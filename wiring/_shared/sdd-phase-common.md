@@ -36,6 +36,15 @@ For each artifact your phase requires, read its locator:
 
 A required locator reported as `<unresolved>` means the artifact does not exist. Report it as a blocker. Never substitute another store's copy, and never go looking for one.
 
+### Quest↔Explore contract (quest runs BEFORE explore)
+
+The quest (RFC pre-pass) is the first SDD phase and runs before exploration. Its output is the `quest`/RFC artifact with an `## Approval:` gate.
+
+- **The approved quest/RFC is the mandate for `sdd-explore`.** The explore phase consumes `sdd/{change}/quest` (engram) or `openspec/changes/{change}/quest.md` (openspec) and validates/resolves the RFC's behavior, contracts, invariants, and acceptance criteria against the real codebase. Explore answers "can the approved RFC be built here?" — it does not re-derive scope.
+- **Explore must read the FULL quest artifact via `mem_get_observation`**, never a search preview (same rule as Section B).
+- **If explore discovers that the approved RFC is not implementable as-is** (a stated goal/contract/invariant conflicts with existing code, a non-goal is already satisfied, an acceptance criterion is infeasible), it must NOT silently proceed to propose. It flags the conflict to the orchestrator, which returns the quest to `needs-changes` — re-opening the interview on only the affected branches (preserving the remaining 50-question budget). An RFC approved before explore is never frozen against later contradictory findings.
+- **The proposal is built from BOTH the approved RFC and the exploration.** `sdd-propose` and `sdd-spec` consume the quest as binding source of truth, with the exploration supplying technical grounding.
+
 ## C. Artifact Persistence
 
 Every phase that produces an artifact MUST persist it. Skipping this BREAKS the pipeline — downstream phases will not find your output.

@@ -1,19 +1,23 @@
 ---
-description: Start a new SDD change — runs exploration then creates a proposal
+description: Start a new SDD change — runs the quest (RFC pre-pass), then exploration, then creates a proposal
 agent: gentle-orchestrator
 ---
 
 Follow the SDD orchestrator workflow for starting a new change named "$ARGUMENTS".
 
 HARD GATE:
-SDD Session Preflight must already be complete for this session. It must include execution mode, artifact store, chained PR strategy, and review budget. If missing, ask the exact orchestrator preflight prompt and STOP. Do not launch exploration or proposal in the same turn.
+SDD Session Preflight must already be complete for this session. It must include execution mode, artifact store, chained PR strategy, and review budget. If missing, ask the exact orchestrator preflight prompt and STOP. Do not launch quest, exploration, or proposal in the same turn.
 
 WORKFLOW:
 
-1. Launch sdd-explore sub-agent to investigate the codebase for this change
-2. Present the exploration summary to the user
-3. Launch sdd-propose sub-agent to create a proposal based on the exploration
-4. Present the proposal summary and ask the user if they want to continue with specs and design
+1. Launch sdd-quest sub-agent FIRST to run the RFC interview (the pre-pass) against the user. It produces the RFC and requires explicit user approval (`## Approval: approved`) before continuing.
+   - If the quest returns `approved` → the RFC is the binding mandate for exploration. Proceed to step 2.
+   - If `needs-changes` → re-run quest until approved or rejected.
+   - If `rejected` → STOP; do not explore or propose.
+2. Launch sdd-explore sub-agent to investigate the codebase, consuming the approved quest/RFC as its mandate (what to validate/resolve).
+3. Present the exploration summary to the user.
+4. Launch sdd-propose sub-agent to create a proposal based on the approved RFC + exploration.
+5. Present the proposal summary and ask the user if they want to continue with specs and design.
 
 CONTEXT:
 

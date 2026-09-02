@@ -12,10 +12,16 @@ WORKFLOW:
 
 1. If the `gentle-ai` binary is available, run `gentle-ai sdd-continue [change] --cwd <repo>` and treat its dispatcher/status output as authoritative — but only when the session artifact store is `openspec` or `hybrid`. When the session artifact store is `engram`, do NOT invoke the native dispatcher at all — it cannot see the change (it reads only `openspec/changes/`); resolve status entirely from Engram (`mem_search` + `mem_get_observation` on the change's topic keys) using the manual status schema in `~/.config/opencode/skills/_shared/sdd-status-contract.md` (the same schema used when the binary is unavailable). The dispatcher is authoritative only for `openspec`/`hybrid`. If unavailable, resolve the active change using the status contract. If `$ARGUMENTS` is missing and more than one active change exists, ask the user to choose and STOP. Do not guess.
 2. Produce or consume structured status before acting: schemaName, planningHome/changeRoot, artifactPaths/contextFiles, task progress, dependency states, next recommended action, blocked reasons, and actionContext.
-3. Check which artifacts already exist for the active change (proposal, specs, design, tasks)
+3. Check which artifacts already exist for the active change (quest, proposal, specs, design, tasks)
 4. Determine the next phase needed based on the dependency graph:
-   proposal → [specs ∥ design] → tasks → apply → verify → archive
-5. Launch the appropriate sub-agent(s) for the next phase only if authoritative status says the dependency is ready. Route only by `nextRecommended` and dependency states; never infer from free text. If `blockedReasons` is non-empty, do not proceed to apply, archive, or terminal work. If `nextRecommended` is `verify`, verification/remediation may run only to refresh evidence; if `nextRecommended` is `resolve-blockers`, report `blockedReasons` and stop; if `nextRecommended` is a planning token (`propose`, `spec`, `design`, or `tasks`), launch the corresponding planning phase.
+   quest → explore → proposal → [specs ∥ design] → tasks → apply → verify → archive
+   QUEST CONDITIONAL: the quest (RFC pre-pass) runs before exploration and is decided by its `## Approval:` header.
+   - If a quest artifact exists with `## Approval: approved` → SKIP the quest; the approved RFC is the mandate. Proceed to `explore` if no exploration exists yet, else continue down the graph from the proposal onward.
+   - If `## Approval: needs-changes` → re-run the quest (re-open the interview on the affected branches, still ≤50 budget).
+   - If `## Approval: rejected` → do NOT explore or propose; report to the user and stop.
+   - If no quest artifact exists → run the quest first.
+   The quest never runs 2+ times when already `approved`. Detection matches the exact header casing `## Approval:` used at persistence.
+5. Launch the appropriate sub-agent(s) for the next phase only if authoritative status says the dependency is ready. Route only by `nextRecommended` and dependency states; never infer from free text. If `blockedReasons` is non-empty, do not proceed to apply, archive, or terminal work. If `nextRecommended` is `verify`, verification/remediation may run only to refresh evidence; if `nextRecommended` is `resolve-blockers`, report `blockedReasons` and stop; if `nextRecommended` is a planning token (`explore`, `propose`, `spec`, `design`, or `tasks`), launch the corresponding planning phase.
 6. Present the result and ask the user to proceed
 
 CONTEXT:

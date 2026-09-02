@@ -14,10 +14,22 @@ Skills creadas/modificadas en este trabajo (versiones actuales, después de la c
 |-------|-----|------------------|
 | `grilling` | Primitiva de entrevista acotada: UNA pregunta a la vez, presupuesto duro de 50, branch-following, no arrastra stack | `~/.agents/skills/grilling/` |
 | `grill-me` | Alias user-invoked que delega a `grilling` | `~/.agents/skills/grill-me/` |
-| `sdd-quest` | Fase SDD quest: entrevista RFC una pregunta a la vez, RFC estructurado, gate de aprobación explícita | `~/.agents/skills/sdd-quest/` |
+| `sdd-quest` | Fase SDD quest (RFC pre-pass): entrevista RFC una pregunta a la vez, RFC estructurado, gate de aprobación explícita; corre ANTES del explore | `~/.agents/skills/sdd-quest/` |
 | `sdd-spec` | Fase SDD spec, ahora lee el RFC aprobado como input vinculante | `~/.agents/skills/sdd-spec/` |
 
 > Cada skill vive duplicada en dos rutas del sistema (`~/.agents/skills/` y `~/.config/opencode/skills/`) y deben mantenerse idénticas (mirror). Aquí se guarda la versión canónica.
+
+### Sincronización (`sync-skills.sh`)
+
+Las skills canónicas de `skills/` se copian a las dos rutas globales con [`sync-skills.sh`](sync-skills.sh) (reemplaza si difiere, no toca lo que ya está idéntico). Ambas rutas son escaneadas por opencode y por pi (via el skill-registry de gentle-pi), así que una corrida cubre los dos runtimes.
+
+```bash
+./sync-skills.sh            # sincroniza (copia solo lo que difiere)
+./sync-skills.sh --check    # verifica sin modificar (reporta desyncs)
+./sync-skills.sh --dry-run  # ensayo: muestra qué se haría, sin copiar
+```
+
+Es idempotente y sin redundancia: solo escribe los archivos que realmente cambian.
 
 ### Wiring (carpeta `wiring/`)
 
@@ -25,7 +37,7 @@ Los archivos de integración que conectan las skills con el orquestador:
 
 - `prompts/sdd/sdd-quest.md` — prompt de la fase quest (subagente)
 - `prompts/sdd/sdd-spec.md` — prompt de la fase spec (subagente)
-- `commands/sdd-new.md` — flujo de arranque explore → quest → propose
+- `commands/sdd-new.md` — flujo de arranque quest → explore → propose
 - `commands/sdd-continue.md` — bloque 'QUEST CONDITIONAL' (gate en `## Approval:`)
 - `_shared/sdd-phase-common.md` — protocolo común referenciado por las fases
 
@@ -59,10 +71,13 @@ sdd-own-skills/
 │   ├── obs-99.md
 │   ├── obs-105.md
 │   └── obs-107.md
-└── docs/
-    └── issue-3332-rfc-gate.md
+├── docs/
+│   └── issue-3332-rfc-gate.md
+└── sync-skills.sh            # sincroniza skills/ -> ~/.agents/skills y ~/.config/opencode/skills
 ```
 
 ## Concepto clave
 
-El hilo conductor de este trabajo: **el RFC aprobado es la source of truth** del comportamiento. Antes de `sdd-propose` y `sdd-spec`, la fase `sdd-quest` entrevista al usuario (una pregunta a la vez, tope 50) y produce un RFC lenguaje-agnóstico que el usuario debe **aprobar explícitamente** (`Approval: approved`). Nunca se auto-aprueba una decisión en nombre del usuario (non-goal de #3332).
+El hilo conductor de este trabajo: **el RFC aprobado es la source of truth** del comportamiento. La fase `sdd-quest` (el RFC pre-pass) se ejecuta **ANTES de la exploración**: entrevista al usuario (una pregunta a la vez, tope 50), produce un RFC lenguaje-agnóstico que el usuario debe **aprobar explícitamente** (`Approval: approved`), y ese RFC aprobado es el **mandato** que consume la fase `explore`. Luego `sdd-propose` y `sdd-spec` usan ese RFC como input vinculante. Nunca se auto-aprueba una decisión en nombre del usuario (non-goal de #3332).
+
+Pipeline: `quest → explore → proposal → [specs ∥ design] → tasks → apply → verify → archive`.

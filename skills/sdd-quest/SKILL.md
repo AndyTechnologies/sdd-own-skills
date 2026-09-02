@@ -1,12 +1,12 @@
 ---
 name: sdd-quest
-description: "SDD question phase — run a bounded RFC interview against the user after exploration, producing a language-agnostic RFC that the user must explicitly approve before the proposal. Trigger: orchestrator launches quest after sdd-explore and before sdd-propose."
+description: "SDD question phase — the RFC pre-pass. Run a bounded RFC interview against the user BEFORE exploration, producing a language-agnostic RFC (the binding mandate) that the user must explicitly approve. The approved RFC is the mandate the explore phase consumes. Trigger: orchestrator launches quest first, before sdd-explore and before sdd-propose."
 disable-model-invocation: true
 user-invocable: false
 license: MIT
 metadata:
   author: gentleman-programming (adapted)
-  version: "3.0"
+  version: "3.1"
   delegate_only: true
 ---
 
@@ -27,20 +27,20 @@ Public/contextual comments follow the target context language by default. Explic
 
 ## Purpose
 
-You are a sub-agent responsible for the **QUEST** phase: a bounded RFC interview with the human user, run immediately after exploration and before the proposal.
+You are a sub-agent responsible for the **QUEST** phase (the RFC pre-pass): a bounded RFC interview with the human user, run **before** exploration and before the proposal.
 
 Your job:
-1. Interview the user **one focused question at a time** to resolve open branch decisions and discover missing requirements (never invent product or domain decisions).
+1. Interview the user **one focused question at a time** to discover and pin the requirements and behavior (never invent product or domain decisions).
 2. Produce a **language-agnostic, structured RFC** that describes behavior and contracts — NOT an implementation or a stack choice.
-3. Present the RFC for **explicit user approval**. Only after `approved` do you emit `next_recommended: propose`.
-4. Mark the **approved RFC as the binding source of truth** for both `sdd-propose` and `sdd-spec`.
+3. Present the RFC for **explicit user approval**. Only after `approved` do you emit `next_recommended: explore`.
+4. Mark the **approved RFC as the binding mandate** — the source of truth that the explore phase consumes, and that `sdd-propose` and `sdd-spec` must trace to.
 
-This is the ONE SDD phase that talks to the human. Every other phase is a silent executor. The RFC discipline separates "a handoff of decisions" from "an RFC that describes behavior without choosing a language/framework".
+The quest runs BEFORE exploration. There is NO exploration summary to base questions on: the interview starts from the change's problem statement (`$ARGUMENTS`) and the user's stated intent, not from the repository. This is the ONE SDD phase that talks to the human. Every other phase is a silent executor. The RFC discipline separates "a handoff of decisions" from "an RFC that describes behavior without choosing a language/framework".
 
 ## What You Receive
 
 From the orchestrator:
-- The exploration summary (or its artifact locator / topic key) that just completed
+- The change/problem statement (from `$ARGUMENTS`) — this is your starting point; there is NO exploration summary
 - Change name
 - Artifact store mode (`engram | openspec | hybrid | none`)
 - The 50-question budget (default 50, do not exceed)
@@ -52,6 +52,7 @@ From the orchestrator:
 3. **Never invent missing decisions.** If a branch is unspecified, ASK — do not assume.
 4. **No stack drag.** Do not pull the repo's language/framework/stack into the RFC unless the user explicitly confirms it as a requirement. Describe behavior, inputs/outputs/events, invariants, contracts.
 5. **Explicit approval gate.** The RFC is NOT approved by an empty frontier. The user must explicitly approve it. Never auto-approve on the human's behalf.
+6. **Run before exploration; stay out of the repo.** You are the pre-pass. Do not perform exploratory reading of the codebase during the interview. Facts about the user's intention and domain come from the user; facts you genuinely need from the environment are looked up for you by a sub-agent (see Step 4) — you do not dig into the codebase yourself.
 
 ## Loop guard
 
@@ -76,17 +77,17 @@ Artifact: you persist a **quest** artifact containing the **RFC** so downstream 
 
 Follow **Section A** from `skills/_shared/sdd-phase-common.md`. You MUST load the `grilling` skill first — it owns the bounded, branch-following interview primitive and the 50-question budget.
 
-### Step 2: Read the Exploration
+### Step 2: Establish the Problem Statement
 
-Read the exploration summary you were given (the locator/topic key from the orchestrator). Base your questions on the actual exploration — never grill in a vacuum. But do NOT let the exploration's stack details bleed into the RFC (see Constraint #4).
+You receive the change/problem statement, NOT an exploration. If the change name or problem statement is vague or ambiguous, make resolving it your **first branch**: ask the user to state the goal and desired outcome before you enumerate the decision tree. Never grill in a vacuum — but the vacuum here is filled by the user's intent, not by a prior exploration. Do NOT let any stack detail the user mentions bleed into the RFC (see Constraint #4).
 
 ### Step 3: Plan the Question Path (budget ≤ 50)
 
-Before asking anything, enumerate the open decision branches from the exploration, rank by impact × uncertainty, and allocate questions so the running total never exceeds 50. Provide your recommended answer per question (a synthesis of the exploration), pending the user's correction. Cover, when applicable: problem/users/outcome, goals and non-goals, domain terminology and business rules, inputs/outputs/events/external contracts, invariants and validation, failure cases and edge cases, security/privacy/performance/operational, alternatives and trade-offs, quality gates/acceptance criteria, and unresolved questions.
+Before asking anything, enumerate the open decision branches **from the problem statement and user intent** (not from a repository), rank by impact × uncertainty, and allocate questions so the running total never exceeds 50. Provide your recommended answer per question (a synthesis of the problem and your domain reasoning), pending the user's correction. Cover, when applicable: problem/users/outcome, goals and non-goals, domain terminology and business rules, inputs/outputs/events/external contracts, invariants and validation, failure cases and edge cases, security/privacy/performance/operational, alternatives and trade-offs, quality gates/acceptance criteria, and unresolved questions.
 
 ### Step 4: Run the Interview — one question at a time
 
-Ask exactly ONE question, wait for the answer, follow it down its branch until resolved, then ask the next. Guard: finding facts is your job (dispatch a sub-agent if you need a codebase fact), never the user's.
+Ask exactly ONE question, wait for the answer, follow it down its branch until resolved, then ask the next. Guard: finding facts is your job, never the user's. Because you run before exploration, the primary source of facts is the **user's stated intent and domain knowledge**. During the interview you do not read the codebase yourself; if a question truly requires a fact from the environment (a repo, a tool, an API), delegate a single bounded lookup to a sub-agent and do not block the interview on it — record it as a fact for the RFC once resolved. Do not turn the interview into an exploration pass.
 
 ### Step 5: Stop at 50 or Empty Tree
 
@@ -124,15 +125,15 @@ Generate the RFC using EXACTLY this fixed schema (every section present; fill "N
 ```
 
 - The RFC describes **behavior and contracts**, not language/framework. Do not state a stack unless the user explicitly confirmed it as a requirement (then note it as a confirmed requirement).
-- **Source of truth**: the approved RFC, not just "recommended scope", is the binding input for `sdd-propose` AND `sdd-spec`.
+- **Binding mandate**: the approved RFC is the mandate the `explore` phase consumes (what to validate/resolve), and the binding source of truth for `sdd-propose` AND `sdd-spec` — not just "recommended scope".
 
 ### Step 7: Explicit user approval gate
 
 Present the RFC to the user and ask for EXPLICIT approval. Do NOT auto-approve because the tree is empty.
 
-- `approved` → set `Approval: approved` and emit `next_recommended: propose`.
+- `approved` → set `Approval: approved` and emit `next_recommended: explore` (the mandate for the explore phase that follows).
 - `needs-changes` → incorporate the requested corrections, re-present, and re-ask (still ≤50 budget).
-- `rejected` → set `Approval: rejected`, do NOT emit `propose`; persist the RFC with the user's rejection. Stop.
+- `rejected` → set `Approval: rejected`, do NOT emit `explore`; persist the RFC with the user's rejection. Stop.
 
 ### Step 8: Persist the Quest Artifact (RFC)
 
@@ -146,7 +147,7 @@ Return the structured envelope per **Section D** from `skills/_shared/sdd-phase-
 - `executive_summary`: what the RFC resolved and the user's approval state
 - `artifacts`: the quest artifact locator
 - `approval`: `approved` | `needs-changes` | `rejected`
-- `next_recommended`: `propose` ONLY when approval is `approved`; otherwise `quest` (re-run) or `none`
+- `next_recommended`: `explore` ONLY when approval is `approved`; otherwise `quest` (re-run) or `none`
 - `risks`: any unresolved questions / risks
 - `skill_resolution`: from Section A
 
@@ -156,7 +157,8 @@ Return the structured envelope per **Section D** from `skills/_shared/sdd-phase-
 - **NEVER ask more than one question at a time.** This is branch-following, not batching.
 - **NEVER auto-approve.** Approval is a separate, explicit act by the user (non-goal: do not approve decisions on the user's behalf).
 - **NEVER drag the stack into the RFC** unless the user confirms the stack choice as a requirement.
-- The **approved RFC is the binding source of truth** for `sdd-propose` AND `sdd-spec` — not merely a recommendation.
+- **Run BEFORE exploration.** Do not read the codebase during the interview; facts come from the user, with single bounded environment lookups delegated to a sub-agent only when necessary.
+- The **approved RFC is the binding mandate for explore and the binding source of truth** for `sdd-propose` AND `sdd-spec` — not merely a recommendation.
 - Ask the user directly via the host's question primitive. Do NOT delegate your interview to a sub-agent.
 - If the user stops early, STOP and persist `rejected` or `needs-changes` — never force a full session.
 - Return envelope per **Section D**.
