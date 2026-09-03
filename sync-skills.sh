@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # sync-skills.sh — Sincroniza las skills canónicas de este repo (skills/)
-# hacia las carpetas globales que usan opencode y pi.
+# y el wiring (wiring/) hacia las carpetas globales que usan opencode y pi.
 #
 # Convención (ver README): cada skill vive duplicada en dos rutas del sistema
 # y deben mantenerse idénticas (mirror). Este repo guarda la versión canónica:
@@ -12,6 +12,15 @@
 #
 # Ambas rutas son escaneadas por opencode y por pi (via el skill-registry de
 # gentle-pi), de modo que sincronizar ambas cubre los dos runtimes.
+#
+# El wiring (wiring/) conecta las skills con el orquestador y también debe
+# mantenerse idéntico con los globales; es lo que enruta las fases (p.ej. que
+# la quest RFC corre antes de explore). Mapeo:
+#
+#   wiring/commands/*.md        -> ~/.config/opencode/commands/*.md
+#   wiring/prompts/sdd/*.md     -> ~/.config/opencode/prompts/sdd/*.md
+#   wiring/_shared/*.md         -> ~/.agents/skills/_shared/*.md
+#                                 ~/.config/opencode/skills/_shared/*.md
 #
 # Sin redundancia: sólo se copia lo que realmente difiere; lo que ya está
 # idéntico se reporta como "up-to-date" y no se toca. El script es idempotente
@@ -24,15 +33,15 @@
 #
 # Salida (exit code):
 #   0 = sincronización completa (todo idéntico o actualizado con éxito)
-#   1 = error de estructura/configuración (skills dir no encontrado, etc.)
+#   1 = error de estructura/configuración (skills/wiring dir no encontrado, etc.)
 #   2 = uno o más copiados fallaron
 
 set -euo pipefail
 
 # --- Resolución de rutas ---------------------------------------------------
 
-# Directorio raíz del repo (carpeta que contiene skills/), calculado desde la
-# ubicación de este script para que funcione desde cualquier checkout.
+# Directorio raíz del repo (carpeta que contiene skills/ y wiring/), calculado
+# desde la ubicación de este script para que funcione desde cualquier checkout.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="$SCRIPT_DIR/skills"
 
@@ -41,6 +50,11 @@ DEST_DIRS=(
   "$HOME/.agents/skills"
   "$HOME/.config/opencode/skills"
 )
+
+# Wiring: mapeo de subcarpeta de wiring/ -> lista de destinos globales reales.
+# commands/ y prompts/ solo las lee opencode; _shared/ lo comparten los dos
+# runtimes (se usa destino por subcarpeta, no un par de raíces como skills).
+WIRING_DIR="$SCRIPT_DIR/wiring"
 
 # --- Opciones --------------------------------------------------------------
 
@@ -141,6 +155,57 @@ sync_dir() {
   return 0
 }
 
+# --- Helper: sincroniza wiring/ hacia sus destinos reales --------------------
+#
+# Reutiliza sync_dir por unidad de destino. Cada subcarpeta de wiring/
+# ("commands", "prompts", "_shared") se mapea a rutas destino ABSOLUTAS que
+# opencode/pi leen realmente:
+#
+#   wiring/commands/*.md        -> ~/.config/opencode/commands/*.md
+#   wiring/prompts/sdd/*.md     -> ~/.config/opencode/prompts/sdd/*.md
+#   wiring/_shared/*.md         -> ~/.config/opencode/skills/_shared/*.md
+#                                 ~/.agents/skills/_shared/*.md
+#
+# Los archivos globales que no existen como canónicos en wiring/ se dejan
+# intactos (no se borra nada del destino).
+sync_wiring() {
+  local sub dest total_updated=0 total_failures=0 total_uptodate=0
+
+  if [[ ! -d "$WIRING_DIR" ]]; then
+    echo "error: no se encontró el directorio de wiring: $WIRING_DIR" >&2
+    return 2
+  fi
+
+  echo "Wiring (sincronizando $WIRING_DIR)"
+  for sub in "${!WIRING_SUBDIR_DESTS[@]}"; do
+    local src_sub="$WIRING_DIR/$sub"
+    [[ -d "$src_sub" ]] || continue
+    for dest in ${WIRING_SUBDIR_DESTS[$sub]}; do
+      # `|| rc=$?` captura el código sin abortar bajo `set -e`; si falla anticipadamente
+      # (rc ya seteado por un comando previo del bucle), lo reseteamos por iteración.
+      local rc=0
+      sync_dir "$src_sub" "$dest" || rc=$?
+      case "$rc" in
+        0) total_uptodate=$((total_uptodate + 1)) ;;
+        1) total_updated=$((total_updated + 1)) ;;
+        2) total_failures=$((total_failures + 1)) ;;
+      esac
+    done
+  done
+
+  printf "  Wiring resumen   : up-to-date=%s actualizados=%s errores=%s\n" \
+    "$total_uptodate" "$total_updated" "$total_failures"
+  return "$total_failures"
+}
+
+# Mapeo subcarpeta (wiring/<sub>) -> rutas destino ABSOLUTAS completas.
+# commands/prompts solo opencode (~/.config/opencode); _shared ambas raíces.
+declare -A WIRING_SUBDIR_DESTS=(
+  [commands]="$HOME/.config/opencode/commands"
+  [prompts]="$HOME/.config/opencode/prompts"
+  [_shared]="$HOME/.config/opencode/skills/_shared $HOME/.agents/skills/_shared"
+)
+
 # --- Ejecución --------------------------------------------------------------
 
 echo "Sincronizando skills desde: $SRC_DIR"
@@ -159,8 +224,10 @@ for skill in "${SKILLS[@]}"; do
   src_skill="$SRC_DIR/$skill"
   echo "== $skill =="
   for dest_root in "${DEST_DIRS[@]}"; do
-    sync_dir "$src_skill" "$dest_root/$skill"
-    case "$?" in
+    # `|| rc=$?` captura el código sin abortar bajo `set -e`; se resetea por iteración.
+    rc=0
+    sync_dir "$src_skill" "$dest_root/$skill" || rc=$?
+    case "$rc" in
       0) total_uptodate=$((total_uptodate + 1)) ;;
       1) total_updated=$((total_updated + 1)) ;;
       2) total_failures=$((total_failures + 1)) ;;
@@ -168,6 +235,15 @@ for skill in "${SKILLS[@]}"; do
   done
   echo
 done
+
+# --- Wiring (commands/prompts/_shared) ---------------------------------------
+echo "--------------------------------------------------"
+wiring_status=0
+sync_wiring || wiring_status=$?
+if [[ $wiring_status -ne 0 ]]; then
+  total_failures=$((total_failures + wiring_status))
+fi
+echo
 
 # --- Resumen ----------------------------------------------------------------
 

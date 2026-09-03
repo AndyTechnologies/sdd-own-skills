@@ -7,27 +7,21 @@ license: MIT
 metadata:
   author: gentleman-programming (adapted)
   version: "3.1"
-  delegate_only: true
+    delegate_only: true  # intentional: quest is orchestrator-inline; excluded from registry autocomplete by design
 ---
 
 ## Execution Role
 
-Confirm your role before acting. You are the dedicated `sdd-quest` sub-agent unless you loaded this skill directly through the `skill()` tool.
+Confirm your role before acting. In OpenCode, **only the orchestrator holds the interactive human channel** (the `question` tool permission); a `task()` sub-agent returns a single final result and cannot sustain a live one-question-at-a-time interview. Therefore the QUEST interview is always performed by whoever holds that channel.
 
-- If you are the `sdd-quest` sub-agent, continue with the phase work below. Do not delegate. Do not call the Skill tool with another orchestrator command.
-- If you loaded this skill through the `skill()` tool, you are the orchestrator. Stop here and delegate to the dedicated `sdd-quest` sub-agent using your platform's delegation primitive (for example, `task(...)` or a sub-agent invocation).
+- **If you are the orchestrator** (you loaded this skill through the `skill()` tool, or you are running `/sdd-new` / `sdd-continue`): you PERFORM the interview yourself. Do NOT delegate the interview to the `sdd-rfc-author` sub-agent — it cannot talk to the human in OpenCode. Proceed with the phase work below, asking the user one focused question at a time via your `question` tool.
+- **If you are the `sdd-rfc-author` sub-agent**: you do NOT interview the human. You are the RFC author: you receive the user's answers (Q&A pairs) collected by the orchestrator, assemble them into the structured RFC, and present the approval gate back to the orchestrator. Do not call the Skill tool or another orchestrator command.
 
-## Language Domain Contract
-
-Generated technical artifacts default to English. Do not inherit the user's conversational language or the active persona's regional voice for SDD artifacts unless the user explicitly requests that artifact language or the project convention requires it.
-
-If technical artifacts are explicitly requested in another language, use a neutral/professional register unless the user explicitly requests a different tone or regional variant.
-
-Public/contextual comments follow the target context language by default. Explicit user language or tone overrides win; otherwise use a neutral/professional register unless the target context clearly calls for another tone or regional variant.
+> Follow the **Language Domain Contract** in `skills/_shared/sdd-phase-common.md`.
 
 ## Purpose
 
-You are a sub-agent responsible for the **QUEST** phase (the RFC pre-pass): a bounded RFC interview with the human user, run **before** exploration and before the proposal.
+You are responsible for the **QUEST** phase (the RFC pre-pass): a bounded RFC interview with the human user, run **before** exploration and before the proposal. In OpenCode the interviewer is the orchestrator (the only role with the `question` channel); the `sdd-rfc-author` sub-agent, when launched, is the RFC author that shapes the collected answers into the structured RFC.
 
 Your job:
 1. Interview the user **one focused question at a time** to discover and pin the requirements and behavior (never invent product or domain decisions).
@@ -77,6 +71,8 @@ Artifact: you persist a **quest** artifact containing the **RFC** so downstream 
 
 Follow **Section A** from `skills/_shared/sdd-phase-common.md`. You MUST load the `grilling` skill first — it owns the bounded, branch-following interview primitive and the 50-question budget.
 
+> **Runtime note (OpenCode):** the interviewer is the orchestrator. If you are the orchestrator and loaded this skill via `skill()`, run Steps 2–5 yourself against the user with your `question` tool. The `sdd-rfc-author` sub-agent is not used for the interview; after the user approves the RFC, the orchestrator launches it with the collected Q&A to draft the final canonical RFC, which the orchestrator persists as the binding mandate.
+
 ### Step 2: Establish the Problem Statement
 
 You receive the change/problem statement, NOT an exploration. If the change name or problem statement is vague or ambiguous, make resolving it your **first branch**: ask the user to state the goal and desired outcome before you enumerate the decision tree. Never grill in a vacuum — but the vacuum here is filled by the user's intent, not by a prior exploration. Do NOT let any stack detail the user mentions bleed into the RFC (see Constraint #4).
@@ -88,6 +84,8 @@ Before asking anything, enumerate the open decision branches **from the problem 
 ### Step 4: Run the Interview — one question at a time
 
 Ask exactly ONE question, wait for the answer, follow it down its branch until resolved, then ask the next. Guard: finding facts is your job, never the user's. Because you run before exploration, the primary source of facts is the **user's stated intent and domain knowledge**. During the interview you do not read the codebase yourself; if a question truly requires a fact from the environment (a repo, a tool, an API), delegate a single bounded lookup to a sub-agent and do not block the interview on it — record it as a fact for the RFC once resolved. Do not turn the interview into an exploration pass.
+
+> **Flow discipline (CRITICAL):** the interview is a **continuous stream** driven by the agent holding the `question` channel. After the user answers a question, ask the NEXT question immediately in the same flow — do NOT pause to ask "shall I continue?", do NOT end the turn to wait for a "continúa"/"go on" prompt, and do NOT re-confirm before each new question. Keep asking one after another until the branch tree is empty or the 50-question budget is spent. The ONLY place you stop to get the user's explicit go-ahead is the RFC approval gate (Step 7). If you find yourself waiting on "continue", that is a bug — keep the interview moving.
 
 ### Step 5: Stop at 50 or Empty Tree
 
@@ -126,6 +124,7 @@ Generate the RFC using EXACTLY this fixed schema (every section present; fill "N
 
 - The RFC describes **behavior and contracts**, not language/framework. Do not state a stack unless the user explicitly confirmed it as a requirement (then note it as a confirmed requirement).
 - **Binding mandate**: the approved RFC is the mandate the `explore` phase consumes (what to validate/resolve), and the binding source of truth for `sdd-propose` AND `sdd-spec` — not just "recommended scope".
+- **Delegation note (OpenCode):** When the artifact store is `engram`, `openspec`, or `hybrid`, the orchestrator may delegate the final RFC drafting to the `sdd-rfc-author` sub-agent after approval (via `task()`) to produce the canonical persisted artifact. The interactive draft presented for user approval in this step remains the orchestrator's work; only the persistence-ready version is delegated.
 
 ### Step 7: Explicit user approval gate
 
@@ -137,7 +136,7 @@ Present the RFC to the user and ask for EXPLICIT approval. Do NOT auto-approve b
 
 ### Step 8: Persist the Quest Artifact (RFC)
 
-Persist per the Persistence Contract with the `## Approval:` header and the full RFC schema. The `Approval:` value is the ONLY gate `sdd-continue` uses to decide re-run vs skip vs proceed. **This is MANDATORY** when tied to a named change — do not skip it.
+Persist per the Persistence Contract with the `## Approval:` header and the full RFC schema. The `Approval:` value is the ONLY gate `sdd-continue` uses to decide re-run vs skip vs proceed. **This is MANDATORY** when tied to a named change — do not skip it. If the orchestrator delegated the final RFC drafting to `sdd-rfc-author` after approval (see Step 6 delegation note), persist the sub-agent's output; otherwise persist the RFC drafted in Step 6.
 
 ### Step 9: Return the Envelope
 
@@ -160,6 +159,7 @@ Return the structured envelope per **Section D** from `skills/_shared/sdd-phase-
 - **Run BEFORE exploration.** Do not read the codebase during the interview; facts come from the user, with single bounded environment lookups delegated to a sub-agent only when necessary.
 - The **approved RFC is the binding mandate for explore and the binding source of truth** for `sdd-propose` AND `sdd-spec` — not merely a recommendation.
 - Ask the user directly via the host's question primitive. Do NOT delegate your interview to a sub-agent.
+- Keep the interview moving: after each answer, ask the NEXT question without pausing for a "continue" confirmation. Do not end the turn waiting for the user to say "continúa"/"go on" between questions. The interview only pauses for the user's explicit go-ahead at the RFC approval gate (Step 7).
 - If the user stops early, STOP and persist `rejected` or `needs-changes` — never force a full session.
 - Return envelope per **Section D**.
 
