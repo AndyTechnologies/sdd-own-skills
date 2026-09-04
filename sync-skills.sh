@@ -118,7 +118,17 @@ if [[ ! -d "$SRC_DIR" ]]; then
 fi
 
 # Colección de skills canónicas (subdirectorios de skills/ con SKILL.md).
-mapfile -t SKILLS < <(find "$SRC_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | grep -v '^_shared$')
+# Bash puro: sin `find -printf` (GNU-only) ni `mapfile` (bash 4+), portable a
+# macOS/BSD y bash 3.2. El glob `*/` ya viene ordenado; `_shared` se excluye
+# porque lo sincroniza el wiring.
+SKILLS=()
+shopt -s nullglob
+for _d in "$SRC_DIR"/*/; do
+  _name="${_d%/}"
+  _name="${_name##*/}"
+  [[ -n "$_name" && "$_name" != "_shared" ]] && SKILLS+=("$_name")
+done
+shopt -u nullglob
 if [[ ${#SKILLS[@]} -eq 0 ]]; then
   echo "error: no hay skills en $SRC_DIR" >&2
   exit 1
@@ -209,20 +219,20 @@ sync_wiring() {
   fi
 
   echo "Wiring (sincronizando $WIRING_DIR)"
-  for sub in "${!WIRING_SUBDIR_DESTS[@]}"; do
-    local src_sub="${WIRING_SUBDIR_SRCS[$sub]:-$WIRING_DIR/$sub}"
+  for i in "${!WIRING_SUBS[@]}"; do
+    local sub="${WIRING_SUBS[$i]}"
+    local src_sub="${WIRING_SUBDIR_SRCS[$i]}"
     [[ -d "$src_sub" ]] || continue
-    for dest in ${WIRING_SUBDIR_DESTS[$sub]}; do
-      # `|| rc=$?` captura el código sin abortar bajo `set -e`; si falla anticipadamente
-      # (rc ya seteado por un comando previo del bucle), lo reseteamos por iteración.
-      local rc=0
-      sync_dir "$src_sub" "$dest" || rc=$?
-      case "$rc" in
-        0) total_uptodate=$((total_uptodate + 1)) ;;
-        1) total_updated=$((total_updated + 1)) ;;
-        2) total_failures=$((total_failures + 1)) ;;
-      esac
-    done
+    local dest="${WIRING_SUBDIR_DESTS[$i]}"
+    # `|| rc=$?` captura el código sin abortar bajo `set -e`; si falla anticipadamente
+    # (rc ya seteado por un comando previo del bucle), lo reseteamos por iteración.
+    local rc=0
+    sync_dir "$src_sub" "$dest" || rc=$?
+    case "$rc" in
+      0) total_uptodate=$((total_uptodate + 1)) ;;
+      1) total_updated=$((total_updated + 1)) ;;
+      2) total_failures=$((total_failures + 1)) ;;
+    esac
   done
 
   printf "  Wiring resumen   : up-to-date=%s actualizados=%s errores=%s\n" \
@@ -275,18 +285,20 @@ sync_wiring() {
 # commands/prompts solo opencode (~/.config/opencode); _shared es la única copia
 # física en ~/.agents/skills/_shared; ~/.config/opencode/skills/_shared es un
 # symlink a esa ubicación.
-declare -A WIRING_SUBDIR_DESTS=(
-  [commands]="$HOME/.config/opencode/commands"
-  [prompts]="$HOME/.config/opencode/prompts"
-  [_shared]="$HOME/.agents/skills/_shared"
+# Arrays paralelos indexados (portables a bash 3.2; `declare -A` es bash 4+).
+WIRING_SUBS=(commands prompts _shared)
+WIRING_SUBDIR_DESTS=(
+  "$HOME/.config/opencode/commands"
+  "$HOME/.config/opencode/prompts"
+  "$HOME/.agents/skills/_shared"
 )
 
 # Fuente por subcarpeta de wiring. commands/prompts viven en wiring/;
 # _shared vive en skills/_shared (las skills los referencian como skills/_shared/…).
-declare -A WIRING_SUBDIR_SRCS=(
-  [commands]="$WIRING_DIR/commands"
-  [prompts]="$WIRING_DIR/prompts"
-  [_shared]="$SRC_DIR/_shared"
+WIRING_SUBDIR_SRCS=(
+  "$WIRING_DIR/commands"
+  "$WIRING_DIR/prompts"
+  "$SRC_DIR/_shared"
 )
 
 # --- OpenCode config: merge del fragmento SDD --------------------------------
@@ -302,7 +314,6 @@ sync_opencode_config() {
   local target="${OPENCODE_CONFIG:-$HOME/.config/opencode/opencode.json}"
   local fragment="$SCRIPT_DIR/wiring/opencode.sdd.json"
   local merged=""
-  local rc=0
 
   if [[ $SKIP_OPENCODE -eq 1 ]]; then
     printf "OpenCode config: saltado (--skip-opencode)\n"
@@ -321,13 +332,16 @@ sync_opencode_config() {
 
   # Merge con jq (primario). Si el target es JSONC (comas finales que opencode
   # tolera) jq falla y se delega en python3, que implementa el mismo merge
-  # recursivo (los valores del fragmento ganan) con tolerancia a JSONC.
+  # recursivo (los valores del fragmento ganan) con tolerancia a JSONC. Si jq
+  # no está instalado, se usa python3 directamente (sin depender de rc).
+  local merged_ok=0
   if command -v jq >/dev/null 2>&1; then
-    merged="$(jq -s '.[0] as $u | .[1] as $f | ($u | .agent = ((.agent // {}) * $f.agent) | if (has("default_agent") | not) then .default_agent = $f.default_agent else . end | if (has("$schema") | not) then .["$schema"] = $f["$schema"] else . end)' "$target" "$fragment" 2>/dev/null)" || rc=$?
+    if merged="$(jq -s '.[0] as $u | .[1] as $f | ($u | .agent = ((.agent // {}) * $f.agent) | if (has("default_agent") | not) then .default_agent = $f.default_agent else . end | if (has("$schema") | not) then .["$schema"] = $f["$schema"] else . end)' "$target" "$fragment" 2>/dev/null)"; then
+      merged_ok=1
+    fi
   fi
-  if [[ $rc -ne 0 ]] && command -v python3 >/dev/null 2>&1; then
-    rc=0
-    merged="$(python3 - "$target" "$fragment" <<'PYEOF'
+  if [[ $merged_ok -eq 0 ]] && command -v python3 >/dev/null 2>&1; then
+    if merged="$(python3 - "$target" "$fragment" <<'PYEOF'
 import json
 import sys
 
@@ -389,10 +403,12 @@ if "$schema" not in user:
     user["$schema"] = frag.get("$schema")
 sys.stdout.write(json.dumps(user, indent=2, ensure_ascii=False) + "\n")
 PYEOF
-    )" || rc=$?
+)"; then
+      merged_ok=1
+    fi
   fi
-  if [[ $rc -ne 0 ]]; then
-    printf "   [ERROR]     no se pudo mergear el fragmento SDD en %s (requiere jq o python3)\n" "$target" >&2
+  if [[ $merged_ok -eq 0 || -z "$merged" ]]; then
+    printf "   [ERROR]     no se pudo mergear el fragmento SDD en %s (requiere jq o python3; se cancela sin tocar el archivo)\n" "$target" >&2
     return 2
   fi
 
@@ -701,13 +717,16 @@ claude_wiring_total_failures=0
 
 # Mapa de wiring/<subcarpeta> -> destino real en ~/.config/opencode (origen del
 # symlink en ~/.claude).  Keys: subdirectorios de wiring/.
-declare -A CLAUDE_WIRING_SYMLINKS=(
-  [commands]="$HOME/.config/opencode/commands"
-  [prompts]="$HOME/.config/opencode/prompts"
+# Arrays paralelos indexados (portables a bash 3.2).
+CLAUDE_WIRING_SUBS=(commands prompts)
+CLAUDE_WIRING_SYMLINKS=(
+  "$HOME/.config/opencode/commands"
+  "$HOME/.config/opencode/prompts"
 )
 
-for sub in "${!CLAUDE_WIRING_SYMLINKS[@]}"; do
-  src_dir="${CLAUDE_WIRING_SYMLINKS[$sub]}"
+for i in "${!CLAUDE_WIRING_SUBS[@]}"; do
+  sub="${CLAUDE_WIRING_SUBS[$i]}"
+  src_dir="${CLAUDE_WIRING_SYMLINKS[$i]}"
   dest_base="$CLAUDE_WIRING_BASE/$sub"
   [[ -d "$src_dir" ]] || continue
 
