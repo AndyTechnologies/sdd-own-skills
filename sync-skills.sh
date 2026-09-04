@@ -27,7 +27,7 @@
 #                                 ~/.claude/commands/*.md              (symlink)
 #   wiring/prompts/sdd/*.md     -> ~/.config/opencode/prompts/sdd/*.md
 #                                 ~/.claude/prompts/sdd/*.md          (symlink)
-#   wiring/_shared/*.md         -> ~/.agents/skills/_shared/*.md
+#   skills/_shared/*.md       -> ~/.agents/skills/_shared/*.md
 #                                 ~/.config/opencode/skills/_shared/*.md (symlink)
 #
 # Sin redundancia: sólo se copia lo que realmente difiere; lo que ya está
@@ -103,7 +103,7 @@ if [[ ! -d "$SRC_DIR" ]]; then
 fi
 
 # Colección de skills canónicas (subdirectorios de skills/ con SKILL.md).
-mapfile -t SKILLS < <(find "$SRC_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+mapfile -t SKILLS < <(find "$SRC_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort | grep -v '^_shared$')
 if [[ ${#SKILLS[@]} -eq 0 ]]; then
   echo "error: no hay skills en $SRC_DIR" >&2
   exit 1
@@ -180,7 +180,7 @@ sync_dir() {
 #
 #   wiring/commands/*.md        -> ~/.config/opencode/commands/*.md
 #   wiring/prompts/sdd/*.md     -> ~/.config/opencode/prompts/sdd/*.md
-#   wiring/_shared/*.md         -> ~/.agents/skills/_shared/*.md
+#   skills/_shared/*.md        -> ~/.agents/skills/_shared/*.md
 #                                 ~/.config/opencode/skills/_shared (symlink)
 #
 # Los archivos globales que no existen como canónicos en wiring/ se dejan
@@ -195,7 +195,7 @@ sync_wiring() {
 
   echo "Wiring (sincronizando $WIRING_DIR)"
   for sub in "${!WIRING_SUBDIR_DESTS[@]}"; do
-    local src_sub="$WIRING_DIR/$sub"
+    local src_sub="${WIRING_SUBDIR_SRCS[$sub]:-$WIRING_DIR/$sub}"
     [[ -d "$src_sub" ]] || continue
     for dest in ${WIRING_SUBDIR_DESTS[$sub]}; do
       # `|| rc=$?` captura el código sin abortar bajo `set -e`; si falla anticipadamente
@@ -217,7 +217,9 @@ sync_wiring() {
   # Solo _shared necesita symlink porque su copia real vive en ~/.agents/skills/_shared;
   # commands y prompts son copias reales en ~/.config/opencode.
   local wiring_link="$HOME/.config/opencode/skills/_shared"
-  local wiring_target="../../.agents/skills/_shared"
+  # El symlink vive en ~/.config/opencode/skills/, que está 3 niveles bajo $HOME,
+  # así que necesita ../../../ para llegar a ~/.agents/skills/_shared.
+  local wiring_target="../../../.agents/skills/_shared"
   if [[ -L "$wiring_link" ]]; then
     local current
     current="$(readlink "$wiring_link")"
@@ -255,6 +257,14 @@ declare -A WIRING_SUBDIR_DESTS=(
   [_shared]="$HOME/.agents/skills/_shared"
 )
 
+# Fuente por subcarpeta de wiring. commands/prompts viven en wiring/;
+# _shared vive en skills/_shared (las skills los referencian como skills/_shared/…).
+declare -A WIRING_SUBDIR_SRCS=(
+  [commands]="$WIRING_DIR/commands"
+  [prompts]="$WIRING_DIR/prompts"
+  [_shared]="$SRC_DIR/_shared"
+)
+
 # --- Ejecución --------------------------------------------------------------
 
 echo "Sincronizando skills desde: $SRC_DIR"
@@ -287,7 +297,10 @@ for skill in "${SKILLS[@]}"; do
   # 2) Symlinks en destinos que apuntan a ~/.agents/skills
   for dest_root in "${DEST_SYMLINK_DIRS[@]}"; do
     dest_link="$dest_root/$skill"
-    relative_target="../../.agents/skills/$skill"
+    # ~/.config/opencode/skills/<skill> está 3 niveles bajo $HOME
+    # (opencode/skills/<skill> a partir de ~/.config), así que necesita ../../..
+    # para llegar a ~/.agents/skills/<skill>.
+    relative_target="../../../.agents/skills/$skill"
 
     # Si ya es un symlink correcto, up-to-date.
     if [[ -L "$dest_link" ]]; then
@@ -488,7 +501,9 @@ for sub in "${!CLAUDE_WIRING_SYMLINKS[@]}"; do
   while IFS= read -r -d '' src_file; do
     rel="${src_file#"$src_dir"/}"
     dest_link="$dest_base/$rel"
-    relative_target="../.config/opencode/$sub/$rel"
+    # ~/.claude/<sub>/<file> está 2 niveles bajo $HOME (Claude + <sub>),
+    # así que necesita ../../ para llegar a ~/.config/opencode/<sub>/<file>.
+    relative_target="../../.config/opencode/$sub/$rel"
 
     # Evaluar si ya es un symlink correcto.
     if [[ -L "$dest_link" ]]; then

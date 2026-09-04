@@ -7,7 +7,7 @@ license: MIT
 metadata:
   author: gentleman-programming (adapted)
   version: "3.1"
-    delegate_only: true  # intentional: quest is orchestrator-inline; excluded from registry autocomplete by design
+  delegate_only: true  # intentional: quest is orchestrator-inline; excluded from registry autocomplete by design
 ---
 
 ## Execution Role

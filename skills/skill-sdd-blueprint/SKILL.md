@@ -56,7 +56,7 @@ Then add the delegation note in step 5 (delegate with exact skill path in `## Sk
 
 - The canonical skill lives in **this repo** `skills/{skill-name}/SKILL.md`.
 - It is mirrored to `~/.agents/skills/` and `~/.config/opencode/skills/` (both read by opencode and pi) via `./sync-skills.sh`.
-- Wiring (`wiring/commands`, `wiring/prompts`, `wiring/_shared`) also mirrors — `wiring/commands/sdd-continue.md` is what rutea the phases.
+- Wiring (`wiring/commands`, `wiring/prompts`) also mirrors; the shared support files live in `skills/_shared` (referenced by the skills as `skills/_shared/…`). `wiring/commands/sdd-continue.md` is what rutea the phases.
 - After ANY change to a skill or wiring, run `./sync-skills.sh --check` to verify, then `./sync-skills.sh` to push the mirror.
 - Never edit only the global copies — the repo copy is canonical.
 

@@ -80,7 +80,7 @@ El flujo SDD: `quest → explore → propose → [spec ∥ design] → tasks →
 - **`~/.config/opencode/skills/<skill>/`** — **symlink** a `../../.agents/skills/<skill>`.
 - **`~/.claude/skills/<skill>/`** — **symlink** a `../../.agents/skills/<skill>`.
 - **`~/.claude/commands/*.md`** y **`~/.claude/prompts/sdd/*.md`** — **symlinks** al wiring de opencode.
-- `wiring/_shared/*.md` → copia física en `~/.agents/skills/_shared/` + symlink en `~/.config/opencode/skills/_shared`.
+- `skills/_shared/*.md` → copia física en `~/.agents/skills/_shared/` + symlink en `~/.config/opencode/skills/_shared`.
 
 Es idempotente y sin redundancia: solo escribe/recrea lo que difiere o falta, recrea symlinks donde haya directorios/archivos que debieran serlo, y reporta `up-to-date / creado / desincronizado`.
 
