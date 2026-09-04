@@ -38,6 +38,8 @@
 #   ./sync-skills.sh            # sincroniza (copia solo lo que difiere)
 #   ./sync-skills.sh --check    # modo verificación: reporta sin copiar
 #   ./sync-skills.sh --dry-run  # modo ensayo: muestra qué se haría, sin copiar
+#   ./sync-skills.sh --skip-opencode            # no mergea ~/.config/opencode/opencode.json
+#   ./sync-skills.sh --registries <proyecto...> # refresh del registry .atl/ tras el sync
 #
 # Salida (exit code):
 #   0 = sincronización completa (todo idéntico o actualizado con éxito)
@@ -77,18 +79,31 @@ WIRING_DIR="$SCRIPT_DIR/wiring"
 
 CHECK_MODE=0
 DRY_RUN=0
+SKIP_OPENCODE=0
+REGISTRY_PROJECTS=()
 
+next_is_registry=0
 for arg in "$@"; do
+  if [[ $next_is_registry -eq 1 ]]; then
+    # --registries acumula los siguientes argumentos que no sean flags.
+    case "$arg" in
+      --*) next_is_registry=0 ;;
+      -*)  next_is_registry=0 ;;
+      *)   REGISTRY_PROJECTS+=("$arg"); continue ;;
+    esac
+  fi
   case "$arg" in
-    --check)    CHECK_MODE=1 ;;
-    --dry-run)  DRY_RUN=1 ;;
+    --check)        CHECK_MODE=1 ;;
+    --dry-run)      DRY_RUN=1 ;;
+    --skip-opencode) SKIP_OPENCODE=1 ;;
+    --registries)   next_is_registry=1 ;;
     -h|--help)
-      sed -n '1,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '1,47p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
       echo "error: opción desconocida: $arg" >&2
-      echo "Uso: $0 [--check] [--dry-run]" >&2
+      echo "Uso: $0 [--check] [--dry-run] [--skip-opencode] [--registries <proyecto...>]" >&2
       exit 1
       ;;
   esac
@@ -234,6 +249,15 @@ sync_wiring() {
         rm "$wiring_link" && ln -s "$wiring_target" "$wiring_link" && printf "   [creado]    %s -> %s\n" "$wiring_link" "$wiring_target" || printf "   [ERROR]     symlink %s\n" "$wiring_link" >&2
       fi
     fi
+  elif [[ -d "$wiring_link" ]]; then
+    # Directorio real (viejo/stale) en la ruta del symlink: reemplazar.
+    if [[ $DRY_RUN -eq 1 ]]; then
+      printf "   [pendiente] reemplazar directorio por symlink %s\n" "$wiring_link"
+    elif [[ $CHECK_MODE -eq 1 ]]; then
+      printf "   [DESYNC]    %s es un directorio real; debería ser symlink\n" "$wiring_link"
+    else
+      rm -rf "$wiring_link" && mkdir -p "$(dirname "$wiring_link")" && ln -s "$wiring_target" "$wiring_link" && printf "   [creado]    %s -> %s\n" "$wiring_link" "$wiring_target" || printf "   [ERROR]     symlink %s\n" "$wiring_link" >&2
+    fi
   elif [[ ! -e "$wiring_link" ]]; then
     if [[ $DRY_RUN -eq 1 ]]; then
       printf "   [pendiente] symlink %s -> %s\n" "$wiring_link" "$wiring_target"
@@ -264,6 +288,178 @@ declare -A WIRING_SUBDIR_SRCS=(
   [prompts]="$WIRING_DIR/prompts"
   [_shared]="$SRC_DIR/_shared"
 )
+
+# --- OpenCode config: merge del fragmento SDD --------------------------------
+#
+# Mergea SOLO los agentes SDD canonizados en wiring/opencode.sdd.json sobre
+# ~/.config/opencode/opencode.json (o $OPENCODE_CONFIG). Nunca borra ni toca
+# claves personales: providers, mcp, permission, models, share, otros agentes
+# y default_agent (si ya está seteado) se preservan tal cual. Las claves del
+# fragmento ganan; las claves añadidas por el usuario se conservan.
+#
+# Devuelve: 0 = up-to-date / sin cambios, 1 = actualizado o pendiente, 2 = error
+sync_opencode_config() {
+  local target="${OPENCODE_CONFIG:-$HOME/.config/opencode/opencode.json}"
+  local fragment="$SCRIPT_DIR/wiring/opencode.sdd.json"
+  local merged=""
+  local rc=0
+
+  if [[ $SKIP_OPENCODE -eq 1 ]]; then
+    printf "OpenCode config: saltado (--skip-opencode)\n"
+    return 0
+  fi
+
+  if [[ ! -e "$target" ]]; then
+    printf "   [FALTA]     no existe %s; el fragmento SDD queda disponible en wiring/opencode.sdd.json\n" "$target"
+    return 0
+  fi
+
+  if [[ ! -f "$fragment" ]]; then
+    echo "error: no se encontró el fragmento SDD: $fragment" >&2
+    exit 1
+  fi
+
+  # Merge con jq (primario). Si el target es JSONC (comas finales que opencode
+  # tolera) jq falla y se delega en python3, que implementa el mismo merge
+  # recursivo (los valores del fragmento ganan) con tolerancia a JSONC.
+  if command -v jq >/dev/null 2>&1; then
+    merged="$(jq -s '.[0] as $u | .[1] as $f | ($u | .agent = ((.agent // {}) * $f.agent) | if (has("default_agent") | not) then .default_agent = $f.default_agent else . end | if (has("$schema") | not) then .["$schema"] = $f["$schema"] else . end)' "$target" "$fragment" 2>/dev/null)" || rc=$?
+  fi
+  if [[ $rc -ne 0 ]] && command -v python3 >/dev/null 2>&1; then
+    rc=0
+    merged="$(python3 - "$target" "$fragment" <<'PYEOF'
+import json
+import sys
+
+
+def load_jsonc(fn):
+    """JSON con tolerancia a comas finales (JSONC de opencode), sin tocar strings."""
+    s = open(fn, encoding="utf-8").read()
+    out = []
+    in_str = False
+    esc = False
+    i = 0
+    n = len(s)
+    while i < n:
+        c = s[i]
+        if in_str:
+            out.append(c)
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            i += 1
+            continue
+        if c == '"':
+            in_str = True
+            out.append(c)
+            i += 1
+            continue
+        if c == ",":
+            j = i + 1
+            while j < n and s[j] in " \t\r\n":
+                j += 1
+            if j < n and s[j] in "}]":
+                i += 1
+                continue
+        out.append(c)
+        i += 1
+    return json.loads("".join(out))
+
+
+def deep_merge(base, override):
+    """Equivalente al `*` de jq: merge recursivo, gana el override."""
+    out = dict(base)
+    for k, v in override.items():
+        if isinstance(out.get(k), dict) and isinstance(v, dict):
+            out[k] = deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+user = load_jsonc(sys.argv[1])
+frag = load_jsonc(sys.argv[2])
+user["agent"] = deep_merge(user.get("agent") or {}, frag["agent"])
+if "default_agent" not in user:
+    user["default_agent"] = frag["default_agent"]
+if "$schema" not in user:
+    user["$schema"] = frag.get("$schema")
+sys.stdout.write(json.dumps(user, indent=2, ensure_ascii=False) + "\n")
+PYEOF
+    )" || rc=$?
+  fi
+  if [[ $rc -ne 0 ]]; then
+    printf "   [ERROR]     no se pudo mergear el fragmento SDD en %s (requiere jq o python3)\n" "$target" >&2
+    return 2
+  fi
+
+  if printf '%s\n' "$merged" | diff -q - "$target" >/dev/null 2>&1; then
+    printf "   [up-to-date] %s (fragmento SDD)\n" "$target"
+    return 0
+  fi
+
+  if [[ $DRY_RUN -eq 1 ]]; then
+    printf "   [pendiente] merge opencode.json (fragmento SDD)\n"
+    return 1
+  fi
+  if [[ $CHECK_MODE -eq 1 ]]; then
+    printf "   [DESYNC]    opencode.json difiere del fragmento SDD\n"
+    return 1
+  fi
+
+  # Modo real: respaldo único + escritura del JSON mergeado (indent 2, newline final).
+  if [[ ! -e "$target.bak" ]]; then
+    cp -- "$target" "$target.bak" || { printf "   [ERROR]     no se pudo crear respaldo %s\n" "$target.bak" >&2; return 2; }
+  fi
+  printf '%s\n' "$merged" > "$target" || { printf "   [ERROR]     no se pudo escribir %s\n" "$target" >&2; return 2; }
+  printf "   [actualizado] %s (respaldo en .bak)\n" "$target"
+  return 1
+}
+
+# --- Registries (.atl): refresh por proyecto tras el sync ---------------------
+#
+# Por cada proyecto en REGISTRY_PROJECTS ejecuta el refresh del skill-registry
+# (.atl/) con el proyecto como cwd. Devuelve la cantidad de errores.
+refresh_project_registries() {
+  local dir rc=0 failures=0
+
+  if [[ ${#REGISTRY_PROJECTS[@]} -eq 0 ]]; then
+    return 0
+  fi
+
+  if ! command -v gentle-ai >/dev/null 2>&1; then
+    printf "   [aviso]     gentle-ai no encontrado; se omite refresh de registries\n"
+    return 0
+  fi
+
+  echo "Registries (.atl) — refresh por proyecto"
+  for dir in "${REGISTRY_PROJECTS[@]}"; do
+    if [[ ! -d "$dir" ]]; then
+      printf "   [ERROR]     no es un directorio: %s\n" "$dir" >&2
+      failures=$((failures + 1))
+      continue
+    fi
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+      printf "   [pendiente] %s: gentle-ai skill-registry refresh --force\n" "$dir"
+    elif [[ $CHECK_MODE -eq 1 ]]; then
+      printf "   [FALTA]     %s: registry desactualizado o pendiente de verificar\n" "$dir"
+    else
+      rc=0
+      (cd "$dir" && gentle-ai skill-registry refresh --force) || rc=$?
+      if [[ $rc -eq 0 ]]; then
+        printf "   [actualizado] %s\n" "$dir"
+      else
+        printf "   [ERROR]     falló refresh de registry en %s\n" "$dir" >&2
+        failures=$((failures + 1))
+      fi
+    fi
+  done
+  return "$failures"
+}
 
 # --- Ejecución --------------------------------------------------------------
 
@@ -370,6 +566,24 @@ sync_wiring || wiring_status=$?
 if [[ $wiring_status -ne 0 ]]; then
   total_failures=$((total_failures + wiring_status))
 fi
+echo
+
+# --- OpenCode config (merge del fragmento SDD) --------------------------------
+echo "--------------------------------------------------"
+rc=0
+sync_opencode_config || rc=$?
+case "$rc" in
+  0) total_uptodate=$((total_uptodate + 1)) ;;
+  1) total_updated=$((total_updated + 1)) ;;
+  2) total_failures=$((total_failures + 1)) ;;
+esac
+echo
+
+# --- Registries (.atl) ---------------------------------------------------------
+echo "--------------------------------------------------"
+rc=0
+refresh_project_registries || rc=$?
+total_failures=$((total_failures + rc))
 echo
 
 # --- Resumen ----------------------------------------------------------------

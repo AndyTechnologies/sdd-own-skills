@@ -81,14 +81,60 @@ El flujo SDD: `quest → explore → propose → [spec ∥ design] → tasks →
 - **`~/.claude/skills/<skill>/`** — **symlink** a `../../.agents/skills/<skill>`.
 - **`~/.claude/commands/*.md`** y **`~/.claude/prompts/sdd/*.md`** — **symlinks** al wiring de opencode.
 - `skills/_shared/*.md` → copia física en `~/.agents/skills/_shared/` + symlink en `~/.config/opencode/skills/_shared`.
+- `wiring/prompts/sdd/*.md` → copia física en `~/.config/opencode/prompts/sdd/*.md`.
+- `wiring/opencode.sdd.json` → **merge** de los agentes SDD en `~/.config/opencode/opencode.json` (ver sección de merge).
+
+**Flujo del sync (en orden):**
+
+1. **Skills**: copia física de cada `skills/<skill>/` a `~/.agents/skills/<skill>/` y symlinks en `~/.config/opencode/skills/<skill>/` y `~/.claude/skills/<skill>/` apuntando a la copia física.
+2. **Wiring**: copia `wiring/commands/` → `~/.config/opencode/commands/`, `wiring/prompts/sdd/` → `~/.config/opencode/prompts/sdd/` y `skills/_shared/` → `~/.agents/skills/_shared/`; mantiene `~/.config/opencode/skills/_shared` como symlink (si existe un directorio real stale en esa ruta, lo reemplaza). Crea además los symlinks de Claude Code (`~/.claude/commands`, `~/.claude/prompts/sdd`).
+3. **Merge de opencode**: aplica `wiring/opencode.sdd.json` sobre `~/.config/opencode/opencode.json` (ver su sección).
+4. **Registries**: si se pasó `--registries`, refresca el skill-registry `.atl/` de cada proyecto listado.
 
 Es idempotente y sin redundancia: solo escribe/recrea lo que difiere o falta, recrea symlinks donde haya directorios/archivos que debieran serlo, y reporta `up-to-date / creado / desincronizado`.
 
 ```bash
-./sync-skills.sh            # sincroniza (copia + symlinks)
-./sync-skills.sh --check    # verifica sin modificar (reporta desyncs)
-./sync-skills.sh --dry-run  # ensayo: muestra qué se haría, sin copiar
+./sync-skills.sh                                  # sincroniza (copia + symlinks + merge)
+./sync-skills.sh --check                          # verifica sin modificar (reporta desyncs)
+./sync-skills.sh --dry-run                        # ensayo: muestra qué se haría, sin copiar
+./sync-skills.sh --skip-opencode                  # NO mergea opencode.json
+./sync-skills.sh --registries <p1> <p2> ...       # refresca el registry .atl/ de cada proyecto tras el sync
 ```
+
+Flags:
+
+- `--check`: solo reporta diferencias (`[DESYNC]`, `[FALTA]`, `[up-to-date]`) sin escribir nada.
+- `--dry-run`: muestra `[pendiente]` para cada acción que ejecutaría, sin escribir nada.
+- `--skip-opencode`: omite el merge de `opencode.json` (el fragmento queda disponible en `wiring/opencode.sdd.json`).
+- `--registries <proyecto...>`: acumula directorios de proyectos; tras el sync corre `gentle-ai skill-registry refresh --force` en cada uno (con `--check`/`--dry-run` solo reporta).
+
+Salida (exit code): `0` = sync completo, `1` = error de estructura/configuración, `2` = uno o más copiados/merges fallaron.
+
+#### Merge de `opencode.json` (fragmento SDD)
+
+El repo versiona **`wiring/opencode.sdd.json`**, un fragmento merge-safe que contiene SOLO los agentes SDD (más `default_agent`). El sync lo mergea sobre `~/.config/opencode/opencode.json`:
+
+- **Añade** los agentes SDD que falten y **actualiza** los existentes (`description`, `mode`, `hidden`, `permission`, `prompt`, `variant`) a la versión canónica del repo.
+- **Preserva todo lo personal**: `providers`, `mcp`, `permission`, `models`, `share`, otros agentes y `default_agent` si ya está seteado. Nada se borra; las claves del fragmento ganan solo en las claves SDD.
+- **Respaldo único**: antes del primer merge se escribe `opencode.json.bak` (solo si no existe ya); los merges siguientes no lo sobrescriben. `--skip-opencode` desactiva el paso completo.
+- **Prompt del orquestador**: el fragmento usa `"prompt": "{file:./prompts/sdd/orchestrator.md}"`, una referencia al contrato versionado en `wiring/prompts/sdd/orchestrator.md`, que el wiring sync despliega a `~/.config/opencode/prompts/sdd/orchestrator.md`. El contrato se edita en el repo, nunca inline en el JSON global.
+- El merge usa `jq` si está disponible; si el config global es JSONC (p. ej. comas finales que opencode tolera) o falta `jq`, usa `python3` con un merge recursivo equivalente.
+
+#### Refresh de registries (`.atl/`)
+
+`./sync-skills.sh --registries <proyecto1> <proyecto2> ...` ejecuta `gentle-ai skill-registry refresh --force` en cada proyecto listado (con el proyecto como cwd) después del sync. Requiere el CLI `gentle-ai` en el PATH; si no está, avisa y omite el paso. El `.atl/` de cada proyecto es local (contiene rutas absolutas) y está gitignoreado. Con `--check`/`--dry-run` solo reporta estado (`[FALTA]` / `[pendiente]`) sin ejecutar nada.
+
+#### Quick-start (clonar el repo)
+
+```bash
+git clone <url-del-repo> sdd-own-skills
+cd sdd-own-skills
+./sync-skills.sh            # crea ~/.agents/skills, ~/.config/opencode/skills y ~/.claude/skills,
+                            # despliega skills + wiring y mergea los agentes SDD
+./sync-skills.sh --check    # verifica que todo quedó sincronizado
+```
+
+Todos los directorios destino se crean automáticamente; no hace falta preparar nada antes del primer sync.
 
 ### Wiring (`wiring/`)
 
@@ -96,8 +142,10 @@ Archivos de integración que enrutan las fases SDD con el orquestador:
 
 - `commands/sdd-new.md` — arranque: `explore → quest → propose` (+ fase RESEARCH).
 - `commands/sdd-continue.md` — bloques `QUEST-CONDITIONAL` y `SUPPORT-CONDITIONAL` (enrutamiento orgánico de research / architecture-lint / changelog por estado de artefactos, sin tocar `nextRecommended`).
+- `prompts/sdd/orchestrator.md` — contrato del orquestador SDD (referenciado por el fragmento vía `{file:./prompts/sdd/orchestrator.md}`; se edita aquí, no inline en el config global).
 - `prompts/sdd/sdd-rfc-author.md` — prompt del subagente autor del RFC (recibe las Q&A, **no entrevista**).
 - `prompts/sdd/sdd-spec.md` — prompt de la fase spec.
+- `opencode.sdd.json` — fragmento merge-safe con los agentes SDD (se mergea sobre `~/.config/opencode/opencode.json`; ver sección de merge).
 - `_shared/sdd-phase-common.md` — protocolo común (loading de skills, retrieval, persistencia, envelope de retorno) referenciado por las fases.
 
 ### Engram snapshot (`engram-snapshot/`) y Docs (`docs/`)
@@ -147,17 +195,19 @@ Sin tocar `nextRecommended`, se añadieron fases de soporte enrutadas por **esta
 sdd-own-skills/
 ├── LICENSE
 ├── README.md
-├── sync-skills.sh                # despliega skills/ + wiring/ a los globales (copias + symlinks)
+├── AGENTS.md                       # guía para agentes de código que trabajan en este repo
+├── sync-skills.sh                  # despliega skills/ + wiring/ a los globales (copias + symlinks + merge SDD)
 ├── skills/
-│   ├── <skill>/SKILL.md          # frontmatter: name, description, trigger, license, version
-│   └── ...                       # (34 skills)
+│   ├── <skill>/SKILL.md            # frontmatter: name, description, trigger, license, version
+│   └── ...                         # (34 skills)
 ├── wiring/
-│   ├── prompts/sdd/*.md
+│   ├── opencode.sdd.json           # fragmento merge-safe: agentes SDD para opencode
+│   ├── prompts/sdd/*.md            # contrato del orquestador + prompts de fases
 │   ├── commands/*.md
 │   └── _shared/sdd-phase-common.md
-├── engram-snapshot/              # artifacts de Engram (diseño/implementación del quest gate)
-├── docs/                         # issue-3332-rfc-gate.md
-└── .gitignore                    # ignora .atl/ (registry con rutas absolutas locales)
+├── engram-snapshot/                # artifacts de Engram (diseño/implementación del quest gate)
+├── docs/                           # issue-3332-rfc-gate.md
+└── .gitignore                      # ignora .atl/ (registry con rutas absolutas locales)
 ```
 
 ---

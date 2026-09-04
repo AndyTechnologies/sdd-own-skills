@@ -1,0 +1,160 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "gentle-orchestrator": {
+      "description": "Gentle AI SDD Orchestrator - coordinates sub-agents, never does work inline",
+      "mode": "primary",
+      "permission": {
+        "question": "allow",
+        "task": {
+          "*": "deny",
+          "explore": "allow",
+          "general": "allow",
+          "jd-fix-agent": "allow",
+          "jd-judge-a": "allow",
+          "jd-judge-b": "allow",
+          "review-readability": "allow",
+          "review-refuter": "allow",
+          "review-reliability": "allow",
+          "review-resilience": "allow",
+          "review-risk": "allow",
+          "review-validator": "allow",
+          "sdd-apply": "allow",
+          "sdd-archive": "allow",
+          "sdd-design": "allow",
+          "sdd-explore": "allow",
+          "sdd-init": "allow",
+          "sdd-onboard": "allow",
+          "sdd-propose": "allow",
+          "sdd-research": "allow",
+          "sdd-spec": "allow",
+          "sdd-tasks": "allow",
+          "sdd-verify": "allow",
+          "sdd-rfc-author": "allow",
+          "sdd-architecture-lint": "allow",
+          "sdd-changelog": "allow"
+        }
+      },
+      "prompt": "{file:./prompts/sdd/orchestrator.md}",
+      "variant": ""
+    },
+    "sdd-apply": {
+      "description": "Implement code changes from task definitions",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "You are the dedicated `sdd-apply` SDD sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Read your canonical skill at ~/.agents/skills/sdd-apply/SKILL.md and follow it exactly.\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
+      "variant": ""
+    },
+    "sdd-archive": {
+      "description": "Archive completed change artifacts",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "You are the dedicated `sdd-archive` SDD sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Read your canonical skill at ~/.agents/skills/sdd-archive/SKILL.md and follow it exactly.\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
+      "variant": ""
+    },
+    "sdd-design": {
+      "description": "Create technical design from proposals",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "You are the dedicated `sdd-design` SDD sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Read your canonical skill at ~/.agents/skills/sdd-design/SKILL.md and follow it exactly.\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
+      "variant": ""
+    },
+    "sdd-explore": {
+      "description": "Investigate codebase and think through ideas",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "You are the dedicated `sdd-explore` SDD sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Read your canonical skill at ~/.agents/skills/sdd-explore/SKILL.md and follow it exactly.\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
+      "variant": ""
+    },
+    "sdd-init": {
+      "description": "Bootstrap SDD context and project configuration",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "You are the dedicated `sdd-init` SDD sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Read your canonical skill at ~/.agents/skills/sdd-init/SKILL.md and follow it exactly.\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
+      "variant": ""
+    },
+    "sdd-onboard": {
+      "description": "Guide user through a complete SDD cycle using their real codebase",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "You are the dedicated `sdd-onboard` SDD sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Read your canonical skill at ~/.agents/skills/sdd-onboard/SKILL.md and follow it exactly.\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
+      "variant": ""
+    },
+    "sdd-propose": {
+      "description": "Create change proposals from explorations",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "You are the dedicated `sdd-propose` SDD sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Read your canonical skill at ~/.agents/skills/sdd-propose/SKILL.md and follow it exactly.\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
+      "variant": ""
+    },
+    "sdd-research": {
+      "description": "Collect source-backed evidence for selected SDD research",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {
+        "bash": "deny",
+        "task": "deny",
+        "webfetch": "deny",
+        "websearch": "deny"
+      },
+      "prompt": "You are the SDD research executor, not the orchestrator. Do NOT delegate or call task. Read ~/.agents/skills/sdd-research/SKILL.md and follow it exactly. Evidence grants: documentation=[]; open-web=[]. Persistence tools are not evidence grants. Unsupported or undeclared classes deny admission and emit no claims. Retain selected intent and persist blocked recovery state without source claims.\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
+      "variant": ""
+    },
+    "sdd-rfc-author": {
+      "description": "Author the SDD RFC from the orchestrator-collected Q&A (the RFC pre-pass). The sub-agent does NOT interview the human; it assembles the collected answers into the structured language-agnostic RFC and returns it with the approval gate.",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "{file:./prompts/sdd/sdd-rfc-author.md}",
+      "variant": ""
+    },
+    "sdd-spec": {
+      "description": "Write detailed specifications from proposals",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "You are the dedicated `sdd-spec` SDD sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Read your canonical skill at ~/.agents/skills/sdd-spec/SKILL.md and follow it exactly.\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
+      "variant": ""
+    },
+    "sdd-tasks": {
+      "description": "Break down specs and designs into implementation tasks",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "You are the dedicated `sdd-tasks` SDD sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Read your canonical skill at ~/.agents/skills/sdd-tasks/SKILL.md and follow it exactly.\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
+      "variant": ""
+    },
+    "sdd-verify": {
+      "description": "Validate implementation against specs",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "You are the dedicated `sdd-verify` SDD sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Read your canonical skill at ~/.agents/skills/sdd-verify/SKILL.md and follow it exactly.\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
+      "variant": ""
+    },
+    "sdd-architecture-lint": {
+      "description": "Independently review an SDD design against clean/hexagonal architecture principles",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "You are the dedicated `sdd-architecture-lint` SDD sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Read your canonical skill at ~/.agents/skills/sdd-architecture-lint/SKILL.md and follow it exactly.\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
+      "variant": ""
+    },
+    "sdd-changelog": {
+      "description": "Generate the release narrative for a completed SDD change",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "You are the dedicated `sdd-changelog` SDD sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Read your canonical skill at ~/.agents/skills/sdd-changelog/SKILL.md and follow it exactly.\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
+      "variant": ""
+    }
+  },
+  "default_agent": "gentle-orchestrator"
+}
