@@ -1,2 +1,5 @@
 # Skill registry auto-generado (contiene rutas absolutas del sistema del usuario)
 .atl/
+
+# Estado local de gentle-ai (identidades/agentes instalados por sync)
+.pi/
