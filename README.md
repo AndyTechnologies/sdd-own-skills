@@ -138,9 +138,9 @@ El pipeline canónico de Alan (instalado por `gentle-ai sync`) se extendió con 
 - **`sdd-propose`** (bloque `sdd-propose-quest-binding`): consume el quest aprobado + la exploración; no entrevista.
 - **`sdd-spec`** (bloque `sdd-spec-rfc-binding`): lee el **RFC aprobado como input vinculante** (goals, contracts, invariants, acceptance criteria → escenarios).
 
-### 3. Quest y fases de soporte orgánicas (`sdd-continue`)
+### 3. Quest y fases de soporte orgánicas (contrato del orquestador)
 
-Sin tocar `nextRecommended`, el command `sdd-continue` (bloque `cmd-sdd-continue-quest-support`) enruta por **estado de artefactos**:
+Sin tocar `nextRecommended`, los hooks orgánicos viven en la sección **`Organic Support Phase Hooks`** del contrato del orquestador (`wiring/prompts/sdd/orchestrator.md`), que es la autoridad en TODA ruta de entrada (command, lenguaje natural, `/sdd-ff`, modo auto). Los commands `/sdd-new`, `/sdd-continue` (bloque `cmd-sdd-continue-quest-support`) y `/sdd-ff` (bloque `cmd-sdd-ff-quest-support`) refuerzan esas reglas y enrutan por **estado de artefactos**:
 
 - **`QUEST-CONDITIONAL`**: en `/sdd-new` el quest **siempre** corre; en `/sdd-continue` es **condicional** — se salta si ya existe un quest `approved` de una corrida previa (evita re-entrevistas redundantes).
 - **`sdd-changelog`** — narrativa de release + clasificación SemVer tras `archive` (con opt-out automático si no hay cambio visible al consumidor).

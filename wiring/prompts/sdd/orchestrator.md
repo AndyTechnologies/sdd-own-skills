@@ -251,7 +251,7 @@ Meta-commands (type directly - orchestrator handles them, won't appear in autoco
 
 ### Native SDD Dispatcher Guard
 
-Before routing, continuing, applying, verifying, or archiving an SDD change, **invoke the native dispatcher** (`gentle-ai sdd-continue [change] --cwd <repo>` or `gentle-ai sdd-status [change] --cwd <repo> --json --instructions`). It resolves the artifact store the workspace DECLARES, reports it in `artifactStore`, and returns that store's locators in `artifactPaths`. **Do NOT determine the artifact store yourself, and do NOT branch on it** — an actor that re-derives the store disagrees with the authority that launched it, which is how a phase ends up reading a store the workspace never declared. Use the dispatcher for every store when `gentle-ai` is available and treat its native status JSON as authoritative over prompt inference. Route only by `nextRecommended` and dependency states; never infer from free text. If `blockedReasons` is non-empty, do not proceed to apply, archive, or terminal work. If `nextRecommended` is `verify`, verification/remediation may run only to refresh evidence; if `nextRecommended` is `resolve-blockers`, report `blockedReasons` and stop; if `nextRecommended` is a planning token (`propose`, `spec`, `design`, or `tasks`), launch the corresponding planning phase. If the binary is unavailable, fall back to the existing prompt contract and manual status schema.
+Before routing, continuing, applying, verifying, or archiving an SDD change, **invoke the native dispatcher** (`gentle-ai sdd-continue [change] --cwd <repo>` or `gentle-ai sdd-status [change] --cwd <repo> --json --instructions`). It resolves the artifact store the workspace DECLARES, reports it in `artifactStore`, and returns that store's locators in `artifactPaths`. **Do NOT determine the artifact store yourself, and do NOT branch on it** — an actor that re-derives the store disagrees with the authority that launched it, which is how a phase ends up reading a store the workspace never declared. Use the dispatcher for every store when `gentle-ai` is available and treat its native status JSON as authoritative over prompt inference. Route only by `nextRecommended` and dependency states; never infer from free text. If `blockedReasons` is non-empty, do not proceed to apply, archive, or terminal work. If `nextRecommended` is `verify`, verification/remediation may run only to refresh evidence; if `nextRecommended` is `resolve-blockers`, report `blockedReasons` and stop; if `nextRecommended` is a planning token (`explore`, `propose`, `spec`, `design`, or `tasks`), launch the corresponding planning phase. If the binary is unavailable, fall back to the existing prompt contract and manual status schema.
 
 ### SDD Session Preflight (HARD GATE)
 
@@ -307,7 +307,7 @@ Hard gate rules:
 
 ### SDD Entry Routing (MANDATORY)
 
-For a new product/code change request that says to use SDD, start at preflight -> init guard -> explore/proposal (`/sdd-new` equivalent). Never launch `sdd-apply` just because the user asked to implement a feature.
+For a new product/code change request that says to use SDD, start at preflight -> init guard -> quest -> explore -> propose (`/sdd-new` equivalent). Never launch `sdd-apply` just because the user asked to implement a feature.
 
 Only launch `sdd-apply` when all are true:
 
@@ -356,6 +356,23 @@ Cache the mode choice for the session - do not ask again unless the user explici
 Interactive approval is phase-scoped. Words like "continue", "dale", or "go on" approve only the immediate next phase, not the rest of the SDD pipeline. Do not treat a generated artifact as approved until the user has had a chance to review or explicitly delegate that review.
 
 ### Research and Pre-Proposal Gate (MANDATORY) — Offer `sdd-research` immediately after `sdd-explore`; selection makes completion mandatory. Before every `propose`, invoke `sdd-propose` only when selected research is `done` or research is unselected, product decisions are `confirmed`, evidence references are valid, and the selected artifact-store state is ready. The orchestrator owns product discovery. Automatic unresolved choices require one lossless grouped prompt with all context, options, consequences, allowed answers, and exact tokens; it MUST persist the pending state before prompting, then STOP without invoking `sdd-propose`. The proposer receives a confirmed pre-proposal handoff and MUST NOT interview or infer consent. Native `gentle-ai.sdd-status/v2` is the sole status contract.
+
+### Organic Support Phase Hooks (MANDATORY)
+
+The quest (RFC pre-pass), `sdd-research`, `sdd-architecture-lint`, and `sdd-changelog` are OPT-IN organic phases. They are NOT part of the `nextRecommended` token set and NEVER alter it — they join the pipeline at hook points and are detected by artifact presence/state, not by a status token. Evaluate these hooks on EVERY routing decision, regardless of the entry route (command, natural-language request, `/sdd-ff`, or automatic-mode advancement). The `/sdd-new`, `/sdd-continue`, and `/sdd-ff` commands may repeat these rules; this contract is the authority, and when a command conflicts, this section wins.
+
+1. **Quest (RFC pre-pass) — pre-explore hook.** Runs before the first exploration when no quest artifact exists for the change. Load the `sdd-quest` skill via your Skill tool and interview the user ONE focused question at a time with your `question` tool — you are the only role with the interactive human channel; never delegate the live interview to `sdd-rfc-author` (it only drafts the canonical RFC from the collected Q&A after approval). Enforce the hard 50-question budget. The gate is the RFC header `## Approval:`:
+   - no quest artifact → run the interview now, then delegate Q&A drafting to `sdd-rfc-author` for canonical persistence (in `none` store, persist your draft inline).
+   - `## Approval: approved` → the RFC is the binding mandate for explore/propose/spec; SKIP and proceed to `explore`, or to the next graph phase if exploration already exists.
+   - `## Approval: needs-changes` → re-open the interview on the affected branches only (remaining budget applies).
+   - `## Approval: rejected` → do NOT explore or propose; report to the user and stop.
+   The quest never runs 2+ times when already `approved`.
+
+2. **Research — pre-proposal hook.** Governed by the "Research and Pre-Proposal Gate" section above.
+
+3. **Architecture-lint — post-design hook.** After `design` is `done` and BEFORE `sdd-tasks` freezes it, when the change touches architecture boundaries (new layers, ports/adapters, dependency injection, module boundaries, external access), delegate one independent `sdd-architecture-lint` review. It must be a separate eye — never self-audit, never run inline. If the change is local and boundary-free, register `N/A` and skip. A finding returns to the design for correction before tasks; the lint carries no review/delivery/release authority.
+
+4. **Changelog — post-archive hook.** After `archive` completes AND the change has not yet emitted a `changelog`, delegate `sdd-changelog` automatically. If the change has no consumer-facing behavior (per spec + archive), the sub-agent returns the organic no-release opt-out and persistence is skipped.
 
 ### Automatic Mode Gatekeeper (MANDATORY)
 
