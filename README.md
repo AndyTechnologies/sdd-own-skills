@@ -1,123 +1,108 @@
 # sdd-own-skills
 
-Repositorio público (mirror/archive) de las **skills LLM-first** para agentes de código, junto con el script de sincronización a las carpetas globales (`~/.agents/skills`, `~/.config/opencode/skills`, `~/.claude/skills`) y el wiring que conecta las fases del flujo **SDD** (Spec-Driven Development).
+Repositorio público de la **personalización SDD del usuario** sobre **gentle-ai** (binario de Gentleman-Programming, v2.6.0), bajo el modelo **overlay con bloques gestionados**.
 
-Este repo es **la fuente canónica (única copia)** de las skills: a partir de él se despliegan a los runtimes mediante symlinks, evitando duplicación y manteniendo una única fuente de verdad.
+El binario `gentle-ai` instala sus propias skills/commands/prompts (las originales de Alan) en `~/.agents/skills`, `~/.config/opencode/skills` (symlinks), `~/.config/opencode/commands` y `~/.config/opencode/prompts/sdd`. Este repo NO las reemplaza: se adhiere con **skills exclusivas nuestras** (full install) y **overlays** que anexan bloques `<!-- sdd-own:<id>:start --> … <!-- sdd-own:<id>:end -->` al final de los archivos de Alan (strip+append idempotente, nunca pisa el original).
 
 ---
 
 ## ¿Qué contiene?
 
-### Skills (`skills/`)
+### Skills exclusivas (`skills/`)
 
-Conjunto completo de skills para agentes de código, organizadas por área. Cada carpeta contiene su `SKILL.md` (frontmatter con `name`, `description`, trigger y `license`).
-
-#### Pipeline SDD (Spec-Driven Development)
-
-El flujo SDD: `quest → explore → propose → [spec ∥ design] → tasks → apply → verify → archive`.
+Cada carpeta es nuestra y se **full-instala** (copia física a `~/.agents/skills/<skill>/` + symlinks en opencode y claude):
 
 | Skill | Rol |
 |-------|-----|
 | `sdd-quest` | **Fase quest (RFC pre-pass):** entrevista al usuario UNA pregunta a la vez (tope duro de 50), produce un RFC lenguaje-agnóstico que el usuario debe aprobar explícitamente (`Approval: approved`). Corre ANTES del explore. El RFC aprobado es la source of truth. |
-| `sdd-explore` | Consume el quest/RFC aprobado como **mandato**, valida "¿se puede buildear esto aquí?" contra el repo real, y mapea el **impacto regresivo** (`## Impact`) en el mismo pase. |
-| `sdd-propose` | Consume el quest aprobado + la exploración para crear la proposal. **No entrevista** — recibe el handoff confirmado del quest. |
-| `sdd-spec` | Escribe el delta spec, leyendo el **RFC aprobado como input vinculante**. |
-| `sdd-design` | Crea el diseño técnico / enfoque de arquitectura. |
-| `sdd-tasks` | Descompone specs + design en tareas de implementación. |
-| `sdd-apply` | Implementa las tareas (soporta **Strict TDD**: `strict-tdd.md`). |
-| `sdd-verify` | Ejecuta las pruebas y demuestra que la implementación cumple specs/design/tasks. |
-| `sdd-archive` | Cierra el change y sincroniza delta specs. |
-| `sdd-init` | Bootstrap del contexto SDD, detección de capacidades de testing, persistencia. |
-| `sdd-onboard` | Guía el ciclo SDD completo sobre un repo real (Quest como Phase 2). |
-| `sdd-research` | Evidencia externa con fuentes auditables (antes de `propose`). |
 | `sdd-architecture-lint` | Segunda mirada independiente del diseño vs clean/hexagonal architecture (solo cuando el diseño toca boundaries). |
 | `sdd-changelog` | Narrativa de release + clasificación SemVer automática (post-archive, con opt-out orgánico si no hay cambio visible al consumidor). |
 | `skill-sdd-blueprint` | Reference/patrón para crear skills SDD nuevas sin tocar `nextRecommended` ni sobre-ingeniar. |
-
-#### Review / RDD (Receipt-Driven Development)
-
-| Skill | Rol |
-|-------|-----|
-| `rdd-defect-workflow` | Flujo de defectos de review: receipt, lineage, corrección/recovery, delivery gate (kill switch). |
-| `judgment-day` | Revisión adversarial dual (blind judges) con a lo sumo dos rondas scoped de fix/re-judgment. |
-
-#### Pruebas
-
-| Skill | Rol |
-|-------|-----|
-| `go-testing` | Patrones de testing en Go (teatest de Bubbletea, golden files, coverage). |
-| `gentle-ai-bench` | Autoría y verificación de journey corpi de gentle-ai bench. |
-
-#### Colaboración / GitHub
-
-| Skill | Rol |
-|-------|-----|
-| `branch-pr` | Pull requests de Gentle AI con checks issue-first. |
-| `chained-pr` | División de cambios grandes en PRs encadenados (>400 líneas). |
-| `comment-writer` | Comentarios cálidos y directos (feedback de PR, reviews, issues). |
-| `issue-creation` | Creación y triage de issues de GitHub desde evidencia del repo. |
-| `work-unit-commits` | Planificación de commits como unidades reviewables. |
-| `systemic-issue-triage` | Ataque de issues por causa raíz, nunca uno a uno. |
-| `skill-registry` | Indexado de skills por trigger y path. |
-
-#### Documentación / UI / utilidades
-
-| Skill | Rol |
-|-------|-----|
-| `cognitive-doc-design` | Documentación que reduce carga cognitiva (guides, RFCs, onboarding). |
 | `ui-design` | Decisiones de UI (dark luxury / premium), diseño de sistemas, accesibilidad. |
 | `web-search` | Búsqueda web con preferencia por MCP dedicados (donsetch, context7). |
-| `hf-cli` | CLI de Hugging Face Hub (`hf`). |
 | `grilling` | Primitiva de entrevista acotada: UNA pregunta a la vez, tope duro de 50, branch-following. **User-invoked only.** |
 | `grill-me` | Alias user-invoked que delega a `grilling`. |
-| `skill-creator` / `skill-improver` | Creación y auditoría de skills LLM-first. |
+| `hf-cli` | CLI de Hugging Face Hub (`hf`). |
+| `typescript` | Patrones estrictos de TypeScript. **Procedencia: Gentleman-Skills (MIT), vendida tal cual.** |
+| `tailwind-4` | Patrones de Tailwind CSS 4. **Procedencia: Gentleman-Skills (MIT), vendida tal cual.** |
+| `zod-4` | Patrones de Zod 4 (breaking changes vs v3). **Procedencia: Gentleman-Skills (MIT), vendida tal cual.** |
+| `playwright` | Patrones de E2E con Playwright (Page Objects, selectors, MCP). **Procedencia: Gentleman-Skills (MIT), vendida tal cual.** |
+| `github-pr` | Pull requests de alta calidad con conventional commits y `gh`. **Procedencia: Gentleman-Skills (MIT), vendida tal cual.** |
 
-### Sincronización (`sync-skills.sh`)
+Las skills vendidas vienen de [Gentleman-Programming/Gentleman-Skills](https://github.com/Gentleman-Programming/Gentleman-Skills) (`curated/`), repo **MIT**; cada `SKILL.md` conserva su frontmatter tal cual (4 con `license: Apache-2.0` declarada, `github-pr` sin campo de licencia — se respeta la licencia del archivo individual). No se renombró contenido ni se alteró el frontmatter.
 
-`sync-skills.sh` despliega las skills canónicas de `skills/` a los runtimes globales:
+### Bootstrap de `_shared` (`skills/_shared/`)
 
-- **`~/.agents/skills/<skill>/`** — única **copia física** (compartida por opencode y pi).
-- **`~/.config/opencode/skills/<skill>/`** — **symlink** a `../../.agents/skills/<skill>`.
-- **`~/.claude/skills/<skill>/`** — **symlink** a `../../.agents/skills/<skill>`.
-- **`~/.claude/commands/*.md`** y **`~/.claude/prompts/sdd/*.md`** — **symlinks** al wiring de opencode.
-- `skills/_shared/*.md` → copia física en `~/.agents/skills/_shared/` + symlink en `~/.config/opencode/skills/_shared`.
-- `wiring/prompts/sdd/*.md` → copia física en `~/.config/opencode/prompts/sdd/*.md`.
-- `wiring/opencode.sdd.json` → **merge** de los agentes SDD en `~/.config/opencode/opencode.json` (ver sección de merge).
+- `codegraph.md` — nuestra exclusiva (directrices CodeGraph del repo).
+- 8 bootstrap **idénticos a los de Alan**: `README.md`, `engram-convention.md`, `openspec-convention.md`, `persistence-contract.md`, `research-lifecycle.md`, `sdd-orchestrator-sections.md`, `sdd-status-contract.md`, `skill-resolver.md`.
 
-**Flujo del sync (en orden):**
+Se instalan en `~/.agents/skills/_shared/` **SOLO SI FALTA** (never overwrite): si el archivo ya está instalado — por `gentle-ai sync` o por un sync anterior — no se toca. `~/.config/opencode/skills/_shared` debe ser symlink a esa copia física.
 
-1. **Skills**: copia física de cada `skills/<skill>/` a `~/.agents/skills/<skill>/` y symlinks en `~/.config/opencode/skills/<skill>/` y `~/.claude/skills/<skill>/` apuntando a la copia física.
-2. **Wiring**: copia `wiring/commands/` → `~/.config/opencode/commands/`, `wiring/prompts/sdd/` → `~/.config/opencode/prompts/sdd/` y `skills/_shared/` → `~/.agents/skills/_shared/`; mantiene `~/.config/opencode/skills/_shared` como symlink (si existe un directorio real stale en esa ruta, lo reemplaza). Crea además los symlinks de Claude Code (`~/.claude/commands`, `~/.claude/prompts/sdd`).
-3. **Merge de opencode**: aplica `wiring/opencode.sdd.json` sobre `~/.config/opencode/opencode.json` (ver su sección).
-4. **Registries**: si se pasó `--registries`, refresca el skill-registry `.atl/` de cada proyecto listado.
+### Overlays (`overlays/`)
 
-Es idempotente y sin redundancia: solo escribe/recrea lo que difiere o falta, recrea symlinks donde haya directorios/archivos que debieran serlo, y reporta `up-to-date / creado / desincronizado`.
+Personalización sobre archivos que instala gentle-ai (las originales de Alan). Cada overlay contiene SOLO bloques `<!-- sdd-own:<id-unico>:start --> … <!-- sdd-own:<id-unico>:end -->`; el sync hace **strip** (quita los bloques con el mismo id ya aplicados) + **append** (anexa el contenido al final del archivo de Alan). NUNCA se sobrescriben líneas del original.
+
+| Overlay | Target | Bloques |
+|---------|--------|---------|
+| `overlays/skills/sdd-explore/SKILL.md` | `~/.agents/skills/sdd-explore/SKILL.md` | `sdd-explore-quest-validate` — explora VALIDA el RFC aprobado + `## Impact` (impacto regresivo en el mismo pase) |
+| `overlays/skills/sdd-onboard/SKILL.md` | `~/.agents/skills/sdd-onboard/SKILL.md` | `sdd-onboard-quest-phase` — el ciclo narrado incluye el quest como Phase 2 |
+| `overlays/skills/sdd-propose/SKILL.md` | `~/.agents/skills/sdd-propose/SKILL.md` | `sdd-propose-quest-binding` — proposal consume el quest aprobado como mandato |
+| `overlays/skills/sdd-spec/SKILL.md` | `~/.agents/skills/sdd-spec/SKILL.md` | `sdd-spec-rfc-binding` — el spec lee el RFC aprobado como source of truth |
+| `overlays/shared/sdd-phase-common.md` | `~/.agents/skills/_shared/sdd-phase-common.md` | `shared-language-domain-contract` (artefactos en inglés / registro neutral) + `shared-quest-explore-contract` (el quest corre antes del explore y es el mandato) |
+| `overlays/commands/sdd-new.md` | `~/.config/opencode/commands/sdd-new.md` | `cmd-sdd-new-quest` — el workflow de arranque incluye el quest interview del orquestador |
+| `overlays/commands/sdd-continue.md` | `~/.config/opencode/commands/sdd-continue.md` | `cmd-sdd-continue-quest-support` — routing condicional del quest + fases de soporte orgánicas (research / architecture-lint / changelog) |
+
+### Wiring (`wiring/`)
+
+- `wiring/prompts/sdd/orchestrator.md` — contrato del orquestador SDD (referenciado por el fragmento vía `{file:./prompts/sdd/orchestrator.md}`; se edita aquí, no inline en el config global).
+- `wiring/prompts/sdd/sdd-rfc-author.md` — prompt del subagente autor del RFC (recibe las Q&A, **no entrevista**).
+- `wiring/opencode.sdd.json` — fragmento merge-safe con los agentes SDD (se mergea sobre el config real de opencode; ver sección de merge).
+
+Alan **no gestiona** esos 2 prompts; los prompts de fase de Alan (`sdd-apply.md`, etc.) viven en el mismo directorio y NO se tocan.
+
+---
+
+## Sincronización (`sync-skills.sh`)
+
+El flujo del sync (en orden):
+
+1. **Paso 0 — `gentle-ai sync`**: instala/resetea las bases canónicas de Alan (skills, commands, prompts). Solo en modo real; con `--skip-gentleai-sync` se omite; si el binario no está en PATH, avisa y sigue.
+2. **Paso 1 — install de lo nuestro**: skills exclusivas (copia física `~/.agents/skills/<skill>/` + symlinks en `~/.config/opencode/skills/<skill>/` y `~/.claude/skills/<skill>/`), bootstrap de `_shared` (solo si falta, con `_shared` como symlink en opencode), y los prompts propios (`orchestrator.md`, `sdd-rfc-author.md`) a `~/.config/opencode/prompts/sdd/` (+ symlink en `~/.claude/prompts/sdd/`).
+3. **Paso 2 — overlays**: strip+append de cada `overlays/**` sobre su target de Alan. Si el target no existe → **ERROR** explícito (probablemente `gentle-ai sync` no instaló esa skill; nunca se crea el base).
+4. **Paso 3 — merge opencode**: fragmento SDD sobre el config real (detecta `.jsonc` primero, si no `.json`).
+5. **Paso 4 — registries**: `--registries <proyecto...>` refresca el skill-registry `.atl/` de cada proyecto (solo modo real).
+
+Es idempotente: el strip+append re-aplica los bloques sin duplicarlos; los bootstrap solo se instalan si faltan; los full-copy de exclusivas solo se escriben si difieren.
 
 ```bash
-./sync-skills.sh                                  # sincroniza (copia + symlinks + merge)
+./sync-skills.sh                                  # paso 0 (gentle-ai sync) + install + overlays + merge
+./sync-skills.sh --skip-gentleai-sync             # omite gentle-ai sync (ya corrió hace poco)
 ./sync-skills.sh --check                          # verifica sin modificar (reporta desyncs)
-./sync-skills.sh --dry-run                        # ensayo: muestra qué se haría, sin copiar
-./sync-skills.sh --skip-opencode                  # NO mergea opencode.json
+./sync-skills.sh --dry-run                        # ensayo: muestra qué se haría, sin escribir nada
+./sync-skills.sh --skip-opencode                  # NO mergea el config de opencode
 ./sync-skills.sh --registries <p1> <p2> ...       # refresca el registry .atl/ de cada proyecto tras el sync
 ```
 
 Flags:
 
-- `--check`: solo reporta diferencias (`[DESYNC]`, `[FALTA]`, `[up-to-date]`) sin escribir nada.
-- `--dry-run`: muestra `[pendiente]` para cada acción que ejecutaría, sin escribir nada.
-- `--skip-opencode`: omite el merge de `opencode.json` (el fragmento queda disponible en `wiring/opencode.sdd.json`).
+- `--check`: solo verifica y reporta (estructura de overlays, targets existentes, marcadores únicos, skills esperadas presentes, desyncs: target sin los bloques esperados, prompts que difieren del repo). No muta nada y **no corre** `gentle-ai sync`. Exit `0` = cero desyncs; `1` = desyncs; `2` = errores de estructura/conflicto.
+- `--dry-run`: muestra `[pendiente]` para cada acción que ejecutaría, sin escribir nada y sin correr `gentle-ai sync`.
+- `--skip-gentleai-sync`: omite el paso 0 (útil cuando `gentle-ai sync` ya corrió hace poco).
+- `--skip-opencode`: omite el merge del config (el fragmento queda disponible en `wiring/opencode.sdd.json`).
 - `--registries <proyecto...>`: acumula directorios de proyectos; tras el sync corre `gentle-ai skill-registry refresh --force` en cada uno (con `--check`/`--dry-run` solo reporta).
 
-Salida (exit code): `0` = sync completo, `1` = error de estructura/configuración, `2` = uno o más copiados/merges fallaron.
+Salida (exit code): `0` = sincronizado / verificado sin desyncs, `1` = error de estructura/configuración o desyncs encontrados en `--check`, `2` = uno o más pasos fallaron al aplicar.
 
-#### Merge de `opencode.json` (fragmento SDD)
+**Semántica de errores**: cualquier condición de conflicto — target de overlay faltante, base no identificable (archivo que solo contiene bloques sdd-own), marcardores rotos o ids de bloque duplicados — produce mensaje claro y exit ≠ 0. NUNCA se clobberea un archivo de Alan: el strip+append solo toca bloques sdd-own, los bootstrap jamás sobrescriben, y los full-copy de exclusivas solo pueden pisar skills de la keep-list (las de Alan no están versionadas aquí).
 
-El repo versiona **`wiring/opencode.sdd.json`**, un fragmento merge-safe que contiene SOLO los agentes SDD (más `default_agent`). El sync lo mergea sobre `~/.config/opencode/opencode.json`:
+#### Merge de opencode (fragmento SDD)
+
+El repo versiona **`wiring/opencode.sdd.json`**, un fragmento merge-safe que contiene SOLO los agentes SDD (más `default_agent`). El sync lo mergea sobre el config real de opencode — que puede llamarse `opencode.json` o `opencode.jsonc` (opencode resuelve `.jsonc` primero si ambos existen; el script lo detecta y mergea sobre ese):
 
 - **Añade** los agentes SDD que falten y **actualiza** los existentes (`description`, `mode`, `hidden`, `permission`, `prompt`, `variant`) a la versión canónica del repo.
 - **Preserva todo lo personal**: `providers`, `mcp`, `permission`, `models`, `share`, otros agentes y `default_agent` si ya está seteado. Nada se borra; las claves del fragmento ganan solo en las claves SDD.
-- **Respaldo único**: antes del primer merge se escribe `opencode.json.bak` (solo si no existe ya); los merges siguientes no lo sobrescriben. `--skip-opencode` desactiva el paso completo.
-- **Prompt del orquestador**: el fragmento usa `"prompt": "{file:./prompts/sdd/orchestrator.md}"`, una referencia al contrato versionado en `wiring/prompts/sdd/orchestrator.md`, que el wiring sync despliega a `~/.config/opencode/prompts/sdd/orchestrator.md`. El contrato se edita en el repo, nunca inline en el JSON global.
+- **Respaldo único**: antes del primer merge se escribe `<config>.bak` (solo si no existe ya); los merges siguientes no lo sobrescriben. `--skip-opencode` desactiva el paso completo.
+- **Prompt del orquestador**: el fragmento usa `"prompt": "{file:./prompts/sdd/orchestrator.md}"`, una referencia al contrato versionado en `wiring/prompts/sdd/orchestrator.md`, que el sync despliega a `~/.config/opencode/prompts/sdd/orchestrator.md`. El contrato se edita en el repo, nunca inline en el JSON global.
 - El merge usa `jq` si está disponible; si el config global es JSONC (p. ej. comas finales que opencode tolera) o falta `jq`, usa `python3` con un merge recursivo equivalente.
 
 #### Refresh de registries (`.atl/`)
@@ -127,65 +112,45 @@ El repo versiona **`wiring/opencode.sdd.json`**, un fragmento merge-safe que con
 #### Quick-start (clonar el repo)
 
 ```bash
-git clone <url-del-repo> sdd-own-skills
+git clone https://github.com/AndyTechnologies/sdd-own-skills.git sdd-own-skills
 cd sdd-own-skills
-./sync-skills.sh            # crea ~/.agents/skills, ~/.config/opencode/skills y ~/.claude/skills,
-                            # despliega skills + wiring y mergea los agentes SDD
-./sync-skills.sh --check    # verifica que todo quedó sincronizado
+./sync-skills.sh            # corre gentle-ai sync (bases de Alan) + install de lo nuestro + overlays + merge SDD
+./sync-skills.sh --check    # verifica que todo quedó sincronizado (cero desyncs)
 ```
 
-Todos los directorios destino se crean automáticamente; no hace falta preparar nada antes del primer sync.
-
-### Wiring (`wiring/`)
-
-Archivos de integración que enrutan las fases SDD con el orquestador:
-
-- `commands/sdd-new.md` — arranque: `explore → quest → propose` (+ fase RESEARCH).
-- `commands/sdd-continue.md` — bloques `QUEST-CONDITIONAL` y `SUPPORT-CONDITIONAL` (enrutamiento orgánico de research / architecture-lint / changelog por estado de artefactos, sin tocar `nextRecommended`).
-- `prompts/sdd/orchestrator.md` — contrato del orquestador SDD (referenciado por el fragmento vía `{file:./prompts/sdd/orchestrator.md}`; se edita aquí, no inline en el config global).
-- `prompts/sdd/sdd-rfc-author.md` — prompt del subagente autor del RFC (recibe las Q&A, **no entrevista**).
-- `prompts/sdd/sdd-spec.md` — prompt de la fase spec.
-- `opencode.sdd.json` — fragmento merge-safe con los agentes SDD (se mergea sobre `~/.config/opencode/opencode.json`; ver sección de merge).
-- `_shared/sdd-phase-common.md` — protocolo común (loading de skills, retrieval, persistencia, envelope de retorno) referenciado por las fases.
-
-### Engram snapshot (`engram-snapshot/`) y Docs (`docs/`)
-
-- **`engram-snapshot/`** — snapshot de los artifacts persistentes (proyecto `meowrch`) que documentan el diseño e implementación del quest RFC gate y sus decisiones.
-- **`docs/issue-3332-rfc-gate.md`** — el plan de 5 pasos del issue #3332, decisiones del usuario y estado de implementación.
+Requiere `gentle-ai` (v2.6.0) instalado y en el PATH; si no está, el sync avisa y continúa (los targets de overlay podrían faltar y el paso 2 los reportaría como error).
 
 ---
 
-## Cambios clave en las skills SDD
+## Nuestra personalización del pipeline SDD
 
-Este repo documenta y versiona el trabajo de evolución del pipeline SDD. Los cambios principales sobre las skills originales:
+El pipeline canónico de Alan (instalado por `gentle-ai sync`) se extendió con bloques `sdd-own` anexados por overlays. Los cambios principales:
 
-### 1. El RFC aprobado es la source of truth (`sdd-quest` v3.1)
+### 1. El RFC aprobado es la source of truth (`sdd-quest` v3.1 → exclusiva)
 
-- **`sdd-quest` corre ANTES del explore.** Entrevista al usuario una pregunta a la vez (tope duro de 50 para evitar loops), produce un RFC lenguaje-agnóstico y exige **aprobación explícita del usuario** (`Approval: approved`).
+- **`sdd-quest` corre ANTES del explore** (es una skill exclusiva nuestra). Entrevista al usuario una pregunta a la vez (tope duro de 50), produce un RFC lenguaje-agnóstico y exige **aprobación explícita del usuario** (`Approval: approved`).
 - **Nunca se auto-aprueba una decisión** en nombre del usuario: el quest es el *confirmed pre-proposal handoff* (non-goal de #3332).
 - **El orquestador** (único rol con canal interactivo `question`) realiza la entrevista; el subagente `sdd-rfc-author` solo **redacta** el RFC canónico a partir de las Q&A recolectadas — no entrevista.
 
-### 2. Exploración regresiva (`sdd-explore` v2.1 → v2.2)
+### 2. El quest alimenta explore / propose / spec (overlays de skills)
 
-- Nueva sección **`## Impact`**: en el mismo pase de exploración se inventarían features, tests, contratos e interfaces existentes que el change tocaría, con su riesgo de regresión.
-- **Opt-out orgánico:** si el cambio es greenfield/aditivo, `## Impact` = `None` y no se fabrica riesgo regresivo.
+- **`sdd-explore`** (bloque `sdd-explore-quest-validate`): VALIDA el RFC aprobado contra el código real — "¿se puede buildear esto aquí?" — y mapea el **impacto regresivo** (`## Impact`) en el mismo pase, con opt-out orgánico para cambios greenfield/aditivos.
+- **`sdd-propose`** (bloque `sdd-propose-quest-binding`): consume el quest aprobado + la exploración; no entrevista.
+- **`sdd-spec`** (bloque `sdd-spec-rfc-binding`): lee el **RFC aprobado como input vinculante** (goals, contracts, invariants, acceptance criteria → escenarios).
 
-### 3. Fases de soporte orgánicas (`sdd-continue`)
+### 3. Quest y fases de soporte orgánicas (`sdd-continue`)
 
-Sin tocar `nextRecommended`, se añadieron fases de soporte enrutadas por **estado de artefactos** (bloque `SUPPORT-CONDITIONAL`):
+Sin tocar `nextRecommended`, el command `sdd-continue` (bloque `cmd-sdd-continue-quest-support`) enruta por **estado de artefactos**:
 
+- **`QUEST-CONDITIONAL`**: en `/sdd-new` el quest **siempre** corre; en `/sdd-continue` es **condicional** — se salta si ya existe un quest `approved` de una corrida previa (evita re-entrevistas redundantes).
 - **`sdd-changelog`** — narrativa de release + clasificación SemVer tras `archive` (con opt-out automático si no hay cambio visible al consumidor).
 - **`sdd-architecture-lint`** — segunda mirada independiente del diseño vs clean/hexagonal (solo cuando el diseño toca boundaries).
 - **`sdd-research`** — evidencia externa auditada antes de `propose`.
 - **`skill-sdd-blueprint`** — patrón de referencia para añadir nuevas skills SDD sin romper el flujo.
 
-### 4. Gestión del quest en `sdd-continue`
+### 4. Contratos transversales (`sdd-phase-common.md`)
 
-- Bloque **`QUEST-CONDITIONAL`**: en `/sdd-new` el quest **siempre** corre (primera alineación); en `/sdd-continue` es **condicional** — se salta si ya existe un quest `confirmed` de una corrida previa (evita re-entrevistas redundantes).
-
-### 5. Topología de sincronización
-
-- Reemplazo del mirror duplicado (2 copias físicas) por **una sola copia física** en `~/.agents/skills` + **symlinks** hacia los demás runtimes (opencode, claude), incluido el wiring de commands/prompts para Claude Code.
+Dos bloques anexados al `_shared/sdd-phase-common.md` de Alan: **Language Domain Contract** (artefactos en inglés, registro neutral) y **Quest↔Explore contract** (el quest corre antes del explore y es el mandato; explore lee SIEMPRE el artefacto completo y si el RFC no es implementable lo devuelve a `needs-changes`).
 
 ---
 
@@ -196,15 +161,17 @@ sdd-own-skills/
 ├── LICENSE
 ├── README.md
 ├── AGENTS.md                       # guía para agentes de código que trabajan en este repo
-├── sync-skills.sh                  # despliega skills/ + wiring/ a los globales (copias + symlinks + merge SDD)
+├── sync-skills.sh                  # gentle-ai sync + install exclusivas + overlays + merge SDD + registries
 ├── skills/
-│   ├── <skill>/SKILL.md            # frontmatter: name, description, trigger, license, version
-│   └── ...                         # (34 skills)
+│   ├── <skill>/SKILL.md            # SOLO nuestras exclusivas (full install)
+│   └── _shared/                    # codegraph.md + 8 bootstrap idénticos a los de Alan (solo si falta)
+├── overlays/
+│   ├── skills/<skill>/SKILL.md     # bloques sdd-own sobre skills de Alan
+│   ├── shared/<f>.md               # bloques sdd-own sobre _shared de Alan
+│   └── commands/<f>.md             # bloques sdd-own sobre commands de Alan
 ├── wiring/
 │   ├── opencode.sdd.json           # fragmento merge-safe: agentes SDD para opencode
-│   ├── prompts/sdd/*.md            # contrato del orquestador + prompts de fases
-│   ├── commands/*.md
-│   └── _shared/sdd-phase-common.md
+│   └── prompts/sdd/                # orchestrator.md + sdd-rfc-author.md (nuestros)
 ├── engram-snapshot/                # artifacts de Engram (diseño/implementación del quest gate)
 ├── docs/                           # issue-3332-rfc-gate.md
 └── .gitignore                      # ignora .atl/ (registry con rutas absolutas locales)
@@ -214,12 +181,8 @@ sdd-own-skills/
 
 ## Licencia
 
-**Este repositorio** está bajo **MIT** (ver [`LICENSE`](LICENSE)) — cubre la colección, la sincronización (`sync-skills.sh`), el wiring y las skills **propias/adaptadas**.
+**Este repositorio** está bajo **MIT** (ver [`LICENSE`](LICENSE)) — cubre la colección, la sincronización (`sync-skills.sh`), el wiring, las skills propias (`sdd-quest`, `sdd-changelog`, `sdd-architecture-lint`, `skill-sdd-blueprint`, `ui-design`, `web-search`) y los overlays.
 
-**Las skills individuales conservan su propia licencia** declarada en el frontmatter de cada `SKILL.md`:
+**Proveniencia de las skills vendidas**: `typescript`, `tailwind-4`, `zod-4`, `playwright` y `github-pr` provienen de [Gentleman-Programming/Gentleman-Skills](https://github.com/Gentleman-Programming/Gentleman-Skills) (`curated/`, repo **MIT**), descargadas tal cual con su frontmatter original (las 4 primeras declaran `license: Apache-2.0`; `github-pr` no declara). Cada skill conserva la licencia de su archivo individual según su autor upstream.
 
-- **MIT**: skills SDD (incluidas las *adaptadas*: `sdd-quest`, `sdd-changelog`, `sdd-architecture-lint`, `skill-sdd-blueprint`), `ui-design` y `web-search` (autor `andy`).
-- **Apache-2.0**: skills originales de gentleman-programming / Alan-TheGentleman (ej. `branch-pr`, `chained-pr`, `go-testing`, `judgment-day`, `issue-creation`, `skill-creator`, `systemic-issue-triage`, `work-unit-commits`, entre otras).
-- **Sin frontmatter de licencia**: `grilling`, `grill-me` (adaptadas de mattpocock) y `hf-cli` (generada por `hf`, CLI de Hugging Face Hub).
-
-Respeta la licencia declarada en cada skill individual según su autor upstream.
+**Skills de Alan no versionadas aquí**: las demás skills del ecosistema (`sdd-apply`, `sdd-verify`, `branch-pr`, `go-testing`, etc.) las instala `gentle-ai sync` desde sus fuentes canónicas; este repo solo las personaliza vía overlays. Se respeta la licencia declarada en cada una según su autor upstream.

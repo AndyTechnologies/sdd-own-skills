@@ -1,91 +1,96 @@
 #!/usr/bin/env bash
 #
-# sync-skills.sh — Sincroniza las skills canónicas de este repo (skills/)
-# y el wiring (wiring/) hacia las carpetas globales que usan opencode y pi.
+# sync-skills.sh — Sincroniza la personalización SDD-own sobre la instalación de gentle-ai.
 #
-# Convención: las skills canónicas viven en este repo y se despliegan a una
-# única carpeta real; el resto son symlinks para mantener una única fuente
-# de verdad.  Este repo guarda la versión canónica y el script la despliega así:
+# Modelo de trabajo (overlay con bloques gestionados):
 #
-#   SRC  : <repos>/skills/<skill>/
-#   DEST : ~/.agents/skills/<skill>/            (carpeta REAL — compartida opencode + pi)
-#          ~/.config/opencode/skills/<skill>/   (symlink a ~/.agents/skills/<skill>)
+#   - gentle-ai (binario de Gentleman-Programming) INSTALA sus skills/commands/prompts
+#     canónicos en ~/.agents/skills, ~/.config/opencode/skills (symlinks),
+#     ~/.config/opencode/commands y ~/.config/opencode/prompts/sdd.
+#   - Las originales de Alan se respetan SIEMPRE (nunca se pisan).
+#   - Nuestra personalización se adhiere como BLOQUES GESTIONADOS anexados al final
+#     del archivo original, marcados así:
 #
-# ~/.agents/skills es la única copia física; el resto de runtimes (opencode,
-# pi) la leen vía symlinks o por el skill-registry.
+#       <!-- sdd-own:<id-unico>:start -->
+#       ...contenido nuestro...
+#       <!-- sdd-own:<id-unico>:end -->
 #
-# Para Claude Code, se crean symlinks adicionales:
-#   ~/.claude/skills/<skill>/     -> ../../.agents/skills/<skill>
-#   ~/.claude/commands/<file>.md  -> ../.config/opencode/commands/<file>.md  (via symlink)
-#   ~/.claude/prompts/sdd/<file>  -> ../.config/opencode/prompts/sdd/<file> (via symlink)
+#   - Mecánica por archivo overlay: (1) se quitan los bloques sdd-own existentes con
+#     el mismo id (regex desde start a end, idempotente); (2) si el archivo base no
+#     existe → ERROR (nunca se crea el base); (3) se anexa el contenido del overlay.
+#     NUNCA se sobreescriben líneas del archivo original.
 #
-# El wiring (wiring/) conecta las skills con el orquestador y también debe
-# mantenerse idéntico con los globales; es lo que enruta las fases (p.ej. que
-# la quest RFC corre antes de explore). Mapeo:
+# Estructura del repo:
 #
-#   wiring/commands/*.md        -> ~/.config/opencode/commands/*.md
-#                                 ~/.claude/commands/*.md              (symlink)
-#   wiring/prompts/sdd/*.md     -> ~/.config/opencode/prompts/sdd/*.md
-#                                 ~/.claude/prompts/sdd/*.md          (symlink)
-#   skills/_shared/*.md       -> ~/.agents/skills/_shared/*.md
-#                                 ~/.config/opencode/skills/_shared/*.md (symlink)
+#   skills/<skill>/            skills EXCLUSIVAS nuestras (full install a
+#                              ~/.agents/skills/<skill>/ + symlinks en opencode/claude)
+#   skills/_shared/            codegraph.md (exclusiva) + 8 bootstrap IDÉNTICOS a los de
+#                              Alan (se instalan en ~/.agents/skills/_shared/ SOLO si faltan)
+#   overlays/skills/<skill>/   bloques sdd-own sobre el SKILL.md que gentle-ai instala
+#   overlays/shared/<f>.md     bloques sdd-own sobre ~/.agents/skills/_shared/<f>
+#   overlays/commands/<f>.md   bloques sdd-own sobre ~/.config/opencode/commands/<f>
+#   wiring/prompts/sdd/*.md    prompts nuestros (orchestrator.md, sdd-rfc-author.md) →
+#                              ~/.config/opencode/prompts/sdd/ (Alan no gestiona esos 2 paths)
+#   wiring/opencode.sdd.json   fragmento SDD mergeado sobre el config real de opencode
 #
-# Sin redundancia: sólo se copia lo que realmente difiere; lo que ya está
-# idéntico se reporta como "up-to-date" y no se toca. El script es idempotente
-# (ejecutarlo varias veces es un no-op cuando ya está sincronizado).
+# Flujo:
+#   Paso 0 — gentle-ai sync (solo modo real; flag --skip-gentleai-sync para omitir)
+#   Paso 1 — install de lo nuestro (skills exclusivas + bootstrap _shared + prompts)
+#   Paso 2 — overlays (strip+append sobre los archivos de Alan)
+#   Paso 3 — merge del fragmento SDD sobre ~/.config/opencode/opencode.json(c)
+#   Paso 4 — registries (.atl) por proyecto
 #
 # Uso:
-#   ./sync-skills.sh            # sincroniza (copia solo lo que difiere)
-#   ./sync-skills.sh --check    # modo verificación: reporta sin copiar
-#   ./sync-skills.sh --dry-run  # modo ensayo: muestra qué se haría, sin copiar
-#   ./sync-skills.sh --skip-opencode            # no mergea ~/.config/opencode/opencode.json
-#   ./sync-skills.sh --registries <proyecto...> # refresh del registry .atl/ tras el sync
+#   ./sync-skills.sh                         # sincroniza (corre gentle-ai sync primero)
+#   ./sync-skills.sh --skip-gentleai-sync    # omite el paso 0 (ya se corrió sync)
+#   ./sync-skills.sh --check                 # modo verificación: reporta sin modificar nada
+#   ./sync-skills.sh --dry-run               # modo ensayo: muestra qué se haría, sin ejecutar
+#   ./sync-skills.sh --skip-opencode         # no mergea el config de opencode
+#   ./sync-skills.sh --registries <proyecto...>  # refresh del registry .atl/ tras el sync
 #
 # Salida (exit code):
-#   0 = sincronización completa (todo idéntico o actualizado con éxito)
-#   1 = error de estructura/configuración (skills/wiring dir no encontrado, etc.)
-#   2 = uno o más copiados fallaron
+#   0 = sincronizado / verificado sin desyncs
+#   1 = error de estructura/configuración o desyncs encontrados en --check
+#   2 = uno o más pasos fallaron al aplicar
 
 set -euo pipefail
 
 # --- Resolución de rutas ---------------------------------------------------
 
-# Directorio raíz del repo (carpeta que contiene skills/ y wiring/), calculado
-# desde la ubicación de este script para que funcione desde cualquier checkout.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_DIR="$SCRIPT_DIR/skills"
-
-# Destinos globales. ~/.agents es la copia física; ~/.config/opencode es un
-# symlink que apunta a ~/.agents para evitar duplicación.
-DEST_DIRS=(
-  "$HOME/.agents/skills"
-)
-DEST_SYMLINK_DIRS=(
-  "$HOME/.config/opencode/skills"
-)
-
-# ~/.claude/skills se mantiene como conjunto de symlinks apuntando a .agents/skills
-# para conservar una única fuente de verdad; no se copian archivos ahí.
-# Análogo para commands y prompts (wiring) de Claude Code.
-CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
-CLAUDE_WIRING_BASE="$HOME/.claude"
-
-# Wiring: mapeo de subcarpeta de wiring/ -> lista de destinos globales reales.
-# commands/ y prompts/ solo las lee opencode; _shared/ lo comparten los dos
-# runtimes (se usa destino por subcarpeta, no un par de raíces como skills).
+SKILLS_DIR="$SCRIPT_DIR/skills"
+SHARED_SRC_DIR="$SKILLS_DIR/_shared"
+OVERLAYS_DIR="$SCRIPT_DIR/overlays"
 WIRING_DIR="$SCRIPT_DIR/wiring"
+PROMPTS_SRC_DIR="$WIRING_DIR/prompts/sdd"
+
+AGENTS_SKILLS_DIR="$HOME/.agents/skills"
+OPENCODE_SKILLS_DIR="$HOME/.config/opencode/skills"
+OPENCODE_COMMANDS_DIR="$HOME/.config/opencode/commands"
+OPENCODE_PROMPTS_SDD_DIR="$HOME/.config/opencode/prompts/sdd"
+CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
+CLAUDE_COMMANDS_DIR="$HOME/.claude/commands"
+CLAUDE_PROMPTS_SDD_DIR="$HOME/.claude/prompts/sdd"
+
+# Bootstrap _shared: 8 archivos IDÉNTICOS a los de Alan + nuestra exclusiva codegraph.md.
+# Se instalan SOLO SI FALTA el target (nunca se sobreescribe lo que ya está instalado).
+SHARED_BOOTSTRAP=(README.md engram-convention.md openspec-convention.md persistence-contract.md \
+  research-lifecycle.md sdd-orchestrator-sections.md sdd-status-contract.md skill-resolver.md)
+
+# Prompts propios que desplegamos (Alan no gestiona estos 2 paths).
+OWN_PROMPTS=(orchestrator.md sdd-rfc-author.md)
 
 # --- Opciones --------------------------------------------------------------
 
 CHECK_MODE=0
 DRY_RUN=0
 SKIP_OPENCODE=0
+SKIP_GENTLEAI_SYNC=0
 REGISTRY_PROJECTS=()
 
 next_is_registry=0
 for arg in "$@"; do
   if [[ $next_is_registry -eq 1 ]]; then
-    # --registries acumula los siguientes argumentos que no sean flags.
     case "$arg" in
       --*) next_is_registry=0 ;;
       -*)  next_is_registry=0 ;;
@@ -93,66 +98,234 @@ for arg in "$@"; do
     esac
   fi
   case "$arg" in
-    --check)        CHECK_MODE=1 ;;
-    --dry-run)      DRY_RUN=1 ;;
-    --skip-opencode) SKIP_OPENCODE=1 ;;
-    --registries)   next_is_registry=1 ;;
+    --check)           CHECK_MODE=1 ;;
+    --dry-run)         DRY_RUN=1 ;;
+    --skip-opencode)   SKIP_OPENCODE=1 ;;
+    --skip-gentleai-sync) SKIP_GENTLEAI_SYNC=1 ;;
+    --registries)      next_is_registry=1 ;;
     -h|--help)
-      sed -n '1,47p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '1,55p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
       echo "error: opción desconocida: $arg" >&2
-      echo "Uso: $0 [--check] [--dry-run] [--skip-opencode] [--registries <proyecto...>]" >&2
+      echo "Uso: $0 [--check] [--dry-run] [--skip-opencode] [--skip-gentleai-sync] [--registries <proyecto...>]" >&2
       exit 1
       ;;
   esac
 done
 
-# --- Validación de estructura ---------------------------------------------
-
-if [[ ! -d "$SRC_DIR" ]]; then
-  echo "error: no se encontró el directorio canónico de skills: $SRC_DIR" >&2
-  echo "¿Ejecutas este script desde el checkout correcto del repo?" >&2
+if [[ $CHECK_MODE -eq 1 && $DRY_RUN -eq 1 ]]; then
+  echo "error: --check y --dry-run son mutuamente excluyentes" >&2
   exit 1
 fi
 
-# Colección de skills canónicas (subdirectorios de skills/ con SKILL.md).
-# Bash puro: sin `find -printf` (GNU-only) ni `mapfile` (bash 4+), portable a
-# macOS/BSD y bash 3.2. El glob `*/` ya viene ordenado; `_shared` se excluye
-# porque lo sincroniza el wiring.
-SKILLS=()
+# --- Validación de estructura ---------------------------------------------
+
+if [[ ! -d "$SKILLS_DIR" ]]; then
+  echo "error: no se encontró el directorio canónico de skills: $SKILLS_DIR" >&2
+  exit 1
+fi
+if [[ ! -d "$OVERLAYS_DIR" ]]; then
+  echo "error: no se encontró el directorio de overlays: $OVERLAYS_DIR" >&2
+  exit 1
+fi
+
+# Skills exclusivas (subdirectorios de skills/ con SKILL.md, excluyendo _shared).
+declare -a SKILLS=()
 shopt -s nullglob
-for _d in "$SRC_DIR"/*/; do
+for _d in "$SKILLS_DIR"/*/; do
   _name="${_d%/}"
   _name="${_name##*/}"
   [[ -n "$_name" && "$_name" != "_shared" ]] && SKILLS+=("$_name")
 done
 shopt -u nullglob
 if [[ ${#SKILLS[@]} -eq 0 ]]; then
-  echo "error: no hay skills en $SRC_DIR" >&2
+  echo "error: no hay skills exclusivas en $SKILLS_DIR" >&2
   exit 1
 fi
 
-# --- Helper: sincroniza un directorio origen a un destino -------------------
-#
-# Imprime su propio feedback y devuelve:
-#   0 = sin cambios (up-to-date)
-#   1 = actualizado / pendiente de actualizar
-#   2 = error
+# Colección de overlay files: <fuente>|<target> (parejas separadas por |).
+declare -a OVERLAYS=()
+shopt -s nullglob
+for _ov in "$OVERLAYS_DIR"/skills/*/SKILL.md; do
+  _skill="${_ov%/SKILL.md}"
+  _skill="${_skill##*/}"
+  OVERLAYS+=("$_ov|$AGENTS_SKILLS_DIR/$_skill/SKILL.md")
+done
+for _ov in "$OVERLAYS_DIR"/shared/*.md; do
+  _f="${_ov##*/}"
+  OVERLAYS+=("$_ov|$AGENTS_SKILLS_DIR/_shared/$_f")
+done
+for _ov in "$OVERLAYS_DIR"/commands/*.md; do
+  _f="${_ov##*/}"
+  OVERLAYS+=("$_ov|$OPENCODE_COMMANDS_DIR/$_f")
+done
+shopt -u nullglob
+if [[ ${#OVERLAYS[@]} -eq 0 ]]; then
+  echo "error: no hay overlay files en $OVERLAYS_DIR" >&2
+  exit 1
+fi
+
+# --- Helpers ----------------------------------------------------------------
+
+# Extrae los ids de bloques sdd-own de un overlay file (start -> end por id).
+# Devuelve ids únicos en el mismo orden de aparición.
+overlay_block_ids() {
+  local file="$1"
+  perl -0777 -ne 'while (/<!--\s*sdd-own:([^:\s]+):start\s*-->.*?<!--\s*sdd-own:\1:end\s*-->/gs) { print "$1\n" }' "$file" \
+    | awk '!seen[$0]++'
+}
+
+# Extrae todas las apariciones de ids (start o end) — para validación de integridad.
+overlay_all_ids() {
+  local file="$1"
+  perl -0777 -ne 'while (/<!--\s*sdd-own:([^:\s]+):(start|end)\s*-->/gs) { print "$1\n" }' "$file" | sort -u
+}
+
+# Cuenta marcadores start/end de un id en un archivo: "start end".
+count_markers() {
+  local file="$1" id="$2"
+  local s e
+  s=$(grep -c "sdd-own:$id:start" "$file" 2>/dev/null || true)
+  e=$(grep -c "sdd-own:$id:end" "$file" 2>/dev/null || true)
+  printf '%s %s' "${s:-0}" "${e:-0}"
+}
+
+# Quita (idempotente) todos los bloques con el id dado de un archivo.
+strip_block_id() {
+  local file="$1" id="$2"
+  perl -0777 -i -pe "s{\Q<!-- sdd-own:$id:start -->\E.*?\Q<!-- sdd-own:$id:end -->\E\s*}{}gs" "$file"
+}
+
+# Aplica un overlay file a su target (strip + append). Devuelve 0 sin cambios, 1 aplicado,
+# 2 error. Requiere: target existe; base identificable tras el strip; ids únicos globales.
+apply_overlay() {
+  local src="$1" target="$2"
+  local id base_after tmp scount ecount malformed=0
+
+  if [[ ! -f "$target" ]]; then
+    printf "   [ERROR]     overlay sin base: %s no existe (¿gentle-ai sync instaló esa skill?)\n" "$target" >&2
+    return 2
+  fi
+
+  # Validar que el overlay esté bien formado (todo start tiene su end y viceversa).
+  while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    read -r scount ecount < <(count_markers "$src" "$id") || true
+    if [[ "${scount:-0}" -ne "${ecount:-0}" ]]; then
+      printf "   [ERROR]     overlay malformado (%s: start=%s end=%s): %s\n" "$id" "${scount:-0}" "${ecount:-0}" "$src" >&2
+      malformed=1
+    fi
+  done < <(overlay_all_ids "$src")
+  if [[ $malformed -eq 1 ]]; then
+    return 2
+  fi
+
+  local ids=()
+  while IFS= read -r id; do [[ -n "$id" ]] && ids+=("$id"); done < <(overlay_block_ids "$src")
+  if [[ ${#ids[@]} -eq 0 ]]; then
+    printf "   [ERROR]     overlay sin bloques sdd-own: %s\n" "$src" >&2
+    return 2
+  fi
+
+  # En todos los modos: un marcador roto previo en el target es una condición de conflicto.
+  for id in "${ids[@]}"; do
+    read -r scount ecount < <(count_markers "$target" "$id") || true
+    if [[ "${scount:-0}" -ne "${ecount:-0}" ]]; then
+      printf "   [ERROR]     base con bloques sdd-own rotos (%s: start=%s end=%s): %s\n" "$id" "${scount:-0}" "${ecount:-0}" "$target" >&2
+      return 2
+    fi
+  done
+
+  # Base actual (sin bloques nuestros del id).
+  tmp="$target.sdd-own-strip.$$"
+  cp "$target" "$tmp" || { printf "   [ERROR]     no se pudo leer %s\n" "$target" >&2; return 2; }
+  for id in "${ids[@]}"; do
+    strip_block_id "$tmp" "$id"
+  done
+  base_after="$(cat "$tmp")" || { rm -f "$tmp"; printf "   [ERROR]     no se pudo leer %s\n" "$tmp" >&2; return 2; }
+
+  if [[ -z "$(printf '%s' "$base_after" | tr -d '[:space:]')" ]]; then
+    rm -f "$tmp"
+    printf "   [ERROR]     base no identificable (solo contiene bloques sdd-own): %s\n" "$target" >&2
+    return 2
+  fi
+
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    rm -f "$tmp"
+    printf "   [pendiente] strip+append %s -> %s (%s bloques)\n" "${src#$SCRIPT_DIR/}" "${target#$HOME/}" "${#ids[@]}"
+    return 1
+  fi
+  if [[ "$CHECK_MODE" -eq 1 ]]; then
+    rm -f "$tmp"
+    # Verificación: el target debe contener todos los bloques esperados y nada raro.
+    local missing=0
+    for id in "${ids[@]}"; do
+      # aplicado = aparecen start y end del id en el target
+      if grep -q "sdd-own:$id:start" "$target" && grep -q "sdd-own:$id:end" "$target"; then
+        :
+      else
+        missing=1
+      fi
+    done
+    # bloques sdd-own presentes que no corresponden al overlay = stale
+    local stray=0
+    while IFS= read -r id; do
+      [[ -z "$id" ]] && continue
+      local known=0
+      for _i in "${ids[@]}"; do
+        [[ "$_i" == "$id" ]] && known=1
+      done
+      # sdd-phase-common espera 2 bloques: ambos están en ids; cualquier otro sobra.
+      [[ "$known" -eq 0 ]] && stray=1
+    done < <(overlay_block_ids "$target")
+    if [[ "$missing" -eq 1 || "$stray" -eq 1 ]]; then
+      printf "   [DESYNC]    %s no contiene los bloques sdd-own esperados\n" "${target#$HOME/}"
+      return 1
+    fi
+    printf "   [ok]        %s contiene los bloques sdd-own esperados\n" "${target#$HOME/}"
+    return 0
+  fi
+
+  # Modo real: escribir.
+  # Separador: solo si el target NO termina en newline. Si ya termina en \n,
+  # el bloque se anexa directo y el strip queda byte-idéntico a la base de Alan.
+  if [[ -n "$(tail -c 1 "$tmp" | tr -d '\n')" ]]; then
+    printf '\n' >> "$tmp" || { rm -f "$tmp"; printf "   [ERROR]     no se pudo escribir %s\n" "$target" >&2; return 2; }
+  fi
+  cat "$src" >> "$tmp" || { rm -f "$tmp"; printf "   [ERROR]     no se pudo escribir %s\n" "$target" >&2; return 2; }
+  printf '\n' >> "$tmp" || { rm -f "$tmp"; printf "   [ERROR]     no se pudo escribir %s\n" "$target" >&2; return 2; }
+
+  # Idempotencia: si el resultado es byte-idéntico al target, no se reescribe.
+  if diff -q "$tmp" "$target" >/dev/null 2>&1; then
+    rm -f "$tmp"
+    printf "   [up-to-date] %s (bloques sdd-own ya aplicados)\n" "${target#$HOME/}"
+    return 0
+  fi
+
+  if ! mv "$tmp" "$target"; then
+    rm -f "$tmp"
+    printf "   [ERROR]     no se pudo escribir %s\n" "$target" >&2
+    return 2
+  fi
+  printf "   [aplicado]  %s (strip+append: %s bloques)\n" "${target#$HOME/}" "${#ids[@]}"
+  return 1
+}
+
+# Sincroniza un directorio source completo → destino (copia física archivo a archivo).
 sync_dir() {
-  local src="$1"
-  local dest="$2"
+  local src="$1" dest="$2"
   local src_file dest_file rel
-  local changed=0
-  local rc=0
+  local changed=0 rc=0
 
   if [[ ! -d "$dest" ]]; then
-    # El directorio destino no existe: hay que crearlo entero.
     if [[ $DRY_RUN -eq 1 ]]; then
       printf "   [pendiente] crear y copiar %s\n" "$dest"
+      return 1
     elif [[ $CHECK_MODE -eq 1 ]]; then
       printf "   [FALTA]     %s\n" "$dest"
+      return 1
     else
       if ! mkdir -p "$dest"; then
         printf "   [ERROR]     no se pudo crear %s\n" "$dest" >&2
@@ -160,20 +333,19 @@ sync_dir() {
       fi
       cp -R "$src/." "$dest/" || { printf "   [ERROR]     copia a %s\n" "$dest" >&2; return 2; }
       printf "   [creado]    %s\n" "$dest"
+      return 1
     fi
-    return 1
   fi
 
-  # Sincronización archivo a archivo dentro del directorio de la skill.
   while IFS= read -r -d '' src_file; do
     rel="${src_file#"$src"/}"
     dest_file="$dest/$rel"
     if [[ ! -e "$dest_file" ]] || ! diff -q "$src_file" "$dest_file" >/dev/null 2>&1; then
       changed=1
       if [[ $DRY_RUN -eq 1 ]]; then
-        printf "   [pendiente] %s -> %s\n" "${src_file#$SRC_DIR/}" "${dest_file#$HOME/}"
+        printf "   [pendiente] %s -> %s\n" "${src_file#$SCRIPT_DIR/}" "${dest_file#$HOME/}"
       elif [[ $CHECK_MODE -eq 1 ]]; then
-        printf "   [DESYNC]    %s (canónico: %s)\n" "${dest_file#$HOME/}" "${src_file#$SRC_DIR/}"
+        printf "   [DESYNC]    %s (canónico: %s)\n" "${dest_file#$HOME/}" "${src_file#$SCRIPT_DIR/}"
       else
         mkdir -p "$(dirname "$dest_file")" || { rc=2; break; }
         cp "$src_file" "$dest_file" || { rc=2; break; }
@@ -185,143 +357,278 @@ sync_dir() {
     printf "   [ERROR]     fallo al sincronizar %s\n" "$dest" >&2
     return 2
   fi
-
   if [[ $changed -eq 1 ]]; then
     if [[ $CHECK_MODE -eq 0 && $DRY_RUN -eq 0 ]]; then
       printf "   [actualizado] %s\n" "$dest"
     fi
     return 1
   fi
-
   printf "   [up-to-date] %s\n" "$dest"
   return 0
 }
 
-# --- Helper: sincroniza wiring/ hacia sus destinos reales --------------------
-#
-# Reutiliza sync_dir por unidad de destino. Cada subcarpeta de wiring/
-# ("commands", "prompts", "_shared") se mapea a rutas destino ABSOLUTAS que
-# opencode/pi leen realmente:
-#
-#   wiring/commands/*.md        -> ~/.config/opencode/commands/*.md
-#   wiring/prompts/sdd/*.md     -> ~/.config/opencode/prompts/sdd/*.md
-#   skills/_shared/*.md        -> ~/.agents/skills/_shared/*.md
-#                                 ~/.config/opencode/skills/_shared (symlink)
-#
-# Los archivos globales que no existen como canónicos en wiring/ se dejan
-# intactos (no se borra nada del destino).
-sync_wiring() {
-  local sub dest total_updated=0 total_failures=0 total_uptodate=0
+# Helper symlink: crea/reemplaza el symlink dest -> target_relativo.
+ensure_symlink() {
+  local dest_link="$1" relative_target="$2"
 
-  if [[ ! -d "$WIRING_DIR" ]]; then
-    echo "error: no se encontró el directorio de wiring: $WIRING_DIR" >&2
+  if [[ -L "$dest_link" ]]; then
+    local current
+    current="$(readlink "$dest_link")"
+    if [[ "$current" == "$relative_target" ]]; then
+      printf "   [up-to-date] %s\n" "$dest_link"
+      return 0
+    fi
+    if [[ $DRY_RUN -eq 1 ]]; then
+      printf "   [pendiente] reemplazar symlink %s -> %s\n" "$dest_link" "$relative_target"
+      return 1
+    elif [[ $CHECK_MODE -eq 1 ]]; then
+      printf "   [DESYNC]    %s (apunta a %s; debería apuntar a %s)\n" "$dest_link" "$current" "$relative_target"
+      return 1
+    else
+      rm "$dest_link" || { printf "   [ERROR]     no se pudo borrar symlink %s\n" "$dest_link" >&2; return 2; }
+    fi
+  elif [[ -d "$dest_link" ]]; then
+    if [[ $DRY_RUN -eq 1 ]]; then
+      printf "   [pendiente] reemplazar directorio por symlink %s\n" "$dest_link"
+      return 1
+    elif [[ $CHECK_MODE -eq 1 ]]; then
+      printf "   [DESYNC]    %s es un directorio real; debería ser symlink\n" "$dest_link"
+      return 1
+    else
+      rm -rf "$dest_link" || { printf "   [ERROR]     no se pudo borrar directorio %s\n" "$dest_link" >&2; return 2; }
+    fi
+  elif [[ -f "$dest_link" ]]; then
+    if [[ $DRY_RUN -eq 1 ]]; then
+      printf "   [pendiente] reemplazar archivo por symlink %s\n" "$dest_link"
+      return 1
+    elif [[ $CHECK_MODE -eq 1 ]]; then
+      printf "   [DESYNC]    %s es un archivo real; debería ser symlink\n" "$dest_link"
+      return 1
+    else
+      rm "$dest_link" || { printf "   [ERROR]     no se pudo borrar archivo %s\n" "$dest_link" >&2; return 2; }
+    fi
+  elif [[ -e "$dest_link" ]]; then
+    printf "   [ERROR]     %s existe y no es archivo/directorio/symlink\n" "$dest_link" >&2
     return 2
   fi
 
-  echo "Wiring (sincronizando $WIRING_DIR)"
-  for i in "${!WIRING_SUBS[@]}"; do
-    local sub="${WIRING_SUBS[$i]}"
-    local src_sub="${WIRING_SUBDIR_SRCS[$i]}"
-    [[ -d "$src_sub" ]] || continue
-    local dest="${WIRING_SUBDIR_DESTS[$i]}"
-    # `|| rc=$?` captura el código sin abortar bajo `set -e`; si falla anticipadamente
-    # (rc ya seteado por un comando previo del bucle), lo reseteamos por iteración.
-    local rc=0
-    sync_dir "$src_sub" "$dest" || rc=$?
-    case "$rc" in
-      0) total_uptodate=$((total_uptodate + 1)) ;;
-      1) total_updated=$((total_updated + 1)) ;;
-      2) total_failures=$((total_failures + 1)) ;;
-    esac
-  done
-
-  printf "  Wiring resumen   : up-to-date=%s actualizados=%s errores=%s\n" \
-    "$total_uptodate" "$total_updated" "$total_failures"
-
-  # --- Symlinks de wiring en ~/.config/opencode que apuntan a ~/.agents --------
-  # Solo _shared necesita symlink porque su copia real vive en ~/.agents/skills/_shared;
-  # commands y prompts son copias reales en ~/.config/opencode.
-  local wiring_link="$HOME/.config/opencode/skills/_shared"
-  # El symlink vive en ~/.config/opencode/skills/, que está 3 niveles bajo $HOME,
-  # así que necesita ../../../ para llegar a ~/.agents/skills/_shared.
-  local wiring_target="../../../.agents/skills/_shared"
-  if [[ -L "$wiring_link" ]]; then
-    local current
-    current="$(readlink "$wiring_link")"
-    if [[ "$current" == "$wiring_target" ]]; then
-      printf "   [up-to-date] %s\n" "$wiring_link"
-    else
-      if [[ $DRY_RUN -eq 1 ]]; then
-        printf "   [pendiente] reemplazar symlink %s -> %s\n" "$wiring_link" "$wiring_target"
-      elif [[ $CHECK_MODE -eq 1 ]]; then
-        printf "   [DESYNC]    %s (debería apuntar a %s)\n" "$wiring_link" "$wiring_target"
-      else
-        rm "$wiring_link" && ln -s "$wiring_target" "$wiring_link" && printf "   [creado]    %s -> %s\n" "$wiring_link" "$wiring_target" || printf "   [ERROR]     symlink %s\n" "$wiring_link" >&2
-      fi
-    fi
-  elif [[ -d "$wiring_link" ]]; then
-    # Directorio real (viejo/stale) en la ruta del symlink: reemplazar.
+  if [[ ! -d "$(dirname "$dest_link")" ]]; then
     if [[ $DRY_RUN -eq 1 ]]; then
-      printf "   [pendiente] reemplazar directorio por symlink %s\n" "$wiring_link"
-    elif [[ $CHECK_MODE -eq 1 ]]; then
-      printf "   [DESYNC]    %s es un directorio real; debería ser symlink\n" "$wiring_link"
-    else
-      rm -rf "$wiring_link" && mkdir -p "$(dirname "$wiring_link")" && ln -s "$wiring_target" "$wiring_link" && printf "   [creado]    %s -> %s\n" "$wiring_link" "$wiring_target" || printf "   [ERROR]     symlink %s\n" "$wiring_link" >&2
-    fi
-  elif [[ ! -e "$wiring_link" ]]; then
-    if [[ $DRY_RUN -eq 1 ]]; then
-      printf "   [pendiente] symlink %s -> %s\n" "$wiring_link" "$wiring_target"
-    elif [[ $CHECK_MODE -eq 1 ]]; then
-      printf "   [FALTA]     %s (debería ser symlink a %s)\n" "$wiring_link" "$wiring_target"
-    else
-      mkdir -p "$(dirname "$wiring_link")" && ln -s "$wiring_target" "$wiring_link" && printf "   [creado]    %s -> %s\n" "$wiring_link" "$wiring_target" || printf "   [ERROR]     symlink %s\n" "$wiring_link" >&2
+      printf "   [pendiente] crear directorio %s\n" "$(dirname "$dest_link")"
+    elif [[ $CHECK_MODE -eq 0 ]]; then
+      mkdir -p "$(dirname "$dest_link")" || { printf "   [ERROR]     no se pudo crear %s\n" "$(dirname "$dest_link")" >&2; return 2; }
     fi
   fi
 
-  return "$total_failures"
+  if [[ $DRY_RUN -eq 1 ]]; then
+    printf "   [pendiente] symlink %s -> %s\n" "$dest_link" "$relative_target"
+    return 1
+  elif [[ $CHECK_MODE -eq 1 ]]; then
+    printf "   [FALTA]     %s (debería ser symlink a %s)\n" "$dest_link" "$relative_target"
+    return 1
+  else
+    ln -s "$relative_target" "$dest_link" || { printf "   [ERROR]     no se pudo crear symlink %s\n" "$dest_link" >&2; return 2; }
+    printf "   [creado]    %s -> %s\n" "$dest_link" "$relative_target"
+    return 1
+  fi
 }
 
-# Mapeo subcarpeta (wiring/<sub>) -> rutas destino ABSOLUTAS completas.
-# commands/prompts solo opencode (~/.config/opencode); _shared es la única copia
-# física en ~/.agents/skills/_shared; ~/.config/opencode/skills/_shared es un
-# symlink a esa ubicación.
-# Arrays paralelos indexados (portables a bash 3.2; `declare -A` es bash 4+).
-WIRING_SUBS=(commands prompts _shared)
-WIRING_SUBDIR_DESTS=(
-  "$HOME/.config/opencode/commands"
-  "$HOME/.config/opencode/prompts"
-  "$HOME/.agents/skills/_shared"
-)
+# --- Paso 0: gentle-ai sync --------------------------------------------------
 
-# Fuente por subcarpeta de wiring. commands/prompts viven en wiring/;
-# _shared vive en skills/_shared (las skills los referencian como skills/_shared/…).
-WIRING_SUBDIR_SRCS=(
-  "$WIRING_DIR/commands"
-  "$WIRING_DIR/prompts"
-  "$SRC_DIR/_shared"
-)
+if [[ $SKIP_GENTLEAI_SYNC -eq 1 ]]; then
+  echo "Paso 0 — gentle-ai sync: omitido (--skip-gentleai-sync)"
+elif [[ $CHECK_MODE -eq 1 || $DRY_RUN -eq 1 ]]; then
+  echo "Paso 0 — gentle-ai sync: no se ejecuta en --check/--dry-run"
+elif command -v gentle-ai >/dev/null 2>&1; then
+  echo "Paso 0 — gentle-ai sync"
+  if ! gentle-ai sync; then
+    echo "  [ERROR]     gentle-ai sync falló; se continúa igual con los pasos siguientes" >&2
+  fi
+else
+  echo "Paso 0 — gentle-ai sync: [aviso] gentle-ai no encontrado en PATH; se omite (los targets de overlay podrían faltar)" >&2
+fi
+echo
 
-# --- OpenCode config: merge del fragmento SDD --------------------------------
-#
-# Mergea SOLO los agentes SDD canonizados en wiring/opencode.sdd.json sobre
-# ~/.config/opencode/opencode.json (o $OPENCODE_CONFIG). Nunca borra ni toca
-# claves personales: providers, mcp, permission, models, share, otros agentes
-# y default_agent (si ya está seteado) se preservan tal cual. Las claves del
-# fragmento ganan; las claves añadidas por el usuario se conservan.
-#
-# Devuelve: 0 = up-to-date / sin cambios, 1 = actualizado o pendiente, 2 = error
+# --- Paso 1: install de lo nuestro ------------------------------------------
+
+echo "Paso 1 — install de skills exclusivas + bootstrap _shared + prompts"
+total_updated=0
+total_failures=0
+
+for skill in "${SKILLS[@]}"; do
+  src_skill="$SKILLS_DIR/$skill"
+  rc=0
+  sync_dir "$src_skill" "$AGENTS_SKILLS_DIR/$skill" || rc=$?
+  case "$rc" in
+    1) total_updated=$((total_updated + 1)) ;;
+    2) total_failures=$((total_failures + 1)) ;;
+  esac
+
+  # Symlink en ~/.config/opencode/skills/<skill> → ~/.agents/skills/<skill>
+  rc=0
+  ensure_symlink "$OPENCODE_SKILLS_DIR/$skill" "../../../.agents/skills/$skill" || rc=$?
+  if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
+
+  # Symlink en ~/.claude/skills/<skill> → ~/.agents/skills/<skill>
+  if [[ -d "$HOME/.claude" ]]; then
+    rc=0
+    ensure_symlink "$CLAUDE_SKILLS_DIR/$skill" "../../.agents/skills/$skill" || rc=$?
+    if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
+  fi
+done
+
+# Bootstrap _shared: SOLO SI FALTA (nunca sobreescribir lo instalado).
+echo "  _shared (bootstrap — instalar solo si falta)"
+if [[ ! -d "$AGENTS_SKILLS_DIR/_shared" && $CHECK_MODE -eq 0 && $DRY_RUN -eq 0 ]]; then
+  mkdir -p "$AGENTS_SKILLS_DIR/_shared"
+fi
+if [[ $DRY_RUN -eq 1 ]]; then
+  printf "   [pendiente] asegurar %s (bootstrap)\n" "$AGENTS_SKILLS_DIR/_shared"
+elif [[ $CHECK_MODE -eq 1 ]]; then
+  for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md; do
+    if [[ ! -e "$AGENTS_SKILLS_DIR/_shared/$f" ]]; then
+      printf "   [FALTA]     ~/.agents/skills/_shared/%s (bootstrap pendiente)\n" "$f"
+    fi
+  done
+else
+  for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md; do
+    if [[ ! -e "$AGENTS_SKILLS_DIR/_shared/$f" ]]; then
+      if cp "$SHARED_SRC_DIR/$f" "$AGENTS_SKILLS_DIR/_shared/$f"; then
+        printf "   [instalado] ~/.agents/skills/_shared/%s (solo si falta)\n" "$f"
+      else
+        printf "   [ERROR]     no se pudo copiar %s\n" "$SHARED_SRC_DIR/$f" >&2
+        total_failures=$((total_failures + 1))
+      fi
+    else
+      printf "   [skip]      ~/.agents/skills/_shared/%s ya existe (no se toca)\n" "$f"
+    fi
+  done
+fi
+
+# Symlink _shared en opencode (apunta a la copia física en .agents).
+rc=0
+ensure_symlink "$OPENCODE_SKILLS_DIR/_shared" "../../../.agents/skills/_shared" || rc=$?
+if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
+
+# Prompts propios → ~/.config/opencode/prompts/sdd/ (copia real; Alan no gestiona estos paths).
+echo "  prompts propios (orchestrator.md, sdd-rfc-author.md)"
+for pf in "${OWN_PROMPTS[@]}"; do
+  src_pf="$PROMPTS_SRC_DIR/$pf"
+  dest_pf="$OPENCODE_PROMPTS_SDD_DIR/$pf"
+  rc=0
+  if [[ ! -f "$src_pf" ]]; then
+    printf "   [ERROR]     falta el prompt canónico %s\n" "$src_pf" >&2
+    total_failures=$((total_failures + 1))
+    continue
+  fi
+  if [[ ! -d "$OPENCODE_PROMPTS_SDD_DIR" ]]; then
+    if [[ $DRY_RUN -eq 1 ]]; then
+      printf "   [pendiente] crear %s\n" "$OPENCODE_PROMPTS_SDD_DIR"
+    elif [[ $CHECK_MODE -eq 1 ]]; then
+      printf "   [FALTA]     %s\n" "$OPENCODE_PROMPTS_SDD_DIR"
+    else
+      mkdir -p "$OPENCODE_PROMPTS_SDD_DIR" || { printf "   [ERROR]     no se pudo crear %s\n" "$OPENCODE_PROMPTS_SDD_DIR" >&2; total_failures=$((total_failures + 1)); continue; }
+    fi
+  fi
+  if [[ ! -e "$dest_pf" ]] || ! diff -q "$src_pf" "$dest_pf" >/dev/null 2>&1; then
+    if [[ $DRY_RUN -eq 1 ]]; then
+      printf "   [pendiente] %s -> %s\n" "$pf" "$dest_pf"
+    elif [[ $CHECK_MODE -eq 1 ]]; then
+      printf "   [DESYNC]    %s difiere del canónico %s\n" "${dest_pf#$HOME/}" "$pf"
+    else
+      mkdir -p "$(dirname "$dest_pf")"
+      cp "$src_pf" "$dest_pf" || { printf "   [ERROR]     no se pudo copiar %s\n" "$dest_pf" >&2; total_failures=$((total_failures + 1)); continue; }
+      printf "   [actualizado] %s\n" "${dest_pf#$HOME/}"
+    fi
+  else
+    printf "   [up-to-date] %s\n" "${dest_pf#$HOME/}"
+  fi
+  # Symlink en ~/.claude/prompts/sdd/<pf> → ~/.config/opencode/prompts/sdd/<pf>.
+  # Desde ~/.claude/prompts/sdd/ hacen falta 3 niveles (..) para llegar a $HOME.
+  if [[ -d "$HOME/.claude" ]]; then
+    rc=0
+    ensure_symlink "$CLAUDE_PROMPTS_SDD_DIR/$pf" "../../../.config/opencode/prompts/sdd/$pf" || rc=$?
+    if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
+  fi
+done
+echo
+
+# --- Paso 2: overlays --------------------------------------------------------
+
+echo "Paso 2 — overlays (strip+append sobre los archivos de Alan)"
+
+# Validación global: ids de bloque únicos entre TODOS los overlays.
+# (Lista plana separada por espacios para ser portable a bash 3.2.)
+SEEN_IDS_STR=""
+for entry in "${OVERLAYS[@]}"; do
+  ov_src="${entry%%|*}"
+  # ids repetidos DENTRO del mismo overlay = dos bloques con el mismo id (conflicto).
+  dup_ids="$(perl -0777 -ne 'while (/<!--\s*sdd-own:([^:\s]+):start\s*-->/gs) { print "$1\n" }' "$ov_src" | sort | uniq -d)"
+  if [[ -n "$dup_ids" ]]; then
+    echo "error: bloques con el mismo id dentro del overlay ($dup_ids) en $ov_src" >&2
+    exit 1
+  fi
+  while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    if [[ " $SEEN_IDS_STR " == *" $id "* ]]; then
+      echo "error: id de bloque duplicado entre overlays: $id (en $ov_src)" >&2
+      exit 1
+    fi
+    SEEN_IDS_STR="$SEEN_IDS_STR $id"
+  done < <(overlay_block_ids "$ov_src")
+done
+
+for entry in "${OVERLAYS[@]}"; do
+  ov_src="${entry%%|*}"
+  ov_target="${entry#*|}"
+  case "$ov_src" in
+    */commands/*) printf "  overlay command: %s\n" "${ov_src##*/}";;
+    */shared/*)    printf "  overlay shared:  %s\n" "${ov_src##*/}";;
+    *)             printf "  overlay skill:   %s\n" "$(basename "$(dirname "$ov_src")")";;
+  esac
+  rc=0
+  apply_overlay "$ov_src" "$ov_target" || rc=$?
+  case "$rc" in
+    1) total_updated=$((total_updated + 1)) ;;
+    2) total_failures=$((total_failures + 1)) ;;
+  esac
+done
+
+# Symlinks de Claude para los commands overlaid (sdd-new.md, sdd-continue.md).
+if [[ -d "$HOME/.claude" ]]; then
+  for _c in "$OVERLAYS_DIR"/commands/*.md; do
+    _f="${_c##*/}"
+    rc=0
+    ensure_symlink "$CLAUDE_COMMANDS_DIR/$_f" "../../.config/opencode/commands/$_f" || rc=$?
+    if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
+  done
+fi
+echo
+
+# --- Paso 3: OpenCode config (merge del fragmento SDD) ------------------------
+
+# Mergea SOLO los agentes SDD canonizados en wiring/opencode.sdd.json sobre el
+# config real de opencode. El config real puede llamarse opencode.json o
+# opencode.jsonc (opencode resuelve .jsonc PRIMERO si existe); se detecta cuál
+# existe y se mergea sobre ese. Nunca borra claves personales.
 sync_opencode_config() {
-  local target="${OPENCODE_CONFIG:-$HOME/.config/opencode/opencode.json}"
-  local fragment="$SCRIPT_DIR/wiring/opencode.sdd.json"
-  local merged=""
+  local fragment="$WIRING_DIR/opencode.sdd.json"
+  local target=""
 
   if [[ $SKIP_OPENCODE -eq 1 ]]; then
     printf "OpenCode config: saltado (--skip-opencode)\n"
     return 0
   fi
 
-  if [[ ! -e "$target" ]]; then
-    printf "   [FALTA]     no existe %s; el fragmento SDD queda disponible en wiring/opencode.sdd.json\n" "$target"
+  if [[ -n "${OPENCODE_CONFIG:-}" ]]; then
+    target="$OPENCODE_CONFIG"
+  elif [[ -f "$HOME/.config/opencode/opencode.jsonc" ]]; then
+    target="$HOME/.config/opencode/opencode.jsonc"
+  elif [[ -f "$HOME/.config/opencode/opencode.json" ]]; then
+    target="$HOME/.config/opencode/opencode.json"
+  else
+    printf "   [FALTA]     no existe %s ni %s; el fragmento SDD queda disponible en wiring/opencode.sdd.json\n" \
+      "$HOME/.config/opencode/opencode.jsonc" "$HOME/.config/opencode/opencode.json"
     return 0
   fi
 
@@ -330,10 +637,7 @@ sync_opencode_config() {
     exit 1
   fi
 
-  # Merge con jq (primario). Si el target es JSONC (comas finales que opencode
-  # tolera) jq falla y se delega en python3, que implementa el mismo merge
-  # recursivo (los valores del fragmento ganan) con tolerancia a JSONC. Si jq
-  # no está instalado, se usa python3 directamente (sin depender de rc).
+  local merged=""
   local merged_ok=0
   if command -v jq >/dev/null 2>&1; then
     if merged="$(jq -s '.[0] as $u | .[1] as $f | ($u | .agent = ((.agent // {}) * $f.agent) | if (has("default_agent") | not) then .default_agent = $f.default_agent else . end | if (has("$schema") | not) then .["$schema"] = $f["$schema"] else . end)' "$target" "$fragment" 2>/dev/null)"; then
@@ -418,15 +722,14 @@ PYEOF
   fi
 
   if [[ $DRY_RUN -eq 1 ]]; then
-    printf "   [pendiente] merge opencode.json (fragmento SDD)\n"
+    printf "   [pendiente] merge %s (fragmento SDD)\n" "${target#$HOME/}"
     return 1
   fi
   if [[ $CHECK_MODE -eq 1 ]]; then
-    printf "   [DESYNC]    opencode.json difiere del fragmento SDD\n"
+    printf "   [DESYNC]    %s difiere del fragmento SDD\n" "${target#$HOME/}"
     return 1
   fi
 
-  # Modo real: respaldo único + escritura del JSON mergeado (indent 2, newline final).
   if [[ ! -e "$target.bak" ]]; then
     cp -- "$target" "$target.bak" || { printf "   [ERROR]     no se pudo crear respaldo %s\n" "$target.bak" >&2; return 2; }
   fi
@@ -435,17 +738,23 @@ PYEOF
   return 1
 }
 
-# --- Registries (.atl): refresh por proyecto tras el sync ---------------------
-#
-# Por cada proyecto en REGISTRY_PROJECTS ejecuta el refresh del skill-registry
-# (.atl/) con el proyecto como cwd. Devuelve la cantidad de errores.
+echo "Paso 3 — merge del fragmento SDD sobre el config real de opencode"
+rc=0
+sync_opencode_config || rc=$?
+case "$rc" in
+  1) total_updated=$((total_updated + 1)) ;;
+  2) total_failures=$((total_failures + 1)) ;;
+esac
+echo
+
+# --- Paso 4: Registries (.atl) ------------------------------------------------
+
 refresh_project_registries() {
   local dir rc=0 failures=0
 
   if [[ ${#REGISTRY_PROJECTS[@]} -eq 0 ]]; then
     return 0
   fi
-
   if ! command -v gentle-ai >/dev/null 2>&1; then
     printf "   [aviso]     gentle-ai no encontrado; se omite refresh de registries\n"
     return 0
@@ -458,7 +767,6 @@ refresh_project_registries() {
       failures=$((failures + 1))
       continue
     fi
-
     if [[ $DRY_RUN -eq 1 ]]; then
       printf "   [pendiente] %s: gentle-ai skill-registry refresh --force\n" "$dir"
     elif [[ $CHECK_MODE -eq 1 ]]; then
@@ -477,126 +785,7 @@ refresh_project_registries() {
   return "$failures"
 }
 
-# --- Ejecución --------------------------------------------------------------
-
-echo "Sincronizando skills desde: $SRC_DIR"
-echo "Destinos:"
-for d in "${DEST_DIRS[@]}"; do
-  echo "  - $d  (copia física)"
-done
-for d in "${DEST_SYMLINK_DIRS[@]}"; do
-  echo "  - $d  (symlink a ~/.agents/skills)"
-done
-echo "Skills: ${SKILLS[*]}"
-echo
-
-total_updated=0
-total_failures=0
-total_uptodate=0
-
-for skill in "${SKILLS[@]}"; do
-  src_skill="$SRC_DIR/$skill"
-  echo "== $skill =="
-  # 1) Copia física a ~/.agents/skills
-  rc=0
-  sync_dir "$src_skill" "$HOME/.agents/skills/$skill" || rc=$?
-  case "$rc" in
-    0) total_uptodate=$((total_uptodate + 1)) ;;
-    1) total_updated=$((total_updated + 1)) ;;
-    2) total_failures=$((total_failures + 1)) ;;
-  esac
-
-  # 2) Symlinks en destinos que apuntan a ~/.agents/skills
-  for dest_root in "${DEST_SYMLINK_DIRS[@]}"; do
-    dest_link="$dest_root/$skill"
-    # ~/.config/opencode/skills/<skill> está 3 niveles bajo $HOME
-    # (opencode/skills/<skill> a partir de ~/.config), así que necesita ../../..
-    # para llegar a ~/.agents/skills/<skill>.
-    relative_target="../../../.agents/skills/$skill"
-
-    # Si ya es un symlink correcto, up-to-date.
-    if [[ -L "$dest_link" ]]; then
-      current_target="$(readlink "$dest_link")"
-      if [[ "$current_target" == "$relative_target" ]]; then
-        printf "   [up-to-date] %s\n" "$dest_link"
-        total_uptodate=$((total_uptodate + 1))
-        continue
-      else
-        # Symlink apunta a otro lado: reemplazar.
-        if [[ $DRY_RUN -eq 1 ]]; then
-          printf "   [pendiente] reemplazar symlink %s -> %s\n" "$dest_link" "$relative_target"
-          total_updated=$((total_updated + 1))
-          continue
-        elif [[ $CHECK_MODE -eq 1 ]]; then
-          printf "   [DESYNC]    %s (debería apuntar a %s, apunta a %s)\n" "$dest_link" "$relative_target" "$current_target"
-          total_updated=$((total_updated + 1))
-          continue
-        else
-          rm "$dest_link" || { printf "   [ERROR]     no se pudo borrar symlink viejo %s\n" "$dest_link" >&2; total_failures=$((total_failures + 1)); continue; }
-        fi
-      fi
-    # Si existe como directorio real, reemplazar por symlink.
-    elif [[ -d "$dest_link" ]]; then
-      if [[ $DRY_RUN -eq 1 ]]; then
-        printf "   [pendiente] reemplazar directorio por symlink %s\n" "$dest_link"
-        total_updated=$((total_updated + 1))
-        continue
-      elif [[ $CHECK_MODE -eq 1 ]]; then
-        printf "   [DESYNC]    %s es un directorio real; debería ser symlink\n" "$dest_link"
-        total_updated=$((total_updated + 1))
-        continue
-      else
-        rm -rf "$dest_link" || { printf "   [ERROR]     no se pudo borrar directorio %s\n" "$dest_link" >&2; total_failures=$((total_failures + 1)); continue; }
-      fi
-    fi
-
-    # Crear directorio padre si falta.
-    if [[ ! -d "$(dirname "$dest_link")" ]]; then
-      if [[ $DRY_RUN -eq 1 ]]; then
-        printf "   [pendiente] crear directorio %s\n" "$(dirname "$dest_link")"
-      elif [[ $CHECK_MODE -eq 0 ]]; then
-        mkdir -p "$(dirname "$dest_link")" || { printf "   [ERROR]     no se pudo crear %s\n" "$(dirname "$dest_link")" >&2; total_failures=$((total_failures + 1)); continue; }
-      fi
-    fi
-
-    # Crear el symlink.
-    if [[ $DRY_RUN -eq 1 ]]; then
-      printf "   [pendiente] symlink %s -> %s\n" "$dest_link" "$relative_target"
-      total_updated=$((total_updated + 1))
-    elif [[ $CHECK_MODE -eq 1 ]]; then
-      printf "   [FALTA]     %s (debería ser symlink a %s)\n" "$dest_link" "$relative_target"
-      total_updated=$((total_updated + 1))
-    else
-      ln -s "$relative_target" "$dest_link" || { printf "   [ERROR]     no se pudo crear symlink %s\n" "$dest_link" >&2; total_failures=$((total_failures + 1)); continue; }
-      printf "   [creado]    %s -> %s\n" "$dest_link" "$relative_target"
-      total_updated=$((total_updated + 1))
-    fi
-  done
-  echo
-done
-
-# --- Wiring (commands/prompts/_shared) ---------------------------------------
-echo "--------------------------------------------------"
-wiring_status=0
-sync_wiring || wiring_status=$?
-if [[ $wiring_status -ne 0 ]]; then
-  total_failures=$((total_failures + wiring_status))
-fi
-echo
-
-# --- OpenCode config (merge del fragmento SDD) --------------------------------
-echo "--------------------------------------------------"
-rc=0
-sync_opencode_config || rc=$?
-case "$rc" in
-  0) total_uptodate=$((total_uptodate + 1)) ;;
-  1) total_updated=$((total_updated + 1)) ;;
-  2) total_failures=$((total_failures + 1)) ;;
-esac
-echo
-
-# --- Registries (.atl) ---------------------------------------------------------
-echo "--------------------------------------------------"
+echo "Paso 4 — registries"
 rc=0
 refresh_project_registries || rc=$?
 total_failures=$((total_failures + rc))
@@ -606,202 +795,31 @@ echo
 
 echo "=================================================="
 echo "Resumen:"
-echo "  Destinos procesados : $(( ${#SKILLS[@]} * ( ${#DEST_DIRS[@]} + ${#DEST_SYMLINK_DIRS[@]} ) ))"
-echo "  Up-to-date          : $total_uptodate"
-echo "  Actualizados        : $total_updated"
-echo "  Errores             : $total_failures"
+echo "  Skills exclusivas : ${#SKILLS[@]}"
+echo "  Overlays          : ${#OVERLAYS[@]}"
+echo "  Up-to-date/ok     : -"
+echo "  Actualizados      : $total_updated"
+echo "  Errores           : $total_failures"
 
+desync=0
 if [[ $CHECK_MODE -eq 1 ]]; then
   echo "  (modo verificación --check: no se modificó ningún archivo)"
+  if [[ $total_failures -eq 0 && $total_updated -eq 0 ]]; then
+    echo "  Estado            : sincronizado (cero desyncs)"
+  else
+    echo "  Estado            : hay desyncs o faltantes (ver líneas [DESYNC]/[FALTA]/[ERROR])"
+    desync=1
+  fi
 elif [[ $DRY_RUN -eq 1 ]]; then
   echo "  (modo ensayo --dry-run: no se modificó ningún archivo)"
 elif [[ $total_failures -eq 0 ]]; then
-  echo "  Estado              : sincronizado (versión canónica == globales)"
+  echo "  Estado            : sincronizado (base de Alan + bloques sdd-own aplicados)"
 fi
 
-# --- Symlinks en ~/.claude/skills (espejo de .agents) ----------------------
-# En lugar de copiar archivos, creamos symlinks relativos a .agents/skills para
-# mantener una única fuente de verdad y evitar duplicación.
-echo "--------------------------------------------------"
-claude_total_created=0
-claude_total_updated=0
-claude_total_uptodate=0
-claude_total_failures=0
-
-if [[ -d "$CLAUDE_SKILLS_DIR" ]]; then
-  echo "Claude skills (symlinks a $CLAUDE_SKILLS_DIR)"
-  for skill in "${SKILLS[@]}"; do
-    src_skill="$HOME/.agents/skills/$skill"
-    dest_link="$CLAUDE_SKILLS_DIR/$skill"
-
-    # Resolución de ruta relativa desde ~/.claude/skills/<skill> -> ~/.agents/skills/<skill>
-    relative_target="../../.agents/skills/$skill"
-
-    # Si ya existe como symlink y apunta al destino correcto, está up-to-date.
-    if [[ -L "$dest_link" ]]; then
-      current_target="$(readlink "$dest_link")"
-      if [[ "$current_target" == "$relative_target" ]]; then
-        printf "   [up-to-date] %s\n" "$dest_link"
-        claude_total_uptodate=$((claude_total_uptodate + 1))
-        continue
-      else
-        # Symlink apunta a otro lado: lo reemplazamos.
-        if [[ $DRY_RUN -eq 1 ]]; then
-          printf "   [pendiente] reemplazar symlink %s -> %s\n" "$dest_link" "$relative_target"
-          claude_total_updated=$((claude_total_updated + 1))
-          continue
-        elif [[ $CHECK_MODE -eq 1 ]]; then
-          printf "   [DESYNC]    %s (debería apuntar a %s, apunta a %s)\n" "$dest_link" "$relative_target" "$current_target"
-          claude_total_updated=$((claude_total_updated + 1))
-          continue
-        else
-          rm "$dest_link" || { printf "   [ERROR]     no se pudo borrar symlink viejo %s\n" "$dest_link" >&2; claude_total_failures=$((claude_total_failures + 1)); continue; }
-        fi
-      fi
-    # Si existe como directorio real, lo reemplazamos por symlink (solo en ejecución real).
-    elif [[ -d "$dest_link" ]]; then
-      if [[ $DRY_RUN -eq 1 ]]; then
-        printf "   [pendiente] reemplazar directorio por symlink %s\n" "$dest_link"
-        claude_total_updated=$((claude_total_updated + 1))
-        continue
-      elif [[ $CHECK_MODE -eq 1 ]]; then
-        printf "   [DESYNC]    %s es un directorio real; debería ser symlink\n" "$dest_link"
-        claude_total_updated=$((claude_total_updated + 1))
-        continue
-      else
-        rm -rf "$dest_link" || { printf "   [ERROR]     no se pudo borrar directorio %s\n" "$dest_link" >&2; claude_total_failures=$((claude_total_failures + 1)); continue; }
-      fi
-    fi
-
-    # Crear el directorio padre si falta.
-    if [[ ! -d "$(dirname "$dest_link")" ]]; then
-      if [[ $DRY_RUN -eq 1 ]]; then
-        printf "   [pendiente] crear directorio %s\n" "$(dirname "$dest_link")"
-      elif [[ $CHECK_MODE -eq 0 ]]; then
-        mkdir -p "$(dirname "$dest_link")" || { printf "   [ERROR]     no se pudo crear %s\n" "$(dirname "$dest_link")" >&2; claude_total_failures=$((claude_total_failures + 1)); continue; }
-      fi
-    fi
-
-    # Crear el symlink.
-    if [[ $DRY_RUN -eq 1 ]]; then
-      printf "   [pendiente] symlink %s -> %s\n" "$dest_link" "$relative_target"
-      claude_total_created=$((claude_total_created + 1))
-    elif [[ $CHECK_MODE -eq 1 ]]; then
-      printf "   [FALTA]     %s (debería ser symlink a %s)\n" "$dest_link" "$relative_target"
-      claude_total_created=$((claude_total_created + 1))
-    else
-      ln -s "$relative_target" "$dest_link" || { printf "   [ERROR]     no se pudo crear symlink %s\n" "$dest_link" >&2; claude_total_failures=$((claude_total_failures + 1)); continue; }
-      printf "   [creado]    %s -> %s\n" "$dest_link" "$relative_target"
-      claude_total_created=$((claude_total_created + 1))
-    fi
-  done
-  printf "  Claude skills    : up-to-date=%s creados/reemplazados=%s errores=%s\n" \
-    "$claude_total_uptodate" "$claude_total_created" "$claude_total_failures"
-else
-  echo "Claude skills: $CLAUDE_SKILLS_DIR no existe; se omite."
-fi
-echo
-
-# --- Wiring para Claude (symlinks en ~/.claude) ------------------------------
-# Creamos symlinks relativos en ~/.claude que apuntan a las carpetas reales de
-# ~/.config/opencode para commands y prompts, manteniene una única fuente de
-# verdad.  Para _shared, el destino ya son ~/.agents/skills/_shared y
-# ~/.config/opencode/skills/_shared; no hace falta duplicar en ~/.claude
-# porque los agentes de Claude Code leen directamente ~/.claude/skills (que
-# ya son symlinks a .agents) y ahí ya está el contenido de _shared.
-echo "--------------------------------------------------"
-claude_wiring_total_created=0
-claude_wiring_total_updated=0
-claude_wiring_total_uptodate=0
-claude_wiring_total_failures=0
-
-# Mapa de wiring/<subcarpeta> -> destino real en ~/.config/opencode (origen del
-# symlink en ~/.claude).  Keys: subdirectorios de wiring/.
-# Arrays paralelos indexados (portables a bash 3.2).
-CLAUDE_WIRING_SUBS=(commands prompts)
-CLAUDE_WIRING_SYMLINKS=(
-  "$HOME/.config/opencode/commands"
-  "$HOME/.config/opencode/prompts"
-)
-
-for i in "${!CLAUDE_WIRING_SUBS[@]}"; do
-  sub="${CLAUDE_WIRING_SUBS[$i]}"
-  src_dir="${CLAUDE_WIRING_SYMLINKS[$i]}"
-  dest_base="$CLAUDE_WIRING_BASE/$sub"
-  [[ -d "$src_dir" ]] || continue
-
-  echo "Claude wiring: $sub (symlinks a $src_dir)"
-  while IFS= read -r -d '' src_file; do
-    rel="${src_file#"$src_dir"/}"
-    dest_link="$dest_base/$rel"
-    # ~/.claude/<sub>/<file> está 2 niveles bajo $HOME (Claude + <sub>),
-    # así que necesita ../../ para llegar a ~/.config/opencode/<sub>/<file>.
-    relative_target="../../.config/opencode/$sub/$rel"
-
-    # Evaluar si ya es un symlink correcto.
-    if [[ -L "$dest_link" ]]; then
-      current_target="$(readlink "$dest_link")"
-      if [[ "$current_target" == "$relative_target" ]]; then
-        printf "   [up-to-date] %s\n" "$dest_link"
-        claude_wiring_total_uptodate=$((claude_wiring_total_uptodate + 1))
-        continue
-      else
-        # Symlink apunta a otro lado: reemplazar.
-        if [[ $DRY_RUN -eq 1 ]]; then
-          printf "   [pendiente] reemplazar symlink %s -> %s\n" "$dest_link" "$relative_target"
-          claude_wiring_total_updated=$((claude_wiring_total_updated + 1))
-          continue
-        elif [[ $CHECK_MODE -eq 1 ]]; then
-          printf "   [DESYNC]    %s (debería apuntar a %s, apunta a %s)\n" "$dest_link" "$relative_target" "$current_target"
-          claude_wiring_total_updated=$((claude_wiring_total_updated + 1))
-          continue
-        else
-          rm "$dest_link" || { printf "   [ERROR]     no se pudo borrar symlink viejo %s\n" "$dest_link" >&2; claude_wiring_total_failures=$((claude_wiring_total_failures + 1)); continue; }
-        fi
-      fi
-    # Si existe como archivo regular, reemplazar.
-    elif [[ -f "$dest_link" ]]; then
-      if [[ $DRY_RUN -eq 1 ]]; then
-        printf "   [pendiente] reemplazar archivo por symlink %s\n" "$dest_link"
-        claude_wiring_total_updated=$((claude_wiring_total_updated + 1))
-        continue
-      elif [[ $CHECK_MODE -eq 1 ]]; then
-        printf "   [DESYNC]    %s es un archivo real; debería ser symlink\n" "$dest_link"
-        claude_wiring_total_updated=$((claude_wiring_total_updated + 1))
-        continue
-      else
-        rm "$dest_link" || { printf "   [ERROR]     no se pudo borrar archivo %s\n" "$dest_link" >&2; claude_wiring_total_failures=$((claude_wiring_total_failures + 1)); continue; }
-      fi
-    fi
-
-    # Crear directorio padre si falta.
-    if [[ ! -d "$(dirname "$dest_link")" ]]; then
-      if [[ $DRY_RUN -eq 1 ]]; then
-        printf "   [pendiente] crear directorio %s\n" "$(dirname "$dest_link")"
-      elif [[ $CHECK_MODE -eq 0 ]]; then
-        mkdir -p "$(dirname "$dest_link")" || { printf "   [ERROR]     no se pudo crear %s\n" "$(dirname "$dest_link")" >&2; claude_wiring_total_failures=$((claude_wiring_total_failures + 1)); continue; }
-      fi
-    fi
-
-    # Crear el symlink.
-    if [[ $DRY_RUN -eq 1 ]]; then
-      printf "   [pendiente] symlink %s -> %s\n" "$dest_link" "$relative_target"
-      claude_wiring_total_created=$((claude_wiring_total_created + 1))
-    elif [[ $CHECK_MODE -eq 1 ]]; then
-      printf "   [FALTA]     %s (debería ser symlink a %s)\n" "$dest_link" "$relative_target"
-      claude_wiring_total_created=$((claude_wiring_total_created + 1))
-    else
-      ln -s "$relative_target" "$dest_link" || { printf "   [ERROR]     no se pudo crear symlink %s\n" "$dest_link" >&2; claude_wiring_total_failures=$((claude_wiring_total_failures + 1)); continue; }
-      printf "   [creado]    %s -> %s\n" "$dest_link" "$relative_target"
-      claude_wiring_total_created=$((claude_wiring_total_created + 1))
-    fi
-  done < <(find "$src_dir" -type f -print0)
-  printf "  Claude wiring (%s): up-to-date=%s creados/reemplazados=%s errores=%s\n" \
-    "$sub" "$claude_wiring_total_uptodate" "$claude_wiring_total_created" "$claude_wiring_total_failures"
-done
-echo
-
-if [[ $total_failures -ne 0 || $claude_total_failures -ne 0 || $claude_wiring_total_failures -ne 0 ]]; then
+if [[ $total_failures -ne 0 ]]; then
   exit 2
+fi
+if [[ $CHECK_MODE -eq 1 && $desync -eq 1 ]]; then
+  exit 1
 fi
 exit 0
