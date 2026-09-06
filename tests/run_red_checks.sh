@@ -13,7 +13,7 @@
 #   T05 no-mutacion host    T12 keep                    T19 check 401 drift
 #   T06 no-mutacion check   T13 replace (F5)            T20 check red estructural
 #   T07 no-mutacion dry-run T14 colision invalid        T21 regresion + README (F7)
-#                                                       T22 env.sh snippet (secrets)
+#                                                       T22 env snippets POSIX+fish
 #
 # Exit: 0 = todo verde (skips permitidos), 1 = fallos.
 # =============================================================================
@@ -397,20 +397,29 @@ t "T21 regresion sync + excepcion sancionada en README (F7)"
 
 # -----------------------------------------------------------------------------
 
-t "T22 env.sh snippet: generado en modo real, 0600, export de la var + instruccion de source"
+t "T22 env snippets: env.sh (POSIX) + env.fish (fish) 0600, export/set -gx, instruccion de source del shell"
 {
   bad=0
+  case "$(basename "${SHELL:-}")" in
+    fish) rc_expected="config.fish" ;;
+    zsh)  rc_expected=".zshrc" ;;
+    *)    rc_expected=".bashrc" ;;
+  esac
   init_sandbox; start_fake_api 200
   run_setup_pty 45 'Token de GitHub (PAT): =ghp_T22SNIP\n;Cambiar el token antes de continuar? [y/N] =n\n'
   [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
-  f="$SB_HOME/.config/sdd-own/env.sh"
-  [[ -f "$f" ]] || { ko "env.sh no generado"; bad=1; }
-  [[ "$(stat -c %a "$f")" == "600" ]] || { ko "env.sh mode $(stat -c %a "$f") != 600"; bad=1; }
-  grep -q "^export GITHUB_PERSONAL_ACCESS_TOKEN=" "$f" || { ko "env.sh sin export de la var"; bad=1; }
-  grep -q "ghp_T22SNIP" "$f" || { ko "env.sh no contiene el token"; bad=1; }
+  s="$SB_HOME/.config/sdd-own/env.sh"
+  f="$SB_HOME/.config/sdd-own/env.fish"
+  [[ -f "$s" ]] || { ko "env.sh no generado"; bad=1; }
+  [[ -f "$f" ]] || { ko "env.fish no generado"; bad=1; }
+  [[ "$(stat -c %a "$s")" == "600" ]] || { ko "env.sh mode $(stat -c %a "$s") != 600"; bad=1; }
+  [[ "$(stat -c %a "$f")" == "600" ]] || { ko "env.fish mode $(stat -c %a "$f") != 600"; bad=1; }
+  grep -q "^export GITHUB_PERSONAL_ACCESS_TOKEN=" "$s" || { ko "env.sh sin export"; bad=1; }
+  grep -q "^set -gx GITHUB_PERSONAL_ACCESS_TOKEN " "$f" || { ko "env.fish sin set -gx"; bad=1; }
+  grep -q "ghp_T22SNIP" "$s" || { ko "env.sh sin token"; bad=1; }
+  grep -q "ghp_T22SNIP" "$f" || { ko "env.fish sin token"; bad=1; }
   out_contains "source" || { ko "sin instruccion de source en la salida"; bad=1; }
-  # el snippet NO debe tocar el rc del usuario (opcion manual)
-  grep -q "bashrc\|zshrc" "$SB_TMP/out.txt" || { ko "sin referencia al rc en la instruccion"; bad=1; }
+  grep -q "$rc_expected" "$SB_TMP/out.txt" || { ko "instruccion no nombra $rc_expected (shell del host)"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 

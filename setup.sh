@@ -39,7 +39,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_DIR="$HOME/.config/sdd-own"
 ENV_FILE="$ENV_DIR/github-mcp.env"
-ENV_SH="$ENV_DIR/env.sh"   # snippet exportable (0600) para source manual en el rc del shell
+ENV_SH="$ENV_DIR/env.sh"     # snippet POSIX (bash/zsh/sh):  export VAR='...'
+ENV_FISH="$ENV_DIR/env.fish" # snippet fish:                  set -gx VAR '...'
+# shell del usuario para la instruccion de source (fish no parsea `export`).
+case "$(basename "${SHELL:-}")" in
+  fish) shell_kind="fish" ;;
+  zsh)  shell_kind="zsh" ;;
+  bash) shell_kind="bash" ;;
+  *)    shell_kind="otro" ;;
+esac
 GH_API="${SDD_OWN_GH_API:-https://api.github.com}"
 
 # ---- contadores y estado globales (reporte) ----------------------------------
@@ -214,37 +222,58 @@ persist_token() {
   printf '  [actualizado] %s (0600) — %s\n' "${ENV_FILE#$HOME/}" "$why"
 }
 
-# write_env_snippet <token> — genera ~/.config/sdd-own/env.sh (0600) con el export
-# de GITHUB_PERSONAL_ACCESS_TOKEN para source manual en el rc del shell. NO toca
-# el rc del usuario (opcion "snippet manual"): solo escribe el archivo y el
-# reporte imprime la instruccion. Los runtimes leen la var del entorno del
-# proceso (opencode {env:}, pi bearerTokenEnv, claude ${VAR}, codex
-# bearer_token_env_var); sin la var exportada, el MCP remote falla con 400.
+# write_env_snippet <token> — genera los snippets exportables (0600) para source
+# manual en el rc del shell: env.sh (POSIX: bash/zsh/sh) y env.fish (fish usa
+# `set -gx`, no parsea `export`). NO toca el rc del usuario (opcion "snippet
+# manual"): solo escribe los archivos y el reporte imprime la instruccion.
+# Los runtimes leen la var del entorno del proceso (opencode {env:}, pi
+# bearerTokenEnv, claude ${VAR}, codex bearer_token_env_var); sin la var
+# exportada, el MCP remote falla con 400. Idempotente (F2): si un snippet ya
+# existe y es identico no se reescribe (RED T15 verifica no-mutacion).
 write_env_snippet() {
-  local token="$1" tmp mode q
+  local token="$1" tmp mode q qf
   install -d -m 700 "$ENV_DIR"
   chmod 700 "$ENV_DIR"
+  # comillas simples robustas: POSIX escapa ' como '\''; fish escapa como \'
+  q="${token//\'/\'\\\'\'}"
+  qf="${token//\'/\\\'}"
+
+  # 1) env.sh — POSIX
   tmp="$(mktemp "$ENV_DIR/env.sh.XXXXXX")"
   CLEANUP_FILES+=("$tmp")
-  # comillas simples robustas: un token con ' se escapa como '\'' (los tokens de
-  # GitHub son alfanumericos, pero la higiene no cuesta)
-  q="${token//\'/\'\\\'\'}"
   printf '# GitHub MCP token — escrito por setup.sh (mode 0600). Source manual:\n' > "$tmp"
   printf '#   source %s\n' "$ENV_SH" >> "$tmp"
   printf 'export GITHUB_PERSONAL_ACCESS_TOKEN=%s\n' "'$q'" >> "$tmp"
   chmod 600 "$tmp"
-  # idempotente (F2): si el snippet ya existe y es identico, no se reescribe —
-  # un re-run real no debe mutar archivos (RED T15 lo verifica con snapshot).
   if [[ -f "$ENV_SH" ]] && cmp -s "$tmp" "$ENV_SH"; then
     rm -f "$tmp"
-    return 0
+  else
+    mv -f "$tmp" "$ENV_SH"
+    chmod 600 "$ENV_SH"
+    mode="$(stat -c %a "$ENV_SH" 2>/dev/null || printf '??')"
+    if [[ "$mode" != "600" ]]; then
+      printf '[ERROR] modo inesperado (%s) en %s\n' "$mode" "$ENV_SH" >&2
+      exit 2
+    fi
   fi
-  mv -f "$tmp" "$ENV_SH"
-  chmod 600 "$ENV_SH"
-  mode="$(stat -c %a "$ENV_SH" 2>/dev/null || printf '??')"
-  if [[ "$mode" != "600" ]]; then
-    printf '[ERROR] modo inesperado (%s) en %s\n' "$mode" "$ENV_SH" >&2
-    exit 2
+
+  # 2) env.fish — fish shell
+  tmp="$(mktemp "$ENV_DIR/env.fish.XXXXXX")"
+  CLEANUP_FILES+=("$tmp")
+  printf '# GitHub MCP token — escrito por setup.sh (mode 0600). Source manual:\n' > "$tmp"
+  printf '#   source %s\n' "$ENV_FISH" >> "$tmp"
+  printf 'set -gx GITHUB_PERSONAL_ACCESS_TOKEN %s\n' "'$qf'" >> "$tmp"
+  chmod 600 "$tmp"
+  if [[ -f "$ENV_FISH" ]] && cmp -s "$tmp" "$ENV_FISH"; then
+    rm -f "$tmp"
+  else
+    mv -f "$tmp" "$ENV_FISH"
+    chmod 600 "$ENV_FISH"
+    mode="$(stat -c %a "$ENV_FISH" 2>/dev/null || printf '??')"
+    if [[ "$mode" != "600" ]]; then
+      printf '[ERROR] modo inesperado (%s) en %s\n' "$mode" "$ENV_FISH" >&2
+      exit 2
+    fi
   fi
   snippet_written=1
 }
@@ -744,21 +773,23 @@ if [[ "$MCP_MODE" == "real" ]]; then
     cur="$(read_env_token)"
     if [[ -n "$cur" ]]; then
       write_env_snippet "$cur"
-      printf '  [ok]        %s generado (0600)\n' "${ENV_SH#$HOME/}"
+      printf '  [ok]        snippets generados (0600): %s, %s\n' "${ENV_SH#$HOME/}" "${ENV_FISH#$HOME/}"
     else
-      printf '  [aviso]     env file sin token — snippet no generado\n'
+      printf '  [aviso]     env file sin token — snippets no generados\n'
     fi
   else
-    printf '  [aviso]     sin env file — snippet no generado\n'
+    printf '  [aviso]     sin env file — snippets no generados\n'
   fi
 elif [[ "$MCP_MODE" == "check" ]]; then
-  if [[ -f "$ENV_SH" ]]; then
-    printf '  [ok]        env snippet presente (mode %s)\n' "$(stat -c %a "$ENV_SH" 2>/dev/null || printf '?')"
-  else
-    printf '  [pendiente] env snippet ausente — se genera en modo real\n'
-  fi
+  for f in "$ENV_SH" "$ENV_FISH"; do
+    if [[ -f "$f" ]]; then
+      printf '  [ok]        %s presente (mode %s)\n' "${f#$HOME/}" "$(stat -c %a "$f" 2>/dev/null || printf '?')"
+    else
+      printf '  [pendiente] %s ausente — se genera en modo real\n' "${f#$HOME/}"
+    fi
+  done
 else
-  printf '  [pendiente] env snippet se generaria en modo real\n'
+  printf '  [pendiente] env snippets se generarian en modo real\n'
 fi
 
 # ---- reporte final ------------------------------------------------------------------
@@ -772,7 +803,7 @@ else
   printf '  Paso MCP        : %s\n' "$MCP_MODE"
 fi
 printf '  Env file        : %s\n' "$( [[ -f "$ENV_FILE" ]] && printf '%s (mode %s)' "${ENV_FILE#$HOME/}" "$(stat -c %a "$ENV_FILE" 2>/dev/null || printf '?')" || printf 'ausente' )"
-printf '  Env snippet     : %s\n' "$( [[ -f "$ENV_SH" ]] && printf '%s (mode %s)' "${ENV_SH#$HOME/}" "$(stat -c %a "$ENV_SH" 2>/dev/null || printf '?')" || printf 'ausente' )"
+printf '  Env snippets    : %s\n' "$( [[ -f "$ENV_SH" && -f "$ENV_FISH" ]] && printf '%s (mode %s)' "${ENV_SH#$HOME/}" "$(stat -c %a "$ENV_SH" 2>/dev/null || printf '?')" || printf 'ausente' )"
 printf '  Token GitHub    : %s%s\n' "$token_status" "$([[ -n "$token_masked" ]] && printf ' (%s)' "$token_masked" || true)"
 printf '  MCP [up-to-date]: %d\n' "$mcp_report_ok"
 printf '  MCP [actualizado]: %d\n' "$mcp_report_updated"
@@ -780,11 +811,24 @@ printf '  MCP [pendiente] : %d\n' "$mcp_report_pend"
 printf '  MCP [aviso]     : %d (runtimes ausentes / saltados)\n' "$mcp_report_skip"
 printf '  MCP [ERROR]     : %d\n' "$mcp_report_error"
 
-if [[ "$MCP_MODE" == "real" ]] && [[ -f "$ENV_SH" ]]; then
+if [[ "$MCP_MODE" == "real" ]] && [[ -f "$ENV_SH" && -f "$ENV_FISH" ]]; then
   printf '\n  ======== Para activar el token en los agentes (opencode, Pi, Claude, Codex) ========\n'
-  printf '  1) Agrega esta linea a tu ~/.bashrc (o ~/.zshrc) y abre una terminal nueva:\n'
-  printf '       source %s\n' "${ENV_SH/#$HOME/\~}"
-  printf '  2) Reinicia opencode: el MCP github (remote api.githubcopilot.com) lee\n'
+  case "$shell_kind" in
+    fish)
+      printf '  1) Agrega esta linea a tu ~/.config/fish/config.fish y abre una terminal nueva:\n'
+      printf '       source %s\n' "${ENV_FISH/#$HOME/\~}"
+      ;;
+    bash|zsh)
+      printf '  1) Agrega esta linea a tu ~/.%src (o el rc de tu shell) y abre una terminal nueva:\n' "$shell_kind"
+      printf '       source %s\n' "${ENV_SH/#$HOME/\~}"
+      ;;
+    *)
+      printf '  1) Shell no reconocido (%s). Agrega UNA de estas dos lineas a tu rc:\n' "${SHELL:-vacio}"
+      printf '       bash/zsh:  source %s\n' "${ENV_SH/#$HOME/\~}"
+      printf '       fish:      source %s\n' "${ENV_FISH/#$HOME/\~}"
+      ;;
+  esac
+  printf '  2) Reinicia %s: el MCP github (remote api.githubcopilot.com) lee\n' "${SHELL:+tu agente}opencode"
   printf '     GITHUB_PERSONAL_ACCESS_TOKEN del entorno del proceso. Sin la var exportada,\n'
   printf '     el literal {env:...} queda sin resolver y el endpoint responde 400.\n'
 fi
