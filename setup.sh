@@ -26,13 +26,12 @@
 #   SDD_OWN_GH_API=<base>            override del endpoint (default https://api.github.com)
 #   MCP_DEBUG_SYNC_ARGS=<file>       omite la delegacion a sync; escribe exit=<n> + argv (1 por linea)
 #   MCP_DEBUG_SYNC_ARGS_EXIT=<n>     exit simulado para el seam (default 0)
-#   SDD_OWN_DEBUG_CURL_CONFIG=<file> copia debug del config tmp de curl e imprime su ruta a stderr
+#   SDD_OWN_DEBUG_CURL_CONFIG=<file> copia debug del config tmp de curl (contiene el token; solo diagnostico)
 #   MCP_GITHUB_TRANSPORT=docker      renderiza alt_docker de cada envelope
 #
 # Higiene de secretos: el token jamas aparece en argv/logs/output; se lee con
-# read -rs, se valida via `curl -K <tmpfile>` (header Bearer con ${VAR} que curl
-# expande desde el ambiente, nunca en la linea de comandos), el tmpfile se crea
-# 0600 y se borra al terminar, y los reportes muestran solo huella enmascarada.
+# read -rs, se valida via `curl -K <tmpfile>` (header Bearer en un config 0600
+# temporal, borrado al terminar) y los reportes muestran solo huella enmascarada.
 # =============================================================================
 
 set -euo pipefail
@@ -135,33 +134,38 @@ read_env_token() {
   ( set -a; . "$ENV_FILE"; set +a; printf '%s' "${GITHUB_PERSONAL_ACCESS_TOKEN:-}" )
 }
 
-# validate_token <token> — imprime 200 | invalid <code> | network
-# y deja SDD_OWN_VALIDATION_SCOPES con el header x-oauth-scopes (vacio si no viene)
+# validate_token <token> — imprime `200|<x-oauth-scopes>` | `invalid <code>` | `network`.
+# Los scopes viajan en el propio stdout (no en una global: el caller usa command
+# substitution y una asignacion global dentro de ella se perderia en el sub-shell;
+# ver bug de scopes corregido en este cambio).
 validate_token() {
   local token="$1"
-  local tmp body hdr rc=0 code
+  local tmp body hdr rc=0 code sc
   tmp="$(mktemp "${TMPDIR:-/tmp}/sdd-own-curl.XXXXXX")"
   body="$(mktemp "${TMPDIR:-/tmp}/sdd-own-body.XXXXXX")"
   hdr="$(mktemp "${TMPDIR:-/tmp}/sdd-own-hdr.XXXXXX")"
   chmod 600 "$tmp"
-  # curl expande ${GITHUB_PERSONAL_ACCESS_TOKEN} desde el ambiente DENTRO del
-  # archivo de config: el token nunca viaja en argv (F1).
-  printf 'header = "Authorization: Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"\n' > "$tmp"
+  # F1: el token vive SOLO en el archivo de config (0600, borrado abajo), nunca
+  # en argv ni en el ambiente del proceso curl. Nota de compatibilidad: curl no
+  # expande ${VAR} dentro de `header =` en configs -K (verificado en 8.21), asi
+  # que el valor va literal en el archivo; el 0600 + rm garantizan la higiene.
+  printf '# setup.sh validate-config (0600, temporal). No commitear, no compartir.\n' > "$tmp"
+  printf 'header = "Authorization: Bearer %s"\n' "$token" >> "$tmp"
   if [[ -n "${SDD_OWN_DEBUG_CURL_CONFIG:-}" ]]; then
     cp "$tmp" "$SDD_OWN_DEBUG_CURL_CONFIG"
     printf 'curl-config: %s\n' "$tmp" >&2
   fi
 
-  GITHUB_PERSONAL_ACCESS_TOKEN="$token" \
-    curl -sS --max-time 15 -o "$body" -D "$hdr" -K "$tmp" "$GH_API/user" 2>/dev/null || rc=$?
+  curl -sS --max-time 15 -o "$body" -D "$hdr" -K "$tmp" "$GH_API/user" 2>/dev/null || rc=$?
 
   local ok=0
   if [[ $rc -eq 0 ]]; then
     code="$(awk 'NR==1 {print $2}' "$hdr" 2>/dev/null || true)"
     if [[ "$code" == "200" ]]; then
-      SDD_OWN_VALIDATION_SCOPES="$(awk 'tolower($1) == "x-oauth-scopes:" { sub(/^[^:]*:[[:space:]]*/, ""); print; exit }' "$hdr" 2>/dev/null || true)"
+      # El header de GitHub termina en \r\n; el \r se quita del valor extraido.
+      sc="$(awk 'tolower($1) == "x-oauth-scopes:" { sub(/^[^:]*:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit }' "$hdr" 2>/dev/null || true)"
       ok=1
-      printf '200\n'
+      printf '200|%s\n' "$sc"
     else
       ok=1
       printf 'invalid %s\n' "${code:-?}"
@@ -217,7 +221,9 @@ prompt_new_token() {
     fi
     st="$(validate_token "$tok")"
     case "$st" in
-      200) ok=1; break ;;
+      "200|"*)
+        SDD_OWN_VALIDATION_SCOPES="${st#200|}"
+        ok=1; break ;;
       network*)
         printf '[ERROR] fallo de red al validar el token; no se persiste nada\n' >&2
         exit 2
@@ -245,6 +251,9 @@ prompt_scope_change() {
     printf '  [aviso] token fine-grained: scopes no verificables (continua)\n'
     return
   fi
+  # El header llega como "repo, read:org, workflow" (comas + espacios); borrar
+  # separadores para que el match ",$need," funcione sobre nombres limpios.
+  sc="${sc//[ ,]/}"
   for need in repo read:org workflow; do
     [[ ",$sc," == *",$need,"* ]] || missing="$missing $need"
   done
@@ -263,14 +272,14 @@ prompt_scope_change() {
 # ---------- merge 5d ------------------------------------------------------------
 
 create_target() {
-  local target="$1" root_key="$2"
+  local target="$1" root_key="$2" merge_type="$3"
   local dir
   dir="$(dirname "$target")"
   [[ -d "$dir" ]] || mkdir -p "$dir"
-  if [[ "$root_key" == "mcp_servers" ]]; then
+  if [[ "$merge_type" == "toml-section" ]]; then
     : > "$target"
   else
-    printf '{\n  "%s": {}\n}\n' "$root_key" > "$target"
+    printf '{}\n' > "$target"
   fi
 }
 
@@ -532,7 +541,7 @@ if [[ -e "${envelopes[0]}" ]]; then
     server_key="$(jget "$envelope" '.server_key')"
     if [[ ! -e "$target" ]]; then
       if [[ "$MCP_MODE" == "real" ]]; then
-        create_target "$target" "$root_key"
+        create_target "$target" "$root_key" "$merge"
         printf '  [creado]    %s (target ausente, sin .bak)\n' "${target#$HOME/}"
         CREATED_TARGETS+=("$target")
       else
@@ -564,7 +573,8 @@ if [[ "$MCP_MODE" == "real" ]]; then
         token_status="no verificable (red)"
         token_masked="$(masked "$existing")"
         ;;
-      200)
+      "200|"*)
+        SDD_OWN_VALIDATION_SCOPES="${st#200|}"
         token_status="existente (valido)"
         token_masked="$(masked "$existing")"
         if [[ -t 0 ]]; then
@@ -605,16 +615,21 @@ elif [[ "$MCP_MODE" == "check" ]]; then
     existing="$(read_env_token)"
     if [[ -z "$existing" ]]; then
       printf '  [ok]        env file presente pero sin token (estado limpio valido)\n'
+      token_status="env file sin token"
     else
       st="$(validate_token "$existing")"
       case "$st" in
-        200)
+        "200|"*)
+          SDD_OWN_VALIDATION_SCOPES="${st#200|}"
+          token_status="valido"
           printf '  [ok]        token valido (%s)\n' "$(masked "$existing")"
           prompt_scope_change "$SDD_OWN_VALIDATION_SCOPES" ;;
         invalid*)
+          token_status="no valido (drift)"
           printf '  [DESYNC]    token del env file rechazado (HTTP %s) — drift\n' "${st#invalid }"
           mcp_exit=1 ;;
         network*)
+          token_status="no verificable (red)"
           printf '  [ERROR]     no se pudo validar el token (fallo de red) — estado estructural\n' >&2
           mcp_exit=2 ;;
       esac

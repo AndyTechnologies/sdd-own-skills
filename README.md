@@ -162,7 +162,7 @@ set -a; source ~/.config/sdd-own/github-mcp.env; set +a
 
 **Semántica de salida**: `0` = todo bien; `1` = estructura/conflicto (flags excluyentes, modo real sin TTY con token necesario, o token inválido/rechazado en check); `2` = fallo estructural (sync falló, o red/API inalcanzable). En `--check`, un MCP no configurado con token ausente es **estado limpio válido** (exit 0); solo los rechazos del API (401/403) marcan token drift (exit 1).
 
-**Seams de test** (no tocar en producción): `MCP_DEBUG_SYNC_ARGS=<file>` (escribe `exit=<n>` + argv de la delegación; `MCP_DEBUG_SYNC_ARGS_EXIT` simula el exit del sync), `SDD_OWN_GH_API` (base URL de la API), `SDD_OWN_DEBUG_CURL_CONFIG=<path>` (debug del config de curl), `MCP_GITHUB_TRANSPORT`.
+**Seams de test** (no tocar en producción): `MCP_DEBUG_SYNC_ARGS=<file>` (escribe `exit=<n>` + argv de la delegación; `MCP_DEBUG_SYNC_ARGS_EXIT` simula el exit del sync), `SDD_OWN_GH_API` (base URL de la API), `SDD_OWN_DEBUG_CURL_CONFIG=<path>` (dump del config temporal de curl — **contiene el token**, solo diagnóstico y borra el dump después), `MCP_GITHUB_TRANSPORT`.
 
 ---
 
