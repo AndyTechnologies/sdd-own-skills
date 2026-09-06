@@ -39,6 +39,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_DIR="$HOME/.config/sdd-own"
 ENV_FILE="$ENV_DIR/github-mcp.env"
+ENV_SH="$ENV_DIR/env.sh"   # snippet exportable (0600) para source manual en el rc del shell
 GH_API="${SDD_OWN_GH_API:-https://api.github.com}"
 
 # ---- contadores y estado globales (reporte) ----------------------------------
@@ -211,6 +212,41 @@ persist_token() {
   token_masked="$(masked "$token")"
   token_written=1
   printf '  [actualizado] %s (0600) — %s\n' "${ENV_FILE#$HOME/}" "$why"
+}
+
+# write_env_snippet <token> — genera ~/.config/sdd-own/env.sh (0600) con el export
+# de GITHUB_PERSONAL_ACCESS_TOKEN para source manual en el rc del shell. NO toca
+# el rc del usuario (opcion "snippet manual"): solo escribe el archivo y el
+# reporte imprime la instruccion. Los runtimes leen la var del entorno del
+# proceso (opencode {env:}, pi bearerTokenEnv, claude ${VAR}, codex
+# bearer_token_env_var); sin la var exportada, el MCP remote falla con 400.
+write_env_snippet() {
+  local token="$1" tmp mode q
+  install -d -m 700 "$ENV_DIR"
+  chmod 700 "$ENV_DIR"
+  tmp="$(mktemp "$ENV_DIR/env.sh.XXXXXX")"
+  CLEANUP_FILES+=("$tmp")
+  # comillas simples robustas: un token con ' se escapa como '\'' (los tokens de
+  # GitHub son alfanumericos, pero la higiene no cuesta)
+  q="${token//\'/\'\\\'\'}"
+  printf '# GitHub MCP token — escrito por setup.sh (mode 0600). Source manual:\n' > "$tmp"
+  printf '#   source %s\n' "$ENV_SH" >> "$tmp"
+  printf 'export GITHUB_PERSONAL_ACCESS_TOKEN=%s\n' "'$q'" >> "$tmp"
+  chmod 600 "$tmp"
+  # idempotente (F2): si el snippet ya existe y es identico, no se reescribe —
+  # un re-run real no debe mutar archivos (RED T15 lo verifica con snapshot).
+  if [[ -f "$ENV_SH" ]] && cmp -s "$tmp" "$ENV_SH"; then
+    rm -f "$tmp"
+    return 0
+  fi
+  mv -f "$tmp" "$ENV_SH"
+  chmod 600 "$ENV_SH"
+  mode="$(stat -c %a "$ENV_SH" 2>/dev/null || printf '??')"
+  if [[ "$mode" != "600" ]]; then
+    printf '[ERROR] modo inesperado (%s) en %s\n' "$mode" "$ENV_SH" >&2
+    exit 2
+  fi
+  snippet_written=1
 }
 
 # backup_env_file — rotacion: cp -p (preserva 0600); al sobrescribir el .bak
@@ -701,6 +737,30 @@ for envelope in "${envelopes[@]:-}"; do
   fi
 done
 
+# ---- 5e snippet del shell: provision del token al entorno de los agentes -----------
+echo "  5e — env snippet (source manual: token disponible para todos los runtimes)"
+if [[ "$MCP_MODE" == "real" ]]; then
+  if [[ -f "$ENV_FILE" ]]; then
+    cur="$(read_env_token)"
+    if [[ -n "$cur" ]]; then
+      write_env_snippet "$cur"
+      printf '  [ok]        %s generado (0600)\n' "${ENV_SH#$HOME/}"
+    else
+      printf '  [aviso]     env file sin token — snippet no generado\n'
+    fi
+  else
+    printf '  [aviso]     sin env file — snippet no generado\n'
+  fi
+elif [[ "$MCP_MODE" == "check" ]]; then
+  if [[ -f "$ENV_SH" ]]; then
+    printf '  [ok]        env snippet presente (mode %s)\n' "$(stat -c %a "$ENV_SH" 2>/dev/null || printf '?')"
+  else
+    printf '  [pendiente] env snippet ausente — se genera en modo real\n'
+  fi
+else
+  printf '  [pendiente] env snippet se generaria en modo real\n'
+fi
+
 # ---- reporte final ------------------------------------------------------------------
 echo
 echo "=================================================="
@@ -712,12 +772,22 @@ else
   printf '  Paso MCP        : %s\n' "$MCP_MODE"
 fi
 printf '  Env file        : %s\n' "$( [[ -f "$ENV_FILE" ]] && printf '%s (mode %s)' "${ENV_FILE#$HOME/}" "$(stat -c %a "$ENV_FILE" 2>/dev/null || printf '?')" || printf 'ausente' )"
+printf '  Env snippet     : %s\n' "$( [[ -f "$ENV_SH" ]] && printf '%s (mode %s)' "${ENV_SH#$HOME/}" "$(stat -c %a "$ENV_SH" 2>/dev/null || printf '?')" || printf 'ausente' )"
 printf '  Token GitHub    : %s%s\n' "$token_status" "$([[ -n "$token_masked" ]] && printf ' (%s)' "$token_masked" || true)"
 printf '  MCP [up-to-date]: %d\n' "$mcp_report_ok"
 printf '  MCP [actualizado]: %d\n' "$mcp_report_updated"
 printf '  MCP [pendiente] : %d\n' "$mcp_report_pend"
 printf '  MCP [aviso]     : %d (runtimes ausentes / saltados)\n' "$mcp_report_skip"
 printf '  MCP [ERROR]     : %d\n' "$mcp_report_error"
+
+if [[ "$MCP_MODE" == "real" ]] && [[ -f "$ENV_SH" ]]; then
+  printf '\n  ======== Para activar el token en los agentes (opencode, Pi, Claude, Codex) ========\n'
+  printf '  1) Agrega esta linea a tu ~/.bashrc (o ~/.zshrc) y abre una terminal nueva:\n'
+  printf '       source %s\n' "${ENV_SH/#$HOME/\~}"
+  printf '  2) Reinicia opencode: el MCP github (remote api.githubcopilot.com) lee\n'
+  printf '     GITHUB_PERSONAL_ACCESS_TOKEN del entorno del proceso. Sin la var exportada,\n'
+  printf '     el literal {env:...} queda sin resolver y el endpoint responde 400.\n'
+fi
 
 final_exit=$(( sync_exit > mcp_exit ? sync_exit : mcp_exit ))
 exit "$final_exit"
