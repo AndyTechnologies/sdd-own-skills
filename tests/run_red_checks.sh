@@ -6,13 +6,13 @@
 #   ./tests/run_red_checks.sh
 #
 # Mapa de cobertura (design.md, Testing Strategy):
-#   T01 sintaxis            T09 token 401 real          T16 presence/creacion (F2)
-#   T02 wrap contract (F6)  T10 red fallida real        T17 merge TOML (F3)
-#   T03 flags y uso         T11 higiene/argv (F1)       T18 hard deps (F4)
-#   T04 argv delegado       T12 scopes faltantes        T19 gate F9
-#   T05 no-mutacion host    T13 keep                    T20 check 401 drift
-#   T06 no-mutacion check   T14 replace (F5)            T21 check red estructural
-#   T07 no-mutacion dry-run T15 colision invalid        T22 regresion + README (F7)
+#   T01 sintaxis            T08 token 401 real          T15 presence/creacion (F2)
+#   T02 wrap contract (F6)  T09 red fallida real        T16 merge TOML (F3)
+#   T03 flags y uso         T10 higiene/argv (F1)       T17 hard deps (F4)
+#   T04 argv delegado       T11 scopes faltantes        T18 gate F9
+#   T05 no-mutacion host    T12 keep                    T19 check 401 drift
+#   T06 no-mutacion check   T13 replace (F5)            T20 check red estructural
+#   T07 no-mutacion dry-run T14 colision invalid        T21 regresion + README (F7)
 #
 # Exit: 0 = todo verde (skips permitidos), 1 = fallos.
 # =============================================================================
@@ -132,7 +132,7 @@ t "T07 no-mutacion sandbox: --dry-run no escribe nada"
 
 # ---------------- Grupo 3: gate de token y secretos --------------------------
 
-t "T09 token invalido (401): 3 intentos, nada persistido, exit 2"
+t "T08 token invalido (401): 3 intentos, nada persistido, exit 2"
 {
   bad=0
   init_sandbox; start_fake_api 401
@@ -145,7 +145,7 @@ t "T09 token invalido (401): 3 intentos, nada persistido, exit 2"
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T10 red fallida en modo real: nada persistido, exit 2"
+t "T09 red fallida en modo real: nada persistido, exit 2"
 {
   bad=0
   init_sandbox; start_fake_api 200; stop_fake_api
@@ -156,7 +156,7 @@ t "T10 red fallida en modo real: nada persistido, exit 2"
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T11 higiene de secretos y argv (F1)"
+t "T10 higiene de secretos y argv (F1)"
 {
   bad=0
   tok="ghp_REDTEST123"
@@ -181,7 +181,7 @@ t "T11 higiene de secretos y argv (F1)"
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T12 scopes faltantes: aviso + opcion de cambio, run continua"
+t "T11 scopes faltantes: aviso + opcion de cambio, run continua"
 {
   bad=0
   init_sandbox; start_fake_api 200 "read:org"
@@ -194,7 +194,7 @@ t "T12 scopes faltantes: aviso + opcion de cambio, run continua"
 
 # ---------------- Grupo 4: persistencia y rotacion ---------------------------
 
-t "T13 keep: token existente valido conservado (k)"
+t "T12 keep: token existente valido conservado (k)"
 {
   bad=0
   init_sandbox; start_fake_api 200
@@ -209,7 +209,7 @@ t "T13 keep: token existente valido conservado (k)"
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T14 replace (F5): R respalda .bak 0600 y rota; a lo sumo un .bak"
+t "T13 replace (F5): R respalda .bak 0600 y rota; a lo sumo un .bak"
 {
   bad=0
   init_sandbox; start_fake_api 200
@@ -227,7 +227,7 @@ t "T14 replace (F5): R respalda .bak 0600 y rota; a lo sumo un .bak"
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T15 colision: env file invalido existente se reemplaza con .bak del invalido"
+t "T14 colision: env file invalido existente se reemplaza con .bak del invalido"
 {
   bad=0
   init_sandbox; start_fake_api 200 "" 1   # primer request 401, resto 200
@@ -242,7 +242,7 @@ t "T15 colision: env file invalido existente se reemplaza con .bak del invalido"
 
 # ---------------- Grupo 5: merges por runtime --------------------------------
 
-t "T16 presence/creacion (F2): pi crea target sin .bak; re-run up-to-date; resto preservado"
+t "T15 presence/creacion (F2): pi crea target sin .bak; re-run up-to-date; resto preservado"
 {
   bad=0
   init_sandbox; start_fake_api 200
@@ -269,7 +269,7 @@ t "T16 presence/creacion (F2): pi crea target sin .bak; re-run up-to-date; resto
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T17 merge TOML (F3): [mcp_servers.github] correcto, resto preservado; tomli-w ausente → ERROR exit 2"
+t "T16 merge TOML (F3): [mcp_servers.github] correcto, resto preservado; tomli-w ausente → ERROR exit 2"
 {
   bad=0
   init_sandbox; start_fake_api 200
@@ -316,7 +316,7 @@ exec /usr/bin/python3 "$@"'
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T18 hard deps (F4): curl ausente y docker ausente con TRANSPORT=docker → exit 2 pre-delegacion"
+t "T17 hard deps (F4): curl ausente y docker ausente con TRANSPORT=docker → exit 2 pre-delegacion"
 {
   bad=0
   init_sandbox
@@ -338,7 +338,7 @@ t "T18 hard deps (F4): curl ausente y docker ausente con TRANSPORT=docker → ex
 
 # ---------------- Grupo 6: gates de salida -----------------------------------
 
-t "T19 gate F9: sync exit 2 omite el paso MCP y propaga exit 2"
+t "T18 gate F9: sync exit 2 omite el paso MCP y propaga exit 2"
 {
   bad=0
   init_sandbox; start_fake_api 200
@@ -350,7 +350,7 @@ t "T19 gate F9: sync exit 2 omite el paso MCP y propaga exit 2"
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T20 --check + token invalido → exit 1 (drift)"
+t "T19 --check + token invalido → exit 1 (drift)"
 {
   bad=0
   init_sandbox; start_fake_api 401
@@ -361,7 +361,7 @@ t "T20 --check + token invalido → exit 1 (drift)"
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T21 --check + API inalcanzable → exit 2 (estructural)"
+t "T20 --check + API inalcanzable → exit 2 (estructural)"
 {
   bad=0
   init_sandbox
@@ -373,7 +373,7 @@ t "T21 --check + API inalcanzable → exit 2 (estructural)"
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T22 regresion sync + excepcion sancionada en README (F7)"
+t "T21 regresion sync + excepcion sancionada en README (F7)"
 {
   bad=0
   init_sandbox
