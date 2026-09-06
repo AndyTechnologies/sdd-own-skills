@@ -320,9 +320,12 @@ prompt_new_token() {
   prompt_scope_change "$SDD_OWN_VALIDATION_SCOPES"
 }
 
-# prompt_scope_change <x-oauth-scopes> — avisa scopes faltantes; ofrece cambio (una vez por run)
+# prompt_scope_change <x-oauth-scopes> [offer_change] — avisa scopes faltantes;
+# por defecto ofrece cambiar el token (una vez por run). Con offer_change=0 SOLO
+# avisa (no re-pregunta el reemplazo): se usa cuando el usuario ya decidio
+# conservar su token, para respetar esa decision sin insistir.
 prompt_scope_change() {
-  local sc="$1"
+  local sc="$1" offer_change="${2:-1}"
   local missing="" need ans=""
   [[ $scope_change_asked -eq 1 ]] && return
   scope_change_asked=1
@@ -338,13 +341,18 @@ prompt_scope_change() {
   done
   [[ -z "$missing" ]] && return
   printf '  [aviso] faltan scopes clasicos:%s (esperado: repo, read:org, workflow)\n' "$missing"
-  if [[ "$MCP_MODE" == "real" ]] && [[ -t 0 ]]; then
-    printf 'Cambiar el token antes de continuar? [y/N] ' >&2
-    read -r ans || true
-    printf '\n' >&2
-    case "$ans" in
-      y|Y) prompt_new_token "cambio por scopes" ;;
-    esac
+  if [[ "$offer_change" -eq 1 ]] && [[ "$MCP_MODE" == "real" ]] && [[ -t 0 ]]; then
+    ans=""
+    while true; do
+      printf 'Cambiar el token antes de continuar? [s/N] ' >&2
+      read -r ans || true
+      printf '\n' >&2
+      case "$ans" in
+        s|S) prompt_new_token "cambio por scopes"; break ;;
+        ""|n|N) break ;;
+        *) printf '  [aviso] respuesta no valida (s = cambiar, N = conservar); reintento\n' >&2 ;;
+      esac
+    done
   fi
 }
 
@@ -656,28 +664,39 @@ if [[ "$MCP_MODE" == "real" ]]; then
         SDD_OWN_VALIDATION_SCOPES="${st#200|}"
         token_status="existente (valido)"
         token_masked="$(masked "$existing")"
+        decision_keep=1
         if [[ -t 0 ]]; then
+          # Una sola decision de token: k conserva, R reemplaza. Validacion
+          # estricta: ante respuesta no valida re-preguntamos (no caemos en un
+          # default silencioso que el usuario no entiende).
+          printf '  [info]      token existente valido (%s)\n' "$token_masked"
           ans=""
-          printf 'Mantener el token existente? [k/R] ' >&2
-          read -r ans || true
-          printf '\n' >&2
+          while true; do
+            printf 'Conservar el token existente? [k/R] (k = conservar, R = reemplazar) ' >&2
+            read -r ans || true
+            printf '\n' >&2
+            case "$ans" in
+              k|K) decision_keep=1; break ;;
+              r|R) decision_keep=0; break ;;
+              *) printf '  [aviso] respuesta no valida (k = conservar, R = reemplazar)\n' >&2 ;;
+            esac
+          done
         else
           ans=""
+          decision_keep=1
           printf '  [aviso]     sin TTY: se conserva el token existente (no se reescribe)\n'
         fi
-        case "$ans" in
-          r|R)
-            if [[ ! -t 0 ]]; then
-              printf '[ERROR] reemplazo de token sin TTY: ejecuta interactivamente\n' >&2
-              exit 1
-            fi
-            prompt_new_token "reemplazo del token existente"
-            ;;
-          *)
-            printf '  [ok]        token existente conservado (sin reescritura)\n'
-            prompt_scope_change "$SDD_OWN_VALIDATION_SCOPES"
-            ;;
-        esac
+        if [[ $decision_keep -eq 0 ]]; then
+          if [[ ! -t 0 ]]; then
+            printf '[ERROR] reemplazo de token sin TTY: ejecuta interactivamente\n' >&2
+            exit 1
+          fi
+          prompt_new_token "reemplazo del token existente"
+        else
+          printf '  [ok]        token existente conservado (sin reescritura)\n'
+          # Ya se decidio conservar: solo avisar scopes, sin re-preguntar el reemplazo.
+          prompt_scope_change "$SDD_OWN_VALIDATION_SCOPES" 0
+        fi
         ;;
       invalid*)
         printf '  [aviso]     token existente rechazado (HTTP %s)\n' "${st#invalid }"

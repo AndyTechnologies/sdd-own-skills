@@ -164,7 +164,7 @@ t "T10 higiene de secretos y argv (F1)"
   exp_mask="${tok:0:4}....${tok: -4}"
   init_sandbox; start_fake_api 200
   add_env SDD_OWN_DEBUG_CURL_CONFIG="$SB_TMP/curl-config.txt"
-  run_setup_pty 45 "Token de GitHub (PAT): =${tok}\\n;Cambiar el token antes de continuar? [y/N] =n\\n"
+  run_setup_pty 45 "Token de GitHub (PAT): =${tok}\\n;Cambiar el token antes de continuar? [s/N] =n\\n"
   [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
   envf="$SB_HOME/.config/sdd-own/github-mcp.env"
   [[ "$(stat -c %a "$envf")" == "600" ]] || { ko "mode $(stat -c %a "$envf") != 600"; bad=1; }
@@ -186,7 +186,7 @@ t "T11 scopes faltantes: aviso + opcion de cambio, run continua"
 {
   bad=0
   init_sandbox; start_fake_api 200 "read:org"
-  run_setup_pty 45 'Token de GitHub (PAT): =ghp_SCOPES\n;Cambiar el token antes de continuar? [y/N] =n\n'
+  run_setup_pty 45 'Token de GitHub (PAT): =ghp_SCOPES\n;Cambiar el token antes de continuar? [s/N] =n\n'
   [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
   grep -q "faltan scopes clasicos" "$SB_TMP/out.txt" || { ko "sin aviso de scopes faltantes"; bad=1; }
   [[ -f "$SB_HOME/.config/sdd-own/github-mcp.env" ]] || { ko "token no persistido"; bad=1; }
@@ -201,7 +201,7 @@ t "T12 keep: token existente valido conservado (k)"
   init_sandbox; start_fake_api 200
   seed_env_file "ghp_T1KEEP123"
   m0="$(env_file_mtime)"
-  run_setup_pty 45 'Mantener el token existente? [k/R] =k\n;Cambiar el token antes de continuar? [y/N] =n\n'
+  run_setup_pty 45 'Conservar el token existente? [k/R] =k\n'
   [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
   grep -q "conservado (sin reescritura)" "$SB_TMP/out.txt" || { ko "sin reporte keep"; bad=1; }
   env_file_lines | grep -q "ghp_T1KEEP123" || { ko "env file no conserva el token"; bad=1; }
@@ -215,7 +215,7 @@ t "T13 replace (F5): R respalda .bak 0600 y rota; a lo sumo un .bak"
   bad=0
   init_sandbox; start_fake_api 200
   seed_env_file "ghp_T1REPLACE"
-  run_setup_pty 45 'Mantener el token existente? [k/R] =R\n;Token de GitHub (PAT): =ghp_T2REPLACE\n;Cambiar el token antes de continuar? [y/N] =n\n'
+  run_setup_pty 45 'Conservar el token existente? [k/R] =R\n;Token de GitHub (PAT): =ghp_T2REPLACE\n;Cambiar el token antes de continuar? [s/N] =n\n'
   [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
   bak="$SB_HOME/.config/sdd-own/github-mcp.env.bak"
   [[ -f "$bak" ]] || { ko "sin .bak tras replace"; bad=1; }
@@ -233,7 +233,7 @@ t "T14 colision: env file invalido existente se reemplaza con .bak del invalido"
   bad=0
   init_sandbox; start_fake_api 200 "" 1   # primer request 401, resto 200
   seed_env_file "ghp_STALEINV"
-  run_setup_pty 45 'Token de GitHub (PAT): =ghp_NEWVALID\n;Cambiar el token antes de continuar? [y/N] =n\n'
+  run_setup_pty 45 'Token de GitHub (PAT): =ghp_NEWVALID\n;Cambiar el token antes de continuar? [s/N] =n\n'
   [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
   grep -q "reemplazo del token invalido" "$SB_TMP/out.txt" || { ko "sin flujo de reemplazo del invalido"; bad=1; }
   grep -q "ghp_STALEINV" "$SB_HOME/.config/sdd-own/github-mcp.env.bak" || { ko ".bak no conserva el invalido previo"; bad=1; }
@@ -406,7 +406,7 @@ t "T22 env snippets: env.sh (POSIX) + env.fish (fish) 0600, export/set -gx, inst
     *)    rc_expected=".bashrc" ;;
   esac
   init_sandbox; start_fake_api 200
-  run_setup_pty 45 'Token de GitHub (PAT): =ghp_T22SNIP\n;Cambiar el token antes de continuar? [y/N] =n\n'
+  run_setup_pty 45 'Token de GitHub (PAT): =ghp_T22SNIP\n;Cambiar el token antes de continuar? [s/N] =n\n'
   [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
   s="$SB_HOME/.config/sdd-own/env.sh"
   f="$SB_HOME/.config/sdd-own/env.fish"

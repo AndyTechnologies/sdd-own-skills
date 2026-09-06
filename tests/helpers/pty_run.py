@@ -17,7 +17,7 @@ Exit code: el del comando; 201 = timeout; 202 = se terminaron los answers sin
 haber consumido todos los prompts y el comando aun corria.
 
 Nota de nuevas lineas: si el answer necesita Enter, escribirlo como "\\n"
-dentro del valor (p. ej. "Mantener el token existente? [k/R]=R\\n"). Se envia
+dentro del valor (p. ej. "Conservar el token existente? [k/R]=R\\n"). Se envia
 el answer tal cual, sin Enter implicito, porque los prompts de setup.sh usan
 read -rs (solo consume el token) y read -r (lee la linea completa).
 """
