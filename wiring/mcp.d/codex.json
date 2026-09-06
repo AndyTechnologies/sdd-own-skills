@@ -5,7 +5,7 @@
   "merge": "toml-section",
   "root_key": "mcp_servers",
   "server_key": "github",
-  "presence": "command -v codex",
+  "presence": "command -v codex >/dev/null 2>&1",
   "block": {
     "url": "https://api.githubcopilot.com/mcp/",
     "bearer_token_env_var": "GITHUB_PERSONAL_ACCESS_TOKEN"

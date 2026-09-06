@@ -5,7 +5,7 @@
   "merge": "json-key",
   "root_key": "mcpServers",
   "server_key": "github",
-  "presence": "command -v pi",
+  "presence": "command -v pi >/dev/null 2>&1",
   "block": {
     "github": {
       "auth": "bearer",
