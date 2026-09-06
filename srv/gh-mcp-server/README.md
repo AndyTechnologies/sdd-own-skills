@@ -24,5 +24,5 @@ Local FastMCP server exposing typed `gh_*`/`git_*` tools over the `gh` and `git`
 ## Startup
 
 ```bash
-uv run --directory <repo>/srv/gh-mcp-server python src/server.py
+uv run --directory <repo>/srv/gh-mcp-server python -m src.server
 ```

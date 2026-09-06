@@ -1,6 +1,6 @@
 ---
 name: github-automation
-description: "Trigger: GitHub automation and operations - repositories, issues, branches, commits, pull request review/merge/status, Actions workflows, and code search. Dual surface: own local gh_*/git_* MCP (default, any account) or official GitHub MCP (GHEC only). Does NOT cover PR or issue creation (github-pr, branch-pr, chained-pr, and issue-creation own those), and never embeds tokens."
+description: "Trigger: GitHub automation and operations - repositories, issues, branches, commits, pull request review/merge/status, Actions workflows, and code search. Dual surface: official GitHub MCP (preferred, any account with a PAT) or own local gh_*/git_* MCP (fallback). Does NOT cover PR or issue creation (github-pr, branch-pr, chained-pr, and issue-creation own those), and never embeds tokens."
 license: MIT
 metadata:
   author: AndyTechnologies (sdd-own-skills)
@@ -15,10 +15,10 @@ This skill supports **two GitHub tool surfaces**. Selection is per session, deci
 
 | Surface | Tools | When to use |
 |---------|-------|-------------|
-| **Own local `gh_*` / `git_*`** | `gh-git-mcp` (local FastMCP over the `gh` + `git` CLIs) — `gh_get_me`, `gh_get_repo`, `gh_list_pull_requests`, `gh_merge_pull_request`, `gh_delete_branch`, `gh_search_code`, `gh_rerun_workflow`, `git_status`, `git_diff`, `git_commit`, … | **Default.** Works on any account plan; no remote server dependency. |
-| **Official `github_*`** | `github/github-mcp-server` (remote, via `./setup.sh`) | Only when the account is on **GitHub Enterprise Cloud (GHEC)** — the remote endpoint `api.githubcopilot.com/mcp/` rejects non-GHEC accounts with `403 forbidden: access denied` (this happens regardless of token validity). |
+| **Official `github_*`** | `github/github-mcp-server` (remote `https://api.githubcopilot.com/mcp/` with `enabled: true`, provisioned by `./setup.sh`) | **Default and preferred.** Works on any account plan with a valid PAT — the remote endpoint serves any GitHub account via the PAT; a `403` means invalid/expired PAT or missing `enabled: true`, not missing GHEC. |
+| **Own local `gh_*` / `git_*`** | `gh-git-mcp` (local FastMCP over the `gh` + `git` CLIs) — `gh_get_me`, `gh_get_repo`, `gh_list_pull_requests`, `gh_merge_pull_request`, `gh_delete_branch`, `gh_search_code`, `gh_rerun_workflow`, `git_status`, `git_diff`, `git_commit`, … | **Fallback.** Token-free (auth delegated to `gh`), zero remote dependency; use when the official server is not configured, cannot connect, or a call fails. |
 
-How to decide: run the identity call — own surface `gh_get_me` / official `github_get_me`. If the official surface returns a `403` / `access denied` error, its account is not GHEC: **switch to the own local surface for the whole session** and do not retry the official one. Sessions start on the own local surface; only a user with a confirmed GHEC account should prefer the official one. Stay on the selected surface, but if a call fails mid-task with a `403`/`access denied` runtime error, re-evaluate: switch that remaining task to the working surface and continue it there. Do not mix surfaces per call without cause — the switch is the fallback, not the default.
+How to decide: run the identity call — official `github_get_me` first. If the official surface is configured and returns a healthy identity, stay on it for the session. If the official server is missing, fails to connect, or returns `401`/`403`/network errors (token problem or server down), **switch to the own local surface** (`gh_get_me`) for the session and do not retry the official one blindly — check the token via `./setup.sh`. If a call fails mid-task, re-evaluate: switch that remaining task to the working surface and continue it there. Do not mix surfaces per call without cause — the switch is the fallback, not the default.
 
 Coverage is not 1:1. The own local surface implements the workflows below with the `gh_*`/`git_*` equivalents, but some official `github_*` tools have **no local equivalent** and degrade to **report-only** (see Workflow equivalents).
 
@@ -30,7 +30,7 @@ The `gh-git-mcp` server is a local FastMCP over the `gh` and `git` CLIs, wired t
 
 - `gh` CLI ≥ 2.x installed and authenticated (`gh auth login`) — the server **delegates all auth to `gh`**; it never sees or embeds a token.
 - `git` available on PATH.
-- `uv` available (the server runs via `uv run --directory srv/gh-mcp-server python src/server.py`).
+- `uv` available (the server runs via `uv run --directory srv/gh-mcp-server python -m src.server`).
 
 The server exposes typed envelopes `{ok, data, summary, error}`. **Destructive operations are two-phase**: call the tool once to get the computed effect (dry-run), then confirm by echoing that **exact** `data` object back — all fields, verbatim, including the `dry_run` marker. The server re-derives the effect, fingerprints it (SHA-256), and executes only on a match. Never call a destructive tool with `confirmed=true` without a preceding dry-run echo-back.
 
@@ -129,7 +129,7 @@ Order: `github_list_issues` (queue) → `github_get_issue` (detail: labels, assi
 ## Pitfalls
 
 - **Hardcoded tool names go stale.** GitHub MCP renames/extends `github_*` tools; verify the live surface before every automation batch. On the own local surface the surface is fixed (`gh_*`/`git_*`) but still verify availability of a tool before assuming it exists.
-- **403 from the official server is an account-plan issue, not a token issue.** The remote endpoint `api.githubcopilot.com/mcp/` only serves GitHub Enterprise Cloud accounts; a `403 forbidden: access denied` with a valid token means the account is not GHEC. Switch to the own local surface; do not rotate tokens or reinstall the server.
+- **403/401 from the official server is a token/config issue, not an account-plan issue.** The official remote endpoint `api.githubcopilot.com/mcp/` serves any GitHub account via a valid PAT; a `403 forbidden: access denied` means an invalid or expired token, or the server entry missing `"enabled": true` in the runtime config. Fix the token via `./setup.sh` (it asks, validates, and stores the PAT; never ask for the secret in chat) — do not switch surfaces on a clean auth failure. If the server is down/unreachable, fall back to the own local surface.
 - **Rate limits.** Search and Actions calls burn budget fast. Read-heavy batches (reviewing many PRs) should run in the smallest number of calls that answer the question.
 - **Token in the wrong place.** The token belongs ONLY in the runtime env (`$GITHUB_PERSONAL_ACCESS_TOKEN`, env file, or the runtime's own mechanism). Never inline it in tool input, logs, chat output, commits, or config files. The own local surface never sees a token at all.
 - **Reviewing without checks.** Status/checks first, always. Approving a PR with a red check ships broken intent.
