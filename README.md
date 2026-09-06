@@ -28,6 +28,9 @@ Cada carpeta es nuestra y se **full-instala** (copia física a `~/.agents/skills
 | `zod-4` | Patrones de Zod 4 (breaking changes vs v3). **Procedencia: Gentleman-Skills (MIT), vendida tal cual.** |
 | `playwright` | Patrones de E2E con Playwright (Page Objects, selectors, MCP). **Procedencia: Gentleman-Skills (MIT), vendida tal cual.** |
 | `github-pr` | Pull requests de alta calidad con conventional commits y `gh`. **Procedencia: Gentleman-Skills (MIT), vendida tal cual.** |
+| `using-git-worktrees` | Aislamiento de workspace vía worktrees: tools nativas primero, fallback `git worktree`, verificación de seguridad. **Procedencia: vendida de [obra/superpowers](https://github.com/obra/superpowers) (MIT, Jesse Vincent); adaptación mínima (frontmatter de suite + nota de provenance).** |
+| `test-fixing` | Arreglar tests fallidos agrupando por causa raíz (red → diagnóstico → patch → re-run) hasta suite verde; stack-neutral. **Procedencia: adaptada de [mhattingpete/claude-skills-marketplace](https://github.com/mhattingpete/claude-skills-marketplace) `engineering-workflow-plugin/skills/test-fixing` (Apache-2.0).** |
+| `github-automation` | Automatización/operaciones de GitHub vía el MCP oficial (superficie `github_*`): repos, issues, branches, commits, PR review/merge/status (no creación), Actions y code search; cero tokens en la skill. **Authoría propia: sdd-own-skills (fresh reauthoring, repo MIT).** |
 
 Las skills vendidas vienen de [Gentleman-Programming/Gentleman-Skills](https://github.com/Gentleman-Programming/Gentleman-Skills) (`curated/`), repo **MIT**; cada `SKILL.md` conserva su frontmatter tal cual (4 con `license: Apache-2.0` declarada, `github-pr` sin campo de licencia — se respeta la licencia del archivo individual). No se renombró contenido ni se alteró el frontmatter.
 
@@ -122,6 +125,47 @@ Requiere `gentle-ai` (v2.6.0) instalado y en el PATH; si no está, el sync avisa
 
 ---
 
+## Setup completo (`setup.sh`)
+
+Wrapper de un solo comando que **delega en `sync-skills.sh`** y, si el sync terminó bien, configura el **MCP de GitHub** en los runtimes detectados. Uso típico en una máquina nueva:
+
+```bash
+./setup.sh                            # sync real completo + configurar MCP de GitHub (interactivo)
+./setup.sh --skip-gentleai-sync       # omite gentle-ai sync (ya corrió hace poco)
+./setup.sh --check                    # verifica sync + estado MCP sin escribir nada
+./setup.sh --dry-run                  # ensayo: muestra qué haría, sin escribir nada
+./setup.sh --registries <p1> <p2>     # delega --registries al sync (refresh .atl/)
+./setup.sh --skip-mcp                 # solo el sync, sin el paso MCP
+./setup.sh --force-mcp-token          # en modo real, pedir token aunque exista uno válido
+```
+
+**Cómo funciona** (paso 5 del script):
+
+1. **Delegación** (paso 0): corre `sync-skills.sh` con el subconjunto de flags que entiende (`--check`, `--dry-run`, `--skip-gentleai-sync`, `--skip-opencode`, `--registries <proyecto...>`). Los flags propios (`--skip-mcp`, `--force-mcp-token`) nunca se reenvían. Si el sync falla con exit ≥ 2, el paso MCP se omite (gate F9) y `setup.sh` sale con ese mismo código. `--check` y `--dry-run` son mutuamente excluyentes (exit 1 si van juntos).
+2. **Detección de runtimes** (5a): las definiciones declarativas viven en `wiring/mcp.d/<runtime>.json`; cada una declara su archivo target, la clave raíz y el bloque a mergear. Runtimes no instalados se reportan como `[aviso]` y se omiten:
+   - `opencode` → configuración detectada (`$OPENCODE_CONFIG`, si no `~/.config/opencode/opencode.jsonc`, si no `.json`), clave `mcp`.
+   - `pi` → `~/.pi/agent/mcp.json`, clave `mcpServers` (usa `auth: "bearer"` + `bearerTokenEnv`, requisito del adapter).
+   - `claude` → `~/.claude.json`, clave `mcpServers`.
+   - `codex` → `~/.codex/config.toml`, sección `[mcp_servers.github]`.
+3. **Gate de token** (5b, solo modo real): si no hay token, pide un **PAT de GitHub** por prompt oculto (`read -rs`) y lo valida contra `https://api.github.com/user` (seam `SDD_OWN_GH_API`). El token se guarda en **`~/.config/sdd-own/github-mcp.env`** (directorio 0700, archivo 0600, solo el fingerprint enmascarado en el reporte). Con token válido existente, pregunta si mantener o rotar (auto-keep sin TTY; `--force-mcp-token` fuerza la pregunta).
+4. **Merges** (5d): aplica el bloque declarado en cada target presente (json-key merge sobre la clave raíz; sección TOML para codex, preservando el resto del archivo). En `--check` los merges pendientes/divergentes se reportan (`[pendiente]` / `[aviso]`) sin tocar nada; en modo real se aplican y se reportan `[actualizado]` / `[up-to-date]`.
+
+**Excepción sancionada** (F7): `setup.sh` es el ÚNICO escritor permitido de la clave `mcp` en la config real de opencode fuera del pipeline de sync. El fragmento `wiring/opencode.sdd.json` nunca contiene `mcp`; los agentes SDD se siguen gestionando por sync (paso 3) y el MCP de GitHub por `setup.sh`, sin pisarse.
+
+**Exportar el token a los runtimes** (claude/codex leen `GITHUB_PERSONAL_ACCESS_TOKEN` de la env):
+
+```bash
+set -a; source ~/.config/sdd-own/github-mcp.env; set +a
+```
+
+**Variante Docker** (sin token en disco): `MCP_GITHUB_TRANSPORT=docker ./setup.sh` usa el contenedor oficial (`ghcr.io/github/github-mcp-server`) con `--env-file`, y los bloques por runtime apuntan al binario docker en vez del endpoint remoto. Requiere `docker` en el PATH.
+
+**Semántica de salida**: `0` = todo bien; `1` = estructura/conflicto (flags excluyentes, modo real sin TTY con token necesario, o token inválido/rechazado en check); `2` = fallo estructural (sync falló, o red/API inalcanzable). En `--check`, un MCP no configurado con token ausente es **estado limpio válido** (exit 0); solo los rechazos del API (401/403) marcan token drift (exit 1).
+
+**Seams de test** (no tocar en producción): `MCP_DEBUG_SYNC_ARGS=<file>` (escribe `exit=<n>` + argv de la delegación; `MCP_DEBUG_SYNC_ARGS_EXIT` simula el exit del sync), `SDD_OWN_GH_API` (base URL de la API), `SDD_OWN_DEBUG_CURL_CONFIG=<path>` (debug del config de curl), `MCP_GITHUB_TRANSPORT`.
+
+---
+
 ## Nuestra personalización del pipeline SDD
 
 El pipeline canónico de Alan (instalado por `gentle-ai sync`) se extendió con bloques `sdd-own` anexados por overlays. Los cambios principales:
@@ -162,6 +206,7 @@ sdd-own-skills/
 ├── README.md
 ├── AGENTS.md                       # guía para agentes de código que trabajan en este repo
 ├── sync-skills.sh                  # gentle-ai sync + install exclusivas + overlays + merge SDD + registries
+├── setup.sh                        # wrapper de sync + paso MCP de GitHub (wiring/mcp.d)
 ├── skills/
 │   ├── <skill>/SKILL.md            # SOLO nuestras exclusivas (full install)
 │   └── _shared/                    # codegraph.md + 8 bootstrap idénticos a los de Alan (solo si falta)
@@ -171,6 +216,7 @@ sdd-own-skills/
 │   └── commands/<f>.md             # bloques sdd-own sobre commands de Alan
 ├── wiring/
 │   ├── opencode.sdd.json           # fragmento merge-safe: agentes SDD para opencode
+│   ├── mcp.d/                      # definiciones declarativas MCP por runtime (opencode/pi/claude/codex)
 │   └── prompts/sdd/                # orchestrator.md + sdd-rfc-author.md (nuestros)
 ├── engram-snapshot/                # artifacts de Engram (diseño/implementación del quest gate)
 ├── docs/                           # issue-3332-rfc-gate.md
@@ -181,8 +227,14 @@ sdd-own-skills/
 
 ## Licencia
 
-**Este repositorio** está bajo **MIT** (ver [`LICENSE`](LICENSE)) — cubre la colección, la sincronización (`sync-skills.sh`), el wiring, las skills propias (`sdd-quest`, `sdd-changelog`, `sdd-architecture-lint`, `skill-sdd-blueprint`, `ui-design`, `web-search`) y los overlays.
+**Este repositorio** está bajo **MIT** (ver [`LICENSE`](LICENSE)) — cubre la colección, la sincronización (`sync-skills.sh`), el setup (`setup.sh` + `wiring/mcp.d`), el wiring, las skills propias (`sdd-quest`, `sdd-changelog`, `sdd-architecture-lint`, `skill-sdd-blueprint`, `ui-design`, `web-search`, `github-automation` — fresh reauthoring) y los overlays.
 
 **Proveniencia de las skills vendidas**: `typescript`, `tailwind-4`, `zod-4`, `playwright` y `github-pr` provienen de [Gentleman-Programming/Gentleman-Skills](https://github.com/Gentleman-Programming/Gentleman-Skills) (`curated/`, repo **MIT**), descargadas tal cual con su frontmatter original (las 4 primeras declaran `license: Apache-2.0`; `github-pr` no declara). Cada skill conserva la licencia de su archivo individual según su autor upstream.
+
+**Proveniencia de las skills adaptadas**: 
+
+- `using-git-worktrees` viene de [obra/superpowers](https://github.com/obra/superpowers) (`tools/git/worktrees/SKILL.md`, **MIT**, Copyright 2025 Jesse Vincent); se adaptó solo el frontmatter (suite `sdd-own-skills` + metadata original + nota de provenance) sin tocar el contenido.
+- `test-fixing` viene de [mhattingpete/claude-skills-marketplace](https://github.com/mhattingpete/claude-skills-marketplace) `engineering-workflow-plugin/skills/test-fixing` (**Apache-2.0**); se adaptó para ser stack-neutral conservando la estructura de diagnóstico.
+- `github-automation` es de autoría propia (fresh reauthoring) y no deriva de ninguna fuente externa.
 
 **Skills de Alan no versionadas aquí**: las demás skills del ecosistema (`sdd-apply`, `sdd-verify`, `branch-pr`, `go-testing`, etc.) las instala `gentle-ai sync` desde sus fuentes canónicas; este repo solo las personaliza vía overlays. Se respeta la licencia declarada en cada una según su autor upstream.

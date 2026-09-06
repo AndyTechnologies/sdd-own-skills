@@ -39,3 +39,13 @@ Flags del script: `--check`, `--dry-run`, `--skip-opencode`, `--skip-gentleai-sy
 - El merge es aditivo: lo personal del usuario se preserva siempre; las claves SDD del fragmento ganan sobre las existentes. No borra nada.
 - El prompt del orquestador se referencia por archivo (`{file:./prompts/sdd/orchestrator.md}`), nunca inline — el contrato versionado lo despliega el wiring sync.
 - El config real puede llamarse `opencode.json` o `opencode.jsonc`; el sync detecta cuál existe (opencode resuelve `.jsonc` primero) y mergea sobre ese archivo.
+
+## setup.sh — excepción sancionada (MCP de GitHub)
+
+`setup.sh` es el wrapper de setup completo: delega en `sync-skills.sh` y, si el sync terminó bien (exit ≤ 1), configura el **MCP de GitHub** en los runtimes detectados. Reglas para agentes que trabajen en este repo:
+
+- **`setup.sh` es el ÚNICO escritor permitido de la clave `mcp` (y `mcpServers`) en configs de runtimes** (`~/.config/opencode/opencode.jsonc|json`, `~/.pi/agent/mcp.json`, `~/.claude.json`, `~/.codex/config.toml`) fuera del pipeline de sync. NUNCA edites esas claves a mano ni agregues `mcp` al fragmento `wiring/opencode.sdd.json` (sigue conteniendo SOLO agentes SDD).
+- Las definiciones declarativas viven en **`wiring/mcp.d/<runtime>.json`** — contrato `{runtime, target_mode, target, merge, root_key, server_key, presence, block, alt_docker}`. Para cambiar el endpoint, el bloque o el target de un runtime, edita el envelope y corre `./setup.sh --check`/real (5d); la mecánica de merge (json-key / sección TOML) vive en `setup.sh` (5d), NO en los envelopes.
+- **Token**: el PAT de GitHub se persiste en `~/.config/sdd-own/github-mcp.env` (0600, directorio 0700). Nunca se commitea, nunca aparece en argv/logs/reportes (solo fingerprint enmascarado). Para rotar: `./setup.sh` (con TTY) o `--force-mcp-token`.
+- Los seams de test (`MCP_DEBUG_SYNC_ARGS*`, `SDD_OWN_GH_API`, `SDD_OWN_DEBUG_CURL_CONFIG`, `MCP_GITHUB_TRANSPORT`) son hooks de verificación; no los uses en producción salvo diagnóstico explícito.
+- No corras `./setup.sh` sin flags en máquinas productivas: usa `--check` (verifica) o `--dry-run` (ensayo); el modo real pide token interactivamente y mergea configs.
