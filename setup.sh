@@ -251,9 +251,9 @@ prompt_scope_change() {
     printf '  [aviso] token fine-grained: scopes no verificables (continua)\n'
     return
   fi
-  # El header llega como "repo, read:org, workflow" (comas + espacios); borrar
-  # separadores para que el match ",$need," funcione sobre nombres limpios.
-  sc="${sc//[ ,]/}"
+  # El header llega como "repo, read:org, workflow"; borrar SOLO los espacios
+  # (conservar comas) para que el match ",$need," funcione por límite limpio.
+  sc="${sc// /}"
   for need in repo read:org workflow; do
     [[ ",$sc," == *",$need,"* ]] || missing="$missing $need"
   done
