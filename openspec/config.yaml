@@ -1,0 +1,38 @@
+schema: spec-driven
+
+context: |
+  Project: sdd-own-skills
+  Stack: Bash (sync-skills.sh), JSON/JSONC (wiring), Markdown (skills/overlays/prompts)
+  Architecture: Configuration/infrastructure repo (overlay model with managed blocks)
+  Conventions: sdd-own block markers, never edit Alan's originals, sync-skills.sh pipeline
+  Testing: No test runner or suite — config repo, not application code
+  Style: English artifacts, Spanish conversational (Rioplatense)
+
+strict_tdd: false
+
+rules:
+  proposal:
+    - Include rollback plan for overlay/wiring changes that affect installed state
+    - Verify sync-skills.sh --check after structural changes
+  specs:
+    - Use Given/When/Then for scenarios involving sync behavior
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY) for overlay contracts
+  design:
+    - Document overlay idempotency guarantees
+    - Distinguish our exclusive skills from Alan's base skills
+  tasks:
+    - Group by phase (skill creation, overlay, wiring)
+    - Keep tasks completable in one session
+  apply:
+    guidelines:
+      - Never edit ~/.agents/skills/ or ~/.config/opencode/ directly
+      - Always use sync-skills.sh --check before --apply
+      - Preserve all sdd-own block markers by id
+    tdd: false
+    test_command: ""
+  verify:
+    test_command: ""
+    build_command: "bash -n sync-skills.sh"
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive overlay deltas
