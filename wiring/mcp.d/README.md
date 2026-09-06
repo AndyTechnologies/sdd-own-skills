@@ -18,6 +18,8 @@ Este directorio declara los bloques de configuración MCP de GitHub por runtime.
 
 **Regla de wrapping (F6)**: para `merge: "json-key"`, `block` incluye el wrapper `server_key` (`{"github": {...}}`) y el merge es `target[root_key] * block`; para `merge: "toml-section"`, `block` es el cuerpo pelado y `server_key` nombra la sección (`[<root_key>.<server_key>]`, ej. `[mcp_servers.github]`). Aplica igual a `alt_docker`.
 
+**Multi-entry (aditivo dentro de un mismo envelope)**: un mismo `block` de `merge: "json-key"` puede contener VARIOS servidores (ej. el `github` remoto + el `gh-git-mcp` local en opencode). El merge profundo es aditivo por servidor (`target.mcp.github` y `target.mcp["gh-git-mcp"]` coexisten; nunca se borra un servidor ausente del fragmento). `server_key` sigue nombrando SOLO el servidor primario de presencia (`presence` evalúa `has(server_key)`); los servidores adicionales del `block` se mergean igual pero no participan del gate de presencia. `alt_docker` cubre únicamente el servidor con variante contenedor (`github`); un servidor local aditivo (type `local`, token-free) no tiene `alt_docker`.
+
 ## Bloques primarios por runtime
 
 Todos los bloques son **token-free por construcción**: referencian el nombre de la variable, nunca el valor.

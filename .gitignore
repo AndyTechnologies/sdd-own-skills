@@ -7,3 +7,4 @@
 # Artefactos de Python de los helpers de test
 __pycache__/
 *.pyc
+.venv/
