@@ -55,6 +55,17 @@ mcp_report_pend=0
 mcp_report_skip=0
 mcp_report_error=0
 
+# ---- limpieza de tmpfiles en cualquier salida (S1) --------------------------
+# El config tmp de curl contiene el token literal (curl no expande ${VAR} en -K);
+# un trap EXIT garantiza que ningun early-exit entre mktemp y el rm inline deje
+# residuales. Los tmpfiles se registran al crearse y el rm inline sigue cubriendo
+# la ruta feliz; el trap es la red de seguridad.
+CLEANUP_FILES=()
+# rc se captura ANTES de limpiar y se restaura al final: el trap nunca altera
+# el exit status del script, ni siquiera si rm no existe en el PATH de un
+# entorno minimo (RED T17 corre setup.sh con PATH que solo tiene dirname).
+trap 'rc=$?; [[ ${#CLEANUP_FILES[@]} -eq 0 ]] || rm -f "${CLEANUP_FILES[@]}" 2>/dev/null; exit "$rc"' EXIT
+
 usage() {
   cat <<'EOF'
 Uso: setup.sh [flags]
@@ -144,6 +155,7 @@ validate_token() {
   tmp="$(mktemp "${TMPDIR:-/tmp}/sdd-own-curl.XXXXXX")"
   body="$(mktemp "${TMPDIR:-/tmp}/sdd-own-body.XXXXXX")"
   hdr="$(mktemp "${TMPDIR:-/tmp}/sdd-own-hdr.XXXXXX")"
+  CLEANUP_FILES+=("$tmp" "$body" "$hdr")
   chmod 600 "$tmp"
   # F1: el token vive SOLO en el archivo de config (0600, borrado abajo), nunca
   # en argv ni en el ambiente del proceso curl. Nota de compatibilidad: curl no
@@ -182,7 +194,9 @@ persist_token() {
   local token="$1" why="$2"
   local tmp mode
   install -d -m 700 "$ENV_DIR"
+  chmod 700 "$ENV_DIR"  # S2: ajusta tambien un dir pre-existente mas permisivo
   tmp="$(mktemp "$ENV_DIR/github-mcp.env.XXXXXX")"
+  CLEANUP_FILES+=("$tmp")
   printf '# GitHub MCP token - written by setup.sh (mode 0600). Rotate in the GitHub UI; do not commit.\n' > "$tmp"
   printf 'GITHUB_PERSONAL_ACCESS_TOKEN=%s\n' "$token" >> "$tmp"
   chmod 600 "$tmp"
