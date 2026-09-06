@@ -519,6 +519,21 @@ For each sub-agent launch:
 2. Copy matching `SKILL.md` paths into the sub-agent prompt as `## Skills to load before work`
 3. Instruct the sub-agent to read those exact files BEFORE task-specific work
 
+#### Mandatory Skill Injection (HARD RULE)
+
+The following phase delegations MUST inject the listed skills by exact `SKILL.md` path into the `## Skills to load before work` block — resolve from the registry, never rely on fuzzy trigger matching, and never launch these phases without them:
+
+| Delegation | Mandatory skills | When |
+| --- | --- | --- |
+| `sdd-design` | `design-patterns` | ALWAYS (design selects structure/abstractions) |
+| `sdd-design` | `ui-ux-principles` | Change touches UI/UX — screens, flows, components, or any consumer-facing interface |
+| `sdd-apply` | `design-patterns` | Tasks reference patterns, interfaces, or architecture layers from the design |
+| `sdd-verify` | `ui-ux-principles` | Change touches UI/UX and verification evaluates interface quality |
+
+These are project-scope skills in this workspace's registry (`design-patterns`, `ui-ux-principles`). If a mandatory path fails to resolve from the registry, STOP and surface the missing entry — do not launch the phase without its domain contract. The executor skills carry the same mandate as a backstop (`overlays/skills/sdd-design/SKILL.md`), so the load is guaranteed from both sides.
+
+**Dedupe contract (no double-loading)**: skills are loaded EXACTLY ONCE by skill name, never twice. Injection wins — when the orchestrator's `## Skills to load before work` block lists a skill, that IS the load; the executor's own mandate only loads skills MISSING from the injected block (backstop), and must never re-read a skill the block already provides. Both layers dedupe by skill name, not by path: if the injected path differs from the executor's fallback path (e.g. registry repo path vs. installed copy), the executor loads whichever appears once and does NOT read the other. This keeps the guarantee without duplicating skill content in context.
+
 ### Skill Resolution Feedback
 
 After every delegation that returns a result, check the `skill_resolution` field:

@@ -1,0 +1,7 @@
+<!-- sdd-own:design-domain-skills:start -->
+**Mandatory domain-skill loading — SDD-own personalization. Do NOT rely on the orchestrator's injection to receive these skills; they are part of your design contract. Load each skill EXACTLY ONCE — dedupe by skill name against the injected block.**
+
+1. `design-patterns` MUST be loaded before design work. If the orchestrator's injected `## Skills to load before work` block already lists it, that IS the load — do NOT read it again. Only if it is NOT in the injected block, resolve and read its `SKILL.md` yourself: registry (`.atl/skill-registry.md` in the project root, or the engram `skill-registry` observation); fallback `~/.agents/skills/design-patterns/SKILL.md`. Use it to gate EVERY pattern/abstraction decision (forces first, lightest route, no anti-patterns).
+2. `ui-ux-principles` MUST be loaded when the change touches UI/UX — screens, flows, components, or any consumer-facing interface. Same dedupe rule: already in the injected block → that IS the load; otherwise resolve yourself (registry, fallback `~/.agents/skills/ui-ux-principles/SKILL.md`). Use it to ground HCD, usability, and accessibility decisions (Nielsen heuristics, WCAG 2.2, measurable metrics).
+3. Report BOTH skills in `skill_resolution: paths-injected` only when you actually read their files. If a path fails to resolve, report `fallback-registry` and continue with the phase skill — do not silently proceed without the domain contract.
+<!-- sdd-own:design-domain-skills:end -->
