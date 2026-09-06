@@ -3,3 +3,7 @@
 
 # Estado local de gentle-ai (identidades/agentes instalados por sync)
 .pi/
+
+# Artefactos de Python de los helpers de test
+__pycache__/
+*.pyc
