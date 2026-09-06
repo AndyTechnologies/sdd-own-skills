@@ -1,0 +1,25 @@
+{
+  "runtime": "codex",
+  "target_mode": "path",
+  "target": "~/.codex/config.toml",
+  "merge": "toml-section",
+  "root_key": "mcp_servers",
+  "server_key": "github",
+  "presence": "command -v codex",
+  "block": {
+    "url": "https://api.githubcopilot.com/mcp/",
+    "bearer_token_env_var": "GITHUB_PERSONAL_ACCESS_TOKEN"
+  },
+  "alt_docker": {
+    "type": "sdk",
+    "command": "docker",
+    "args": [
+      "run",
+      "--rm",
+      "-i",
+      "--env-file",
+      "{{ENV_FILE}}",
+      "ghcr.io/github/github-mcp-server"
+    ]
+  }
+}
