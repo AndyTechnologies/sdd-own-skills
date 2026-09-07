@@ -22,7 +22,7 @@
         "uv",
         "run",
         "--directory",
-        "/home/andy/Proyectos/sdd-own-skills/srv/gh-mcp-server",
+        "{{SDD_OWN_DIR}}/srv/gh-mcp-server",
         "python",
         "-m",
         "src.server"

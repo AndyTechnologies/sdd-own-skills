@@ -356,7 +356,7 @@ prompt_scope_change() {
   fi
 }
 
-# ---------- merge 5d ------------------------------------------------------------
+# ---------- merge (paso 5e) ---------------------------------------------------
 
 create_target() {
   local target="$1" root_key="$2" merge_type="$3"
@@ -743,8 +743,58 @@ else
   fi
 fi
 
-# ---- 5d merges por runtime ---------------------------------------------------------
-echo "  5d — merges por runtime"
+# ---- 5d preflight: sync del servidor MCP local a sdd-own -----------------------
+echo "  5d — sync del servidor MCP local (srv/gh-mcp-server)"
+GH_SERVER_SRC="$SCRIPT_DIR/srv/gh-mcp-server"
+GH_SERVER_DEST="$ENV_DIR/srv/gh-mcp-server"
+if [[ ! -d "$GH_SERVER_SRC" ]]; then
+  printf '  [ERROR]     fuente del servidor no encontrada: %s\n' "$GH_SERVER_SRC" >&2
+  mcp_report_error=$((mcp_report_error + 1))
+  mcp_exit=2
+elif [[ ! -d "$GH_SERVER_DEST" ]]; then
+  if [[ "$MCP_MODE" == "check" ]]; then
+    printf '  [FALTA]     %s (servidor no desplegado)\n' "${GH_SERVER_DEST#$HOME/}"
+    mcp_report_pend=$((mcp_report_pend + 1))
+  elif [[ "$MCP_MODE" == "dry-run" ]]; then
+    printf '  [pendiente] copiar servidor MCP a %s\n' "${GH_SERVER_DEST#$HOME/}"
+    mcp_report_pend=$((mcp_report_pend + 1))
+  else
+    mkdir -p "$(dirname "$GH_SERVER_DEST")" || { printf '  [ERROR]     no se pudo crear %s\n' "$(dirname "$GH_SERVER_DEST")" >&2; mcp_report_error=$((mcp_report_error + 1)); mcp_exit=2; }
+    cp -R "$GH_SERVER_SRC" "$GH_SERVER_DEST" || { printf '  [ERROR]     no se pudo copiar el servidor a %s\n' "$GH_SERVER_DEST" >&2; mcp_report_error=$((mcp_report_error + 1)); mcp_exit=2; }
+    printf '  [creado]    %s (servidor MCP desplegado)\n' "${GH_SERVER_DEST#$HOME/}"
+    mcp_report_updated=$((mcp_report_updated + 1))
+  fi
+else
+  gh_server_changed=0
+  while IFS= read -r -d '' gh_src_file; do
+    gh_rel="${gh_src_file#"$GH_SERVER_SRC"/}"
+    gh_dest_file="$GH_SERVER_DEST/$gh_rel"
+    if [[ ! -e "$gh_dest_file" ]] || ! diff -q "$gh_src_file" "$gh_dest_file" >/dev/null 2>&1; then
+      gh_server_changed=1
+      break
+    fi
+  done < <(find "$GH_SERVER_SRC" -type f -print0)
+  if [[ $gh_server_changed -eq 1 ]]; then
+    if [[ "$MCP_MODE" == "check" ]]; then
+      printf '  [DESYNC]    %s difiere de la fuente del repo\n' "${GH_SERVER_DEST#$HOME/}"
+      mcp_report_pend=$((mcp_report_pend + 1))
+    elif [[ "$MCP_MODE" == "dry-run" ]]; then
+      printf '  [pendiente] actualizar %s (difiere de la fuente)\n' "${GH_SERVER_DEST#$HOME/}"
+      mcp_report_pend=$((mcp_report_pend + 1))
+    else
+      cp -R "$GH_SERVER_SRC/." "$GH_SERVER_DEST/" || { printf '  [ERROR]     no se pudo actualizar %s\n' "$GH_SERVER_DEST" >&2; mcp_report_error=$((mcp_report_error + 1)); mcp_exit=2; }
+      printf '  [actualizado] %s\n' "${GH_SERVER_DEST#$HOME/}"
+      mcp_report_updated=$((mcp_report_updated + 1))
+    fi
+  else
+    printf '  [up-to-date] %s\n' "${GH_SERVER_DEST#$HOME/}"
+    mcp_report_ok=$((mcp_report_ok + 1))
+  fi
+fi
+echo
+
+# ---- 5e merges por runtime ---------------------------------------------------------
+echo "  5e — merges por runtime"
 for envelope in "${envelopes[@]:-}"; do
   runtime="$(jget "$envelope" '.runtime')" || continue
   presence="$(jget "$envelope" '.presence // ""')"
@@ -778,6 +828,9 @@ for envelope in "${envelopes[@]:-}"; do
   else
     block="$(jget "$envelope" '.block')"
   fi
+  # Placeholder del directorio propio (servidor local): se sustituye en el bloque
+  # seleccionado (docker o normal) por la ruta absoluta de ~/.config/sdd-own.
+  block="${block//\{\{SDD_OWN_DIR\}\}/$ENV_DIR}"
   if [[ "$merge" == "toml-section" ]]; then
     merge_toml_section "$target" "$root_key" "$server_key" "$block" "$MCP_MODE" "$created"
   else
@@ -785,8 +838,8 @@ for envelope in "${envelopes[@]:-}"; do
   fi
 done
 
-# ---- 5e snippet del shell: provision del token al entorno de los agentes -----------
-echo "  5e — env snippet (source manual: token disponible para todos los runtimes)"
+# ---- 5f snippet del shell: provision del token al entorno de los agentes ----------
+echo "  5f — env snippet (source manual: token disponible para todos los runtimes)"
 if [[ "$MCP_MODE" == "real" ]]; then
   if [[ -f "$ENV_FILE" ]]; then
     cur="$(read_env_token)"

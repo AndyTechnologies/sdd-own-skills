@@ -148,7 +148,7 @@ Wrapper de un solo comando que **delega en `sync-skills.sh`** y, si el sync term
    - `claude` → `~/.claude.json`, clave `mcpServers`.
    - `codex` → `~/.codex/config.toml`, sección `[mcp_servers.github]`.
 3. **Gate de token** (5b, solo modo real): si no hay token, pide un **PAT de GitHub** por prompt oculto (`read -rs`) y lo valida contra `https://api.github.com/user` (seam `SDD_OWN_GH_API`). El token se guarda en **`~/.config/sdd-own/github-mcp.env`** (directorio 0700, archivo 0600, solo el fingerprint enmascarado en el reporte). Con token válido existente, pregunta si mantener o rotar (auto-keep sin TTY; `--force-mcp-token` fuerza la pregunta).
-4. **Merges** (5d): aplica el bloque declarado en cada target presente (json-key merge sobre la clave raíz; sección TOML para codex, preservando el resto del archivo). En `--check` los merges pendientes/divergentes se reportan (`[pendiente]` / `[aviso]`) sin tocar nada; en modo real se aplican y se reportan `[actualizado]` / `[up-to-date]`.
+4. **Merges** (5e): aplica el bloque declarado en cada target presente (json-key merge sobre la clave raíz; sección TOML para codex, preservando el resto del archivo). En `--check` los merges pendientes/divergentes se reportan (`[pendiente]` / `[aviso]`) sin tocar nada; en modo real se aplican y se reportan `[actualizado]` / `[up-to-date]`.
 
 **Excepción sancionada** (F7): `setup.sh` es el ÚNICO escritor permitido de la clave `mcp` en la config real de opencode fuera del pipeline de sync. El fragmento `wiring/opencode.sdd.json` nunca contiene `mcp`; los agentes SDD se siguen gestionando por sync (paso 3) y el MCP de GitHub por `setup.sh`, sin pisarse.
 

@@ -22,20 +22,40 @@
 #
 # Estructura del repo:
 #
-#   skills/<skill>/            skills EXCLUSIVAS nuestras (full install a
-#                              ~/.agents/skills/<skill>/ + symlinks en opencode/claude)
-#   skills/_shared/            codegraph.md (exclusiva) + 8 bootstrap IDÉNTICOS a los de
-#                              Alan (se instalan en ~/.agents/skills/_shared/ SOLO si faltan)
+#   skills/<skill>/            skills EXCLUSIVAS nuestras (canonical source en repo)
+#   skills/_shared/            codegraph.md (exclusiva) + 8 bootstrap IDÉNTICOS a los de Alan
 #   overlays/skills/<skill>/   bloques sdd-own sobre el SKILL.md que gentle-ai instala
-#   overlays/shared/<f>.md     bloques sdd-own sobre ~/.agents/skills/_shared/<f>
+#   overlays/shared/<f>.md     bloques sdd-own sobre _shared/<f>
 #   overlays/commands/<f>.md   bloques sdd-own sobre ~/.config/opencode/commands/<f>
-#   wiring/prompts/sdd/*.md    prompts nuestros (orchestrator.md, sdd-rfc-author.md) →
-#                              ~/.config/opencode/prompts/sdd/ (Alan no gestiona esos 2 paths)
+#   wiring/prompts/sdd/*.md    prompts nuestros (orchestrator.md, sdd-rfc-author.md)
 #   wiring/opencode.sdd.json   fragmento SDD mergeado sobre el config real de opencode
+#
+# Modelo de despliegue (~/.config/sdd-own/ como canónico):
+#
+#   ~/.config/sdd-own/             origen de TODO lo nuestro (carpeta ya existente)
+#     skills/<skill>/              copias físicas ORIGINALES de skills exclusivas
+#     skills/_shared/              copias físicas ORIGINALES del bootstrap + codegraph.md (solo-si-falta)
+#     prompts/sdd/                 copias físicas ORIGINALES de prompts propios
+#     srv/gh-mcp-server/           servidor MCP local (desplegado por setup.sh)
+#     github-mcp.env, env.sh, ...  (ya existían; no se tocan)
+#
+#   ~/.agents/skills/<skill>/      SYMLINK → ../../.config/sdd-own/skills/<skill>
+#   ~/.config/opencode/skills/<skill>/ SYMLINK → ../../../.config/sdd-own/skills/<skill>
+#   ~/.claude/skills/<skill>/      SYMLINK → ../../.config/sdd-own/skills/<skill>
+#
+#   _shared (EXCEPCIÓN): este directorio es compartido — la base de Alan (p.ej.
+#   sdd-phase-common.md) vive en ~/.agents/skills/_shared/ como directorio REAL,
+#   instalada por gentle-ai sync. Nuestros 9 archivos se copian ahí SOLO SI FALTA.
+#   ~/.agents/skills/_shared/ NUNCA es symlink. ~/.config/opencode/skills/_shared
+#   y ~/.claude/skills/_shared/ son SYMLINKS al directorio real compartido (no a
+#   sdd-own), para que los agentes vean la base de Alan + los nuestros.
+#
+#   Alan: sus skills en ~/.agents/skills/ se mantienen como directorios reales;
+#   los overlays hacen strip+append sobre esos archivos sin tocar el base.
 #
 # Flujo:
 #   Paso 0 — gentle-ai sync (solo modo real; flag --skip-gentleai-sync para omitir)
-#   Paso 1 — install de lo nuestro (skills exclusivas + bootstrap _shared + prompts)
+#   Paso 1 — install de lo nuestro (copia original a ~/.config/sdd-own/ + symlinks)
 #   Paso 2 — overlays (strip+append sobre los archivos de Alan)
 #   Paso 3 — merge del fragmento SDD sobre ~/.config/opencode/opencode.json(c)
 #   Paso 4 — registries (.atl) por proyecto
@@ -72,6 +92,10 @@ CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
 CLAUDE_COMMANDS_DIR="$HOME/.claude/commands"
 CLAUDE_PROMPTS_SDD_DIR="$HOME/.claude/prompts/sdd"
 
+SDD_OWN_DIR="$HOME/.config/sdd-own"
+SDD_OWN_SKILLS_DIR="$SDD_OWN_DIR/skills"
+SDD_OWN_PROMPTS_SDD_DIR="$SDD_OWN_DIR/prompts/sdd"
+
 # Bootstrap _shared: 8 archivos IDÉNTICOS a los de Alan + nuestra exclusiva codegraph.md.
 # Se instalan SOLO SI FALTA el target (nunca se sobreescribe lo que ya está instalado).
 SHARED_BOOTSTRAP=(README.md engram-convention.md openspec-convention.md persistence-contract.md \
@@ -104,7 +128,7 @@ for arg in "$@"; do
     --skip-gentleai-sync) SKIP_GENTLEAI_SYNC=1 ;;
     --registries)      next_is_registry=1 ;;
     -h|--help)
-      sed -n '1,55p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '1,68p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -458,96 +482,195 @@ total_failures=0
 for skill in "${SKILLS[@]}"; do
   src_skill="$SKILLS_DIR/$skill"
   rc=0
-  sync_dir "$src_skill" "$AGENTS_SKILLS_DIR/$skill" || rc=$?
+  sync_dir "$src_skill" "$SDD_OWN_SKILLS_DIR/$skill" || rc=$?
   case "$rc" in
     1) total_updated=$((total_updated + 1)) ;;
     2) total_failures=$((total_failures + 1)) ;;
   esac
 
-  # Symlink en ~/.config/opencode/skills/<skill> → ~/.agents/skills/<skill>
+  # Symlink en ~/.agents/skills/<skill> → ~/.config/sdd-own/skills/<skill>
+  # Desde ~/.agents/skills/ hacen falta 2 niveles (..) para llegar a $HOME.
   rc=0
-  ensure_symlink "$OPENCODE_SKILLS_DIR/$skill" "../../../.agents/skills/$skill" || rc=$?
+  ensure_symlink "$AGENTS_SKILLS_DIR/$skill" "../../.config/sdd-own/skills/$skill" || rc=$?
   if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
 
-  # Symlink en ~/.claude/skills/<skill> → ~/.agents/skills/<skill>
+  # Symlink en ~/.config/opencode/skills/<skill> → ~/.config/sdd-own/skills/<skill>
+  # Desde ~/.config/opencode/skills/ hacen falta 3 niveles (..) para llegar a $HOME.
+  rc=0
+  ensure_symlink "$OPENCODE_SKILLS_DIR/$skill" "../../../.config/sdd-own/skills/$skill" || rc=$?
+  if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
+
+  # Symlink en ~/.claude/skills/<skill> → ~/.config/sdd-own/skills/<skill>
+  # Desde ~/.claude/skills/ hacen falta 2 niveles (..) para llegar a $HOME.
   if [[ -d "$HOME/.claude" ]]; then
     rc=0
-    ensure_symlink "$CLAUDE_SKILLS_DIR/$skill" "../../.agents/skills/$skill" || rc=$?
+    ensure_symlink "$CLAUDE_SKILLS_DIR/$skill" "../../.config/sdd-own/skills/$skill" || rc=$?
     if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
   fi
 done
 
-# Bootstrap _shared: SOLO SI FALTA (nunca sobreescribir lo instalado).
-echo "  _shared (bootstrap — instalar solo si falta)"
-if [[ ! -d "$AGENTS_SKILLS_DIR/_shared" && $CHECK_MODE -eq 0 && $DRY_RUN -eq 0 ]]; then
-  mkdir -p "$AGENTS_SKILLS_DIR/_shared"
+# Bootstrap _shared: excepción — directorio compartido, NO symlink.
+# 1) Nuestros canónicos en sdd-own (solo-si-falta).
+# 2) ~/.agents/skills/_shared/ = directorio REAL (base de Alan + copia solo-si-falta).
+# 3) opencode/claude _shared = symlink al directorio real (no a sdd-own).
+echo "  _shared (bootstrap — excepción: directorio compartido)"
+
+# --- 1) Canónicos en ~/.config/sdd-own/skills/_shared/ (solo-si-falta) ---
+if [[ ! -d "$SDD_OWN_SKILLS_DIR/_shared" && $CHECK_MODE -eq 0 && $DRY_RUN -eq 0 ]]; then
+  mkdir -p "$SDD_OWN_SKILLS_DIR/_shared"
 fi
 if [[ $DRY_RUN -eq 1 ]]; then
-  printf "   [pendiente] asegurar %s (bootstrap)\n" "$AGENTS_SKILLS_DIR/_shared"
+  printf "   [pendiente] asegurar %s (bootstrap)\n" "$SDD_OWN_SKILLS_DIR/_shared"
+elif [[ $CHECK_MODE -eq 1 ]]; then
+  for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md; do
+    if [[ ! -e "$SDD_OWN_SKILLS_DIR/_shared/$f" ]]; then
+      printf "   [FALTA]     ~/.config/sdd-own/skills/_shared/%s (bootstrap pendiente)\n" "$f"
+    fi
+  done
+else
+  for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md; do
+    if [[ ! -e "$SDD_OWN_SKILLS_DIR/_shared/$f" ]]; then
+      if cp "$SHARED_SRC_DIR/$f" "$SDD_OWN_SKILLS_DIR/_shared/$f"; then
+        printf "   [instalado] ~/.config/sdd-own/skills/_shared/%s (solo si falta)\n" "$f"
+      else
+        printf "   [ERROR]     no se pudo copiar %s\n" "$SHARED_SRC_DIR/$f" >&2
+        total_failures=$((total_failures + 1))
+      fi
+    else
+      printf "   [skip]      ~/.config/sdd-own/skills/_shared/%s ya existe (no se toca)\n" "$f"
+    fi
+  done
+fi
+
+# --- 2) ~/.agents/skills/_shared/ = directorio REAL compartido (NUNCA symlink) ---
+if [[ -L "$AGENTS_SKILLS_DIR/_shared" ]]; then
+  # Es un symlink (estado heredado del sync anterior) → reconvertir a directorio real.
+  if [[ $DRY_RUN -eq 1 ]]; then
+    printf "   [pendiente] reconvertir %s a directorio real (era symlink)\n" "$AGENTS_SKILLS_DIR/_shared"
+  elif [[ $CHECK_MODE -eq 1 ]]; then
+    printf "   [DESYNC]    %s es symlink; debe ser directorio real\n" "$AGENTS_SKILLS_DIR/_shared"
+    total_updated=$((total_updated + 1))
+  else
+    if rm "$AGENTS_SKILLS_DIR/_shared" && mkdir -p "$AGENTS_SKILLS_DIR/_shared"; then
+      printf "   [reconvertido] %s a directorio real (era symlink)\n" "$AGENTS_SKILLS_DIR/_shared"
+    else
+      printf "   [ERROR]     no se pudo reconvertir %s a directorio real\n" "$AGENTS_SKILLS_DIR/_shared" >&2
+      total_failures=$((total_failures + 1))
+    fi
+  fi
+elif [[ ! -d "$AGENTS_SKILLS_DIR/_shared" ]]; then
+  if [[ $DRY_RUN -eq 1 ]]; then
+    printf "   [pendiente] crear %s (dir compartido de Alan)\n" "$AGENTS_SKILLS_DIR/_shared"
+  elif [[ $CHECK_MODE -eq 1 ]]; then
+    printf "   [FALTA]     %s (dir compartido de Alan)\n" "$AGENTS_SKILLS_DIR/_shared"
+    total_updated=$((total_updated + 1))
+  else
+    if mkdir -p "$AGENTS_SKILLS_DIR/_shared"; then
+      printf "   [creado]    %s (dir compartido de Alan)\n" "$AGENTS_SKILLS_DIR/_shared"
+    else
+      printf "   [ERROR]     no se pudo crear %s\n" "$AGENTS_SKILLS_DIR/_shared" >&2
+      total_failures=$((total_failures + 1))
+    fi
+  fi
+else
+  # Ya es directorio real: no-op.
+  printf "   [up-to-date] %s (directorio real compartido)\n" "$AGENTS_SKILLS_DIR/_shared"
+fi
+
+# --- 3) Copiar nuestros 9 archivos al directorio compartido (solo-si-falta) ---
+# Mismo patrón que el loop canónico de sdd-own; target = dir real compartido.
+if [[ $DRY_RUN -eq 1 ]]; then
+  for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md; do
+    if [[ ! -e "$AGENTS_SKILLS_DIR/_shared/$f" ]]; then
+      printf "   [pendiente] %s/_shared/%s (bootstrap compartido)\n" "${AGENTS_SKILLS_DIR#$HOME/}" "$f"
+    fi
+  done
 elif [[ $CHECK_MODE -eq 1 ]]; then
   for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md; do
     if [[ ! -e "$AGENTS_SKILLS_DIR/_shared/$f" ]]; then
-      printf "   [FALTA]     ~/.agents/skills/_shared/%s (bootstrap pendiente)\n" "$f"
+      printf "   [FALTA]     %s/_shared/%s (bootstrap compartido pendiente)\n" "${AGENTS_SKILLS_DIR#$HOME/}" "$f"
     fi
   done
 else
   for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md; do
     if [[ ! -e "$AGENTS_SKILLS_DIR/_shared/$f" ]]; then
       if cp "$SHARED_SRC_DIR/$f" "$AGENTS_SKILLS_DIR/_shared/$f"; then
-        printf "   [instalado] ~/.agents/skills/_shared/%s (solo si falta)\n" "$f"
+        printf "   [instalado] %s/_shared/%s (solo si falta, directorio compartido)\n" "${AGENTS_SKILLS_DIR#$HOME/}" "$f"
       else
-        printf "   [ERROR]     no se pudo copiar %s\n" "$SHARED_SRC_DIR/$f" >&2
+        printf "   [ERROR]     no se pudo copiar %s → %s/_shared/%s\n" "$SHARED_SRC_DIR/$f" "${AGENTS_SKILLS_DIR#$HOME/}" "$f" >&2
         total_failures=$((total_failures + 1))
       fi
     else
-      printf "   [skip]      ~/.agents/skills/_shared/%s ya existe (no se toca)\n" "$f"
+      printf "   [skip]      %s/_shared/%s ya existe (no se toca)\n" "${AGENTS_SKILLS_DIR#$HOME/}" "$f"
     fi
   done
 fi
 
-# Symlink _shared en opencode (apunta a la copia física en .agents).
+# --- 4) Symlinks: opencode y claude → directorio real compartido (NO a sdd-own) ---
+# OpenCode: desde ~/.config/opencode/skills/ hacen falta 3 niveles para llegar a $HOME.
 rc=0
 ensure_symlink "$OPENCODE_SKILLS_DIR/_shared" "../../../.agents/skills/_shared" || rc=$?
 if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
 
-# Prompts propios → ~/.config/opencode/prompts/sdd/ (copia real; Alan no gestiona estos paths).
+# Claude: desde ~/.claude/skills/ hacen falta 2 niveles para llegar a $HOME.
+if [[ -d "$HOME/.claude" ]]; then
+  rc=0
+  ensure_symlink "$CLAUDE_SKILLS_DIR/_shared" "../../.agents/skills/_shared" || rc=$?
+  if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
+fi
+
+# Prompts propios → original en ~/.config/sdd-own/prompts/sdd/ + symlinks por
+# archivo en ~/.config/opencode/prompts/sdd/ y ~/.claude/prompts/sdd/ (no se
+# symlinkea el directorio completo porque ahí conviven prompts de Alan).
 echo "  prompts propios (orchestrator.md, sdd-rfc-author.md)"
 for pf in "${OWN_PROMPTS[@]}"; do
   src_pf="$PROMPTS_SRC_DIR/$pf"
-  dest_pf="$OPENCODE_PROMPTS_SDD_DIR/$pf"
+  dest_own_pf="$SDD_OWN_PROMPTS_SDD_DIR/$pf"
+  dest_oc_pf="$OPENCODE_PROMPTS_SDD_DIR/$pf"
   rc=0
   if [[ ! -f "$src_pf" ]]; then
     printf "   [ERROR]     falta el prompt canónico %s\n" "$src_pf" >&2
     total_failures=$((total_failures + 1))
     continue
   fi
-  if [[ ! -d "$OPENCODE_PROMPTS_SDD_DIR" ]]; then
+
+  # 1) Original físico → ~/.config/sdd-own/prompts/sdd/<pf>
+  if [[ ! -d "$SDD_OWN_PROMPTS_SDD_DIR" ]]; then
     if [[ $DRY_RUN -eq 1 ]]; then
-      printf "   [pendiente] crear %s\n" "$OPENCODE_PROMPTS_SDD_DIR"
+      printf "   [pendiente] crear %s\n" "$SDD_OWN_PROMPTS_SDD_DIR"
     elif [[ $CHECK_MODE -eq 1 ]]; then
-      printf "   [FALTA]     %s\n" "$OPENCODE_PROMPTS_SDD_DIR"
+      printf "   [FALTA]     %s\n" "$SDD_OWN_PROMPTS_SDD_DIR"
     else
-      mkdir -p "$OPENCODE_PROMPTS_SDD_DIR" || { printf "   [ERROR]     no se pudo crear %s\n" "$OPENCODE_PROMPTS_SDD_DIR" >&2; total_failures=$((total_failures + 1)); continue; }
+      mkdir -p "$SDD_OWN_PROMPTS_SDD_DIR" || { printf "   [ERROR]     no se pudo crear %s\n" "$SDD_OWN_PROMPTS_SDD_DIR" >&2; total_failures=$((total_failures + 1)); continue; }
     fi
   fi
-  if [[ ! -e "$dest_pf" ]] || ! diff -q "$src_pf" "$dest_pf" >/dev/null 2>&1; then
+  if [[ ! -e "$dest_own_pf" ]] || ! diff -q "$src_pf" "$dest_own_pf" >/dev/null 2>&1; then
     if [[ $DRY_RUN -eq 1 ]]; then
-      printf "   [pendiente] %s -> %s\n" "$pf" "$dest_pf"
+      printf "   [pendiente] %s -> %s\n" "$pf" "${dest_own_pf#$HOME/}"
     elif [[ $CHECK_MODE -eq 1 ]]; then
-      printf "   [DESYNC]    %s difiere del canónico %s\n" "${dest_pf#$HOME/}" "$pf"
+      printf "   [DESYNC]    %s difiere del canónico %s\n" "${dest_own_pf#$HOME/}" "$pf"
     else
-      mkdir -p "$(dirname "$dest_pf")"
-      cp "$src_pf" "$dest_pf" || { printf "   [ERROR]     no se pudo copiar %s\n" "$dest_pf" >&2; total_failures=$((total_failures + 1)); continue; }
-      printf "   [actualizado] %s\n" "${dest_pf#$HOME/}"
+      mkdir -p "$(dirname "$dest_own_pf")"
+      cp "$src_pf" "$dest_own_pf" || { printf "   [ERROR]     no se pudo copiar %s\n" "$dest_own_pf" >&2; total_failures=$((total_failures + 1)); continue; }
+      printf "   [actualizado] %s\n" "${dest_own_pf#$HOME/}"
     fi
   else
-    printf "   [up-to-date] %s\n" "${dest_pf#$HOME/}"
+    printf "   [up-to-date] %s\n" "${dest_own_pf#$HOME/}"
   fi
-  # Symlink en ~/.claude/prompts/sdd/<pf> → ~/.config/opencode/prompts/sdd/<pf>.
+
+  # 2) Symlink por archivo en ~/.config/opencode/prompts/sdd/<pf> → original.
+  # Desde ~/.config/opencode/prompts/sdd/ hacen falta 3 niveles (..) para llegar
+  # a ~/.config; opencode resuelve ese dir (que también contiene prompts de Alan,
+  # que NO se tocan).
+  rc=0
+  ensure_symlink "$dest_oc_pf" "../../../sdd-own/prompts/sdd/$pf" || rc=$?
+  if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
+
+  # 3) Symlink en ~/.claude/prompts/sdd/<pf> → ~/.config/sdd-own/prompts/sdd/<pf>.
   # Desde ~/.claude/prompts/sdd/ hacen falta 3 niveles (..) para llegar a $HOME.
   if [[ -d "$HOME/.claude" ]]; then
     rc=0
-    ensure_symlink "$CLAUDE_PROMPTS_SDD_DIR/$pf" "../../../.config/opencode/prompts/sdd/$pf" || rc=$?
+    ensure_symlink "$CLAUDE_PROMPTS_SDD_DIR/$pf" "../../../.config/sdd-own/prompts/sdd/$pf" || rc=$?
     if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
   fi
 done

@@ -20,6 +20,8 @@ Este directorio declara los bloques de configuración MCP de GitHub por runtime.
 
 **Multi-entry (aditivo dentro de un mismo envelope)**: un mismo `block` de `merge: "json-key"` puede contener VARIOS servidores (ej. el `github` remoto + el `gh-git-mcp` local en opencode). El merge profundo es aditivo por servidor (`target.mcp.github` y `target.mcp["gh-git-mcp"]` coexisten; nunca se borra un servidor ausente del fragmento). `server_key` sigue nombrando SOLO el servidor primario de presencia (`presence` evalúa `has(server_key)`); los servidores adicionales del `block` se mergean igual pero no participan del gate de presencia. `alt_docker` cubre únicamente el servidor con variante contenedor (`github`); un servidor local aditivo (type `local`, token-free) no tiene `alt_docker`.
 
+**Servidor local desplegado (`{{SDD_OWN_DIR}}`)**: un servidor local (type `local`) se lanza con un array de comando cuyo argumento de working-directory usa el placeholder `{{SDD_OWN_DIR}}/srv/<server>` (ej. `["uv","run","--directory","{{SDD_OWN_DIR}}/srv/gh-mcp-server","python","-m","src.server"]`). `setup.sh` sustituye `{{SDD_OWN_DIR}}` por `$HOME/.config/sdd-own` en tiempo de render (igual que `{{ENV_FILE}}` en la variante docker) y despliega el servidor desde el repo a `~/.config/sdd-own/srv/<server>` antes del merge.
+
 ## Bloques primarios por runtime
 
 Todos los bloques son **token-free por construcción**: referencian el nombre de la variable, nunca el valor.
@@ -33,7 +35,7 @@ Todos los bloques son **token-free por construcción**: referencian el nombre de
 
 ## Variante Docker (`alt_docker`)
 
-Con `MCP_GITHUB_TRANSPORT=docker` (override de entorno, sin flag de CLI), `setup.sh` renderiza `alt_docker` en vez del bloque primario: `docker run --rm -i --env-file <envfile> ghcr.io/github/github-mcp-server`. El placeholder `{{ENV_FILE}}` se reemplaza por la ruta absoluta del env file (`~/.config/sdd-own/github-mcp.env`) en tiempo de render. Requiere `docker` instalado (fail-fast si falta y el transporte es docker). El env file tolera comentarios (`#`) y líneas vacías (Docker ≥ 20.10).
+Con `MCP_GITHUB_TRANSPORT=docker` (override de entorno, sin flag de CLI), `setup.sh` renderiza `alt_docker` en vez del bloque primario: `docker run --rm -i --env-file <envfile> ghcr.io/github/github-mcp-server`. El placeholder `{{ENV_FILE}}` se reemplaza por la ruta absoluta del env file (`~/.config/sdd-own/github-mcp.env`) en tiempo de render (igual que `{{SDD_OWN_DIR}}` se reemplaza por `$HOME/.config/sdd-own` en los servidores locales). Requiere `docker` instalado (fail-fast si falta y el transporte es docker). El env file tolera comentarios (`#`) y líneas vacías (Docker ≥ 20.10).
 
 ## Agregar un runtime
 

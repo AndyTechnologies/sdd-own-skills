@@ -30,7 +30,7 @@ The `gh-git-mcp` server is a local FastMCP over the `gh` and `git` CLIs, wired t
 
 - `gh` CLI ≥ 2.x installed and authenticated (`gh auth login`) — the server **delegates all auth to `gh`**; it never sees or embeds a token.
 - `git` available on PATH.
-- `uv` available (the server runs via `uv run --directory srv/gh-mcp-server python -m src.server`).
+- `uv` available (the server runs from the deployed copy at `$HOME/.config/sdd-own/srv/gh-mcp-server` via `uv run --directory "$HOME/.config/sdd-own/srv/gh-mcp-server" python -m src.server`).
 
 The server exposes typed envelopes `{ok, data, summary, error}`. **Destructive operations are two-phase**: call the tool once to get the computed effect (dry-run), then confirm by echoing that **exact** `data` object back — all fields, verbatim, including the `dry_run` marker. The server re-derives the effect, fingerprints it (SHA-256), and executes only on a match. Never call a destructive tool with `confirmed=true` without a preceding dry-run echo-back.
 
