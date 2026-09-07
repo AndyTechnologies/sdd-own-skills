@@ -5,12 +5,17 @@
   "merge": "json-key",
   "root_key": "mcpServers",
   "server_key": "github",
+  "deps": ["uv", "donsetch"],
   "presence": "command -v pi >/dev/null 2>&1",
   "block": {
     "github": {
       "auth": "bearer",
       "url": "https://api.githubcopilot.com/mcp/",
       "bearerTokenEnv": "GITHUB_PERSONAL_ACCESS_TOKEN"
+    },
+    "donsetch": {
+      "command": "donsetch",
+      "args": ["mcp"]
     }
   },
   "alt_docker": {

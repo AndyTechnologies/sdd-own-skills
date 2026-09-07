@@ -63,6 +63,7 @@ mcp_report_updated=0
 mcp_report_pend=0
 mcp_report_skip=0
 mcp_report_error=0
+deps_missing=()
 
 # ---- limpieza de tmpfiles en cualquier salida (S1) --------------------------
 # El config tmp de curl contiene el token literal (curl no expande ${VAR} en -K);
@@ -86,6 +87,7 @@ Uso: setup.sh [flags]
   --registries <proy>    Se reenvia a sync-skills.sh
   --skip-mcp             Omite solo el paso MCP (el sync igual corre)
   --force-mcp-token      Fuerza re-prompt + re-validacion aunque exista un token valido
+  --force                Sobrescribe config manual MCP en los merges sin pedir TTY
   -h, --help             Esta ayuda
 
 Exits: 0 ok · 1 uso o --check con drift · 2 fallo de apply
@@ -375,7 +377,7 @@ merge_json_key() {
   local target="$1" root_key="$2" block="$3" server_key="$4" mode="$5" flag_created="$6"
   local merged="" merged_ok=0
   if command -v jq >/dev/null 2>&1; then
-    if merged="$(jq -s --arg k "$root_key" '.[0] as $u | .[1] as $f | $u | .[$k] = ((.[$k] // {}) * $f)' "$target" <(printf '%s\n' "$block") 2>/dev/null)"; then
+    if merged="$(jq -s --indent 2 --arg k "$root_key" '.[0] as $u | .[1] as $f | $u | .[$k] = ((.[$k] // {}) * $f)' "$target" <(printf '%s\n' "$block") 2>/dev/null)"; then
       merged_ok=1
     fi
   fi
@@ -461,12 +463,41 @@ PYEOF
     return 0
   fi
 
-  if [[ $flag_created -eq 0 ]] && [[ ! -e "$target.bak" ]]; then
-    cp -- "$target" "$target.bak" || { printf '  [ERROR]     no se pudo crear respaldo %s\n' "$target.bak" >&2; mcp_report_error=$((mcp_report_error + 1)); mcp_exit=2; return 2; }
+  # C2 gate: config manual con la entrada YA presente no se pisa sin --force o
+  # confirmacion TTY (la creacion aditiva — entrada ausente — nunca se gatea).
+  if [[ $flag_created -eq 0 ]] && \
+     jq -e --arg k "$root_key" --arg s "$server_key" '.[$k]? // empty | has($s)' "$target" >/dev/null 2>&1 && \
+     ! printf '%s\n' "$merged" | diff -q - "$target" >/dev/null 2>&1; then
+    if [[ $FORCE -eq 1 ]]; then
+      : # --force: sobrescribir config manual
+    elif [[ ! -t 0 ]]; then
+      printf '  [aviso]     %s (%s.%s) difiere; requiere --force o TTY para sobrescribir config manual\n' \
+        "${target#$HOME/}" "$root_key" "$server_key"
+      mcp_report_pend=$((mcp_report_pend + 1))
+      return 0
+    else
+      ans=""
+      read -r -p "$(printf '  Sobrescribir config manual en %s? [y/N] ' "${target#$HOME/}")" ans || true
+      case "${ans:-}" in
+        y|Y) : ;;
+        *)
+          printf '  [aviso]     %s (%s.%s) no sobrescrito — config manual preservada\n' \
+            "${target#$HOME/}" "$root_key" "$server_key"
+          mcp_report_pend=$((mcp_report_pend + 1))
+          return 0
+          ;;
+      esac
+    fi
   fi
+
+  if [[ $flag_created -eq 0 ]]; then
+    local bak_path="$target.bak.$(date +%Y%m%d-%H%M%S)"
+    cp -- "$target" "$bak_path" || { printf '  [ERROR]     no se pudo crear respaldo %s\n' "$bak_path" >&2; mcp_report_error=$((mcp_report_error + 1)); mcp_exit=2; return 2; }
+  fi
+  # salida pretty (indent=2); los comentarios del .jsonc no se preservan (M3).
   printf '%s\n' "$merged" > "$target" || { printf '  [ERROR]     no se pudo escribir %s\n' "${target#$HOME/}" >&2; mcp_report_error=$((mcp_report_error + 1)); mcp_exit=2; return 2; }
   printf '  [actualizado] %s (%s.%s)%s\n' "${target#$HOME/}" "$root_key" "$server_key" \
-    "$([[ $flag_created -eq 1 ]] && printf ' — target creado, sin .bak' || printf ' (respaldo en .bak)')"
+    "$([[ $flag_created -eq 1 ]] && printf ' — target creado, sin respaldo' || printf ' (respaldo en .bak.<ts>)')"
   mcp_report_updated=$((mcp_report_updated + 1))
   return 0
 }
@@ -523,14 +554,80 @@ PYEOF
     mcp_report_pend=$((mcp_report_pend + 1))
     return 0
   fi
-  if [[ $flag_created -eq 0 ]] && [[ ! -e "$target.bak" ]]; then
-    cp -- "$target" "$target.bak" || { printf '  [ERROR]     no se pudo crear respaldo %s\n' "$target.bak" >&2; mcp_report_error=$((mcp_report_error + 1)); mcp_exit=2; return 2; }
+  # C2 gate (TOML): misma regla que json — no pisar config manual sin --force/TTY.
+  if [[ $flag_created -eq 0 ]] && \
+     ! printf '%s\n' "$merged" | diff -q - "$target" >/dev/null 2>&1 && \
+     python3 - "$target" "$root_key" "$server_key" <<'PYEOF' 2>/dev/null
+import sys, tomllib
+try:
+    with open(sys.argv[1], "rb") as f:
+        d = tomllib.load(f)
+except Exception:
+    sys.exit(1)
+root = d.get(sys.argv[2])
+sys.exit(0 if isinstance(root, dict) and sys.argv[3] in root else 1)
+PYEOF
+  then
+    if [[ $FORCE -eq 1 ]]; then
+      : # --force: sobrescribir config manual
+    elif [[ ! -t 0 ]]; then
+      printf '  [aviso]     %s ([%s.%s]) difiere; requiere --force o TTY para sobrescribir config manual\n' \
+        "${target#$HOME/}" "$root_key" "$server_key"
+      mcp_report_pend=$((mcp_report_pend + 1))
+      return 0
+    else
+      ans=""
+      read -r -p "$(printf '  Sobrescribir config manual en %s? [y/N] ' "${target#$HOME/}")" ans || true
+      case "${ans:-}" in
+        y|Y) : ;;
+        *)
+          printf '  [aviso]     %s ([%s.%s]) no sobrescrito — config manual preservada\n' \
+            "${target#$HOME/}" "$root_key" "$server_key"
+          mcp_report_pend=$((mcp_report_pend + 1))
+          return 0
+          ;;
+      esac
+    fi
+  fi
+
+  if [[ $flag_created -eq 0 ]]; then
+    local bak_path="$target.bak.$(date +%Y%m%d-%H%M%S)"
+    cp -- "$target" "$bak_path" || { printf '  [ERROR]     no se pudo crear respaldo %s\n' "$bak_path" >&2; mcp_report_error=$((mcp_report_error + 1)); mcp_exit=2; return 2; }
   fi
   printf '%s\n' "$merged" > "$target" || { printf '  [ERROR]     no se pudo escribir %s\n' "${target#$HOME/}" >&2; mcp_report_error=$((mcp_report_error + 1)); mcp_exit=2; return 2; }
   printf '  [actualizado] %s ([%s.%s])%s\n' "${target#$HOME/}" "$root_key" "$server_key" \
-    "$([[ $flag_created -eq 1 ]] && printf ' — target creado, sin .bak' || printf ' (respaldo en .bak)')"
+    "$([[ $flag_created -eq 1 ]] && printf ' — target creado, sin respaldo' || printf ' (respaldo en .bak.<ts>)')"
   mcp_report_updated=$((mcp_report_updated + 1))
   return 0
+}
+
+# check_runtime_deps <envelope> <runtime> — verifica las deps opcionales de un
+# envelope MCP (".deps": ["bin1", ...]) y acumula las faltantes en deps_missing
+# como "dep -> MCP server_key (runtime)". Corre en check/dry/real (solo avisa).
+check_runtime_deps() {
+  local envelope="$1" runtime="$2"
+  local deps="" dep server=""
+  server="$(jget "$envelope" '.server_key // ""' 2>/dev/null || true)"
+  if command -v jq >/dev/null 2>&1; then
+    deps="$(jq -r '.deps[]?' "$envelope" 2>/dev/null || true)"
+  elif command -v python3 >/dev/null 2>&1; then
+    deps="$(python3 - "$envelope" <<'PYEOF' 2>/dev/null || true
+import json, sys
+try:
+    d = json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    sys.exit(0)
+for dep in d.get("deps") or []:
+    print(dep)
+PYEOF
+)"
+  fi
+  while IFS= read -r dep; do
+    [[ -z "$dep" ]] && continue
+    if ! command -v "$dep" >/dev/null 2>&1; then
+      deps_missing+=("$dep -> MCP $server ($runtime)")
+    fi
+  done <<< "$deps"
 }
 
 # ---------- main ------------------------------------------------------------------
@@ -539,6 +636,7 @@ CHECK_SEEN=0
 DRYRUN_SEEN=0
 MCP_SKIP=0
 FORCE_TOKEN=0
+FORCE=0
 MCP_MODE="real"
 SYNC_FLAGS=()
 while [[ $# -gt 0 ]]; do
@@ -551,6 +649,7 @@ while [[ $# -gt 0 ]]; do
       SYNC_FLAGS+=(--registries "$2"); shift 2 ;;
     --skip-mcp) MCP_SKIP=1; shift ;;
     --force-mcp-token) FORCE_TOKEN=1; shift ;;
+    --force) FORCE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage; exit 1 ;;
   esac
@@ -608,6 +707,7 @@ if [[ -e "${envelopes[0]}" ]]; then
       mcp_report_skip=$((mcp_report_skip + 1))
       continue
     fi
+    check_runtime_deps "$envelope" "$runtime" || true
     target_mode="$(jget "$envelope" '.target_mode')"
     target=""
     if [[ "$target_mode" == "opencode-config" ]]; then
@@ -629,7 +729,7 @@ if [[ -e "${envelopes[0]}" ]]; then
     if [[ ! -e "$target" ]]; then
       if [[ "$MCP_MODE" == "real" ]]; then
         create_target "$target" "$root_key" "$merge"
-        printf '  [creado]    %s (target ausente, sin .bak)\n' "${target#$HOME/}"
+        printf '  [creado]    %s (target ausente, sin respaldo)\n' "${target#$HOME/}"
         CREATED_TARGETS+=("$target")
       else
         printf '  [pendiente] %s: target ausente — se crearia y mergearia\n' "${target#$HOME/}"
@@ -865,6 +965,11 @@ else
 fi
 
 # ---- reporte final ------------------------------------------------------------------
+# Las deps MCP faltantes cuentan como avisos/pendientes en el resumen.
+if [[ ${#deps_missing[@]} -gt 0 ]]; then
+  mcp_report_pend=$((mcp_report_pend + ${#deps_missing[@]}))
+fi
+
 echo
 echo "=================================================="
 echo "Resumen:"
@@ -882,6 +987,12 @@ printf '  MCP [actualizado]: %d\n' "$mcp_report_updated"
 printf '  MCP [pendiente] : %d\n' "$mcp_report_pend"
 printf '  MCP [aviso]     : %d (runtimes ausentes / saltados)\n' "$mcp_report_skip"
 printf '  MCP [ERROR]     : %d\n' "$mcp_report_error"
+if [[ ${#deps_missing[@]} -gt 0 ]]; then
+  printf '  Dependencias faltantes:\n'
+  for dep_missing in "${deps_missing[@]}"; do
+    printf '  [aviso]     %s\n' "$dep_missing"
+  done
+fi
 
 if [[ "$MCP_MODE" == "real" ]] && [[ -f "$ENV_SH" && -f "$ENV_FISH" ]]; then
   printf '\n  ======== Para activar el token en los agentes (opencode, Pi, Claude, Codex) ========\n'

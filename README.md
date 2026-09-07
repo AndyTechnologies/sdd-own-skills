@@ -4,13 +4,15 @@ Repositorio público de la **personalización SDD del usuario** sobre **gentle-a
 
 El binario `gentle-ai` instala sus propias skills/commands/prompts (las originales de Alan) en `~/.agents/skills`, `~/.config/opencode/skills` (symlinks), `~/.config/opencode/commands` y `~/.config/opencode/prompts/sdd`. Este repo NO las reemplaza: se adhiere con **skills exclusivas nuestras** (full install) y **overlays** que anexan bloques `<!-- sdd-own:<id>:start --> … <!-- sdd-own:<id>:end -->` al final de los archivos de Alan (strip+append idempotente, nunca pisa el original).
 
+**Modelo de despliegue**: los canónicos de TODO lo nuestro viven en `~/.config/sdd-own/` (`skills/<skill>` originales físicos, `skills/_shared/` bootstrap, `prompts/sdd/`). Los directorios de agentes son SYMLINKS a esos canónicos — `~/.agents/skills/<skill>` (skills exclusivas), `~/.config/opencode/skills/<skill>` y `~/.claude/skills/<skill>` → `~/.config/sdd-own/skills/<skill>` (editar el original se propaga a los tres, sin replicación). **Excepción `_shared`**: `~/.agents/skills/_shared/` es un directorio REAL compartido (base de Alan instalada por `gentle-ai sync` + nuestras copias solo-si-falta); `~/.config/opencode/skills/_shared` y `~/.claude/skills/_shared` symlinkean a ese directorio compartido, NO a sdd-own. `setup.sh` despliega además el servidor MCP local en `~/.config/sdd-own/srv/gh-mcp-server`.
+
 ---
 
 ## ¿Qué contiene?
 
 ### Skills exclusivas (`skills/`)
 
-Cada carpeta es nuestra y se **full-instala** (copia física a `~/.agents/skills/<skill>/` + symlinks en opencode y claude):
+Cada carpeta es nuestra y se **full-instala**: la copia física ORIGINAL va a `~/.config/sdd-own/skills/<skill>/` y `~/.agents/skills/<skill>/`, `~/.config/opencode/skills/<skill>/` y `~/.claude/skills/<skill>/` son symlinks a esa copia:
 
 | Skill | Rol |
 |-------|-----|
@@ -39,7 +41,7 @@ Las skills vendidas vienen de [Gentleman-Programming/Gentleman-Skills](https://g
 - `codegraph.md` — nuestra exclusiva (directrices CodeGraph del repo).
 - 8 bootstrap **idénticos a los de Alan**: `README.md`, `engram-convention.md`, `openspec-convention.md`, `persistence-contract.md`, `research-lifecycle.md`, `sdd-orchestrator-sections.md`, `sdd-status-contract.md`, `skill-resolver.md`.
 
-Se instalan en `~/.agents/skills/_shared/` **SOLO SI FALTA** (never overwrite): si el archivo ya está instalado — por `gentle-ai sync` o por un sync anterior — no se toca. `~/.config/opencode/skills/_shared` debe ser symlink a esa copia física.
+Se instalan **SOLO SI FALTA** (never overwrite): si el archivo ya está instalado — por `gentle-ai sync` o por un sync anterior — no se toca. `~/.agents/skills/_shared/` es un directorio REAL compartido (base de Alan + nuestras copias); `~/.config/opencode/skills/_shared` y `~/.claude/skills/_shared` deben ser symlinks a ese directorio compartido (no a sdd-own), para que los agentes vean la base de Alan + los nuestros.
 
 ### Overlays (`overlays/`)
 
@@ -70,7 +72,7 @@ Alan **no gestiona** esos 2 prompts; los prompts de fase de Alan (`sdd-apply.md`
 El flujo del sync (en orden):
 
 1. **Paso 0 — `gentle-ai sync`**: instala/resetea las bases canónicas de Alan (skills, commands, prompts). Solo en modo real; con `--skip-gentleai-sync` se omite; si el binario no está en PATH, avisa y sigue.
-2. **Paso 1 — install de lo nuestro**: skills exclusivas (copia física `~/.agents/skills/<skill>/` + symlinks en `~/.config/opencode/skills/<skill>/` y `~/.claude/skills/<skill>/`), bootstrap de `_shared` (solo si falta, con `_shared` como symlink en opencode), y los prompts propios (`orchestrator.md`, `sdd-rfc-author.md`) a `~/.config/opencode/prompts/sdd/` (+ symlink en `~/.claude/prompts/sdd/`).
+2. **Paso 1 — install de lo nuestro**: skills exclusivas (original en `~/.config/sdd-own/skills/<skill>/` + symlinks en `~/.agents/skills/<skill>/`, `~/.config/opencode/skills/<skill>/` y `~/.claude/skills/<skill>/`), bootstrap de `_shared` (solo si falta: copia a `~/.config/sdd-own/skills/_shared/` y al directorio real compartido `~/.agents/skills/_shared/`, con los `_shared` de opencode/claude como symlinks al compartido), y los prompts propios (`orchestrator.md`, `sdd-rfc-author.md`) a `~/.config/sdd-own/prompts/sdd/` (+ symlink por archivo en `~/.config/opencode/prompts/sdd/` y `~/.claude/prompts/sdd/`).
 3. **Paso 2 — overlays**: strip+append de cada `overlays/**` sobre su target de Alan. Si el target no existe → **ERROR** explícito (probablemente `gentle-ai sync` no instaló esa skill; nunca se crea el base).
 4. **Paso 3 — merge opencode**: fragmento SDD sobre el config real (detecta `.jsonc` primero, si no `.json`).
 5. **Paso 4 — registries**: `--registries <proyecto...>` refresca el skill-registry `.atl/` de cada proyecto (solo modo real).
@@ -88,13 +90,13 @@ Es idempotente: el strip+append re-aplica los bloques sin duplicarlos; los boots
 
 Flags:
 
-- `--check`: solo verifica y reporta (estructura de overlays, targets existentes, marcadores únicos, skills esperadas presentes, desyncs: target sin los bloques esperados, prompts que difieren del repo). No muta nada y **no corre** `gentle-ai sync`. Exit `0` = cero desyncs; `1` = desyncs; `2` = errores de estructura/conflicto.
+- `--check`: solo verifica y reporta (estructura de overlays, targets existentes, marcadores únicos, skills esperadas presentes, desyncs: target sin los bloques esperados, prompts que difieren del repo). No muta nada y **no corre** `gentle-ai sync`. Exit `0` = sincronizado (cero desyncs); `1` = desyncs/faltantes detectados; `2` = errores estructurales/fallos.
 - `--dry-run`: muestra `[pendiente]` para cada acción que ejecutaría, sin escribir nada y sin correr `gentle-ai sync`.
 - `--skip-gentleai-sync`: omite el paso 0 (útil cuando `gentle-ai sync` ya corrió hace poco).
 - `--skip-opencode`: omite el merge del config (el fragmento queda disponible en `wiring/opencode.sdd.json`).
 - `--registries <proyecto...>`: acumula directorios de proyectos; tras el sync corre `gentle-ai skill-registry refresh --force` en cada uno (con `--check`/`--dry-run` solo reporta).
 
-Salida (exit code): `0` = sincronizado / verificado sin desyncs, `1` = error de estructura/configuración o desyncs encontrados en `--check`, `2` = uno o más pasos fallaron al aplicar.
+Salida (exit code): `0` = sincronizado / verificado sin desyncs (cero desyncs), `1` = desyncs/faltantes detectados (en `--check`), `2` = errores estructurales o fallos al aplicar.
 
 **Semántica de errores**: cualquier condición de conflicto — target de overlay faltante, base no identificable (archivo que solo contiene bloques sdd-own), marcardores rotos o ids de bloque duplicados — produce mensaje claro y exit ≠ 0. NUNCA se clobberea un archivo de Alan: el strip+append solo toca bloques sdd-own, los bootstrap jamás sobrescriben, y los full-copy de exclusivas solo pueden pisar skills de la keep-list (las de Alan no están versionadas aquí).
 
@@ -137,6 +139,7 @@ Wrapper de un solo comando que **delega en `sync-skills.sh`** y, si el sync term
 ./setup.sh --registries <p1> <p2>     # delega --registries al sync (refresh .atl/)
 ./setup.sh --skip-mcp                 # solo el sync, sin el paso MCP
 ./setup.sh --force-mcp-token          # en modo real, pedir token aunque exista uno válido
+./setup.sh --force                    # sobrescribir config manual MCP sin pedir confirmación
 ```
 
 **Cómo funciona** (paso 5 del script):

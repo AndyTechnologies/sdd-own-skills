@@ -419,7 +419,10 @@ ensure_symlink() {
       printf "   [DESYNC]    %s es un directorio real; debería ser symlink\n" "$dest_link"
       return 1
     else
-      rm -rf "$dest_link" || { printf "   [ERROR]     no se pudo borrar directorio %s\n" "$dest_link" >&2; return 2; }
+      # C1: un directorio real puede contener datos (instalación manual); se
+      # rescata renombrándolo en vez de borrarlo (rm -rf silencioso = pérdida).
+      mv "$dest_link" "${dest_link}.sdd-own-obsolete.$$" || { printf "   [ERROR]     no se pudo renombrar directorio %s\n" "$dest_link" >&2; return 2; }
+      printf "   [rescatado]  %s -> %s.sdd-own-obsolete.$$\n" "$dest_link" "$dest_link"
     fi
   elif [[ -f "$dest_link" ]]; then
     if [[ $DRY_RUN -eq 1 ]]; then
@@ -457,6 +460,11 @@ ensure_symlink() {
   fi
 }
 
+# --- Contadores globales (resumen final) --------------------------------------
+# Se inicializan ANTES del paso 0 para que un fallo de gentle-ai sync sume (H1).
+total_updated=0
+total_failures=0
+
 # --- Paso 0: gentle-ai sync --------------------------------------------------
 
 if [[ $SKIP_GENTLEAI_SYNC -eq 1 ]]; then
@@ -467,6 +475,7 @@ elif command -v gentle-ai >/dev/null 2>&1; then
   echo "Paso 0 — gentle-ai sync"
   if ! gentle-ai sync; then
     echo "  [ERROR]     gentle-ai sync falló; se continúa igual con los pasos siguientes" >&2
+    total_failures=$((total_failures + 1))
   fi
 else
   echo "Paso 0 — gentle-ai sync: [aviso] gentle-ai no encontrado en PATH; se omite (los targets de overlay podrían faltar)" >&2
@@ -476,8 +485,6 @@ echo
 # --- Paso 1: install de lo nuestro ------------------------------------------
 
 echo "Paso 1 — install de skills exclusivas + bootstrap _shared + prompts"
-total_updated=0
-total_failures=0
 
 for skill in "${SKILLS[@]}"; do
   src_skill="$SKILLS_DIR/$skill"
@@ -492,20 +499,29 @@ for skill in "${SKILLS[@]}"; do
   # Desde ~/.agents/skills/ hacen falta 2 niveles (..) para llegar a $HOME.
   rc=0
   ensure_symlink "$AGENTS_SKILLS_DIR/$skill" "../../.config/sdd-own/skills/$skill" || rc=$?
-  if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
+  case "$rc" in
+    1) total_updated=$((total_updated + 1)) ;;
+    2) total_failures=$((total_failures + 1)) ;;
+  esac
 
   # Symlink en ~/.config/opencode/skills/<skill> → ~/.config/sdd-own/skills/<skill>
   # Desde ~/.config/opencode/skills/ hacen falta 3 niveles (..) para llegar a $HOME.
   rc=0
   ensure_symlink "$OPENCODE_SKILLS_DIR/$skill" "../../../.config/sdd-own/skills/$skill" || rc=$?
-  if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
+  case "$rc" in
+    1) total_updated=$((total_updated + 1)) ;;
+    2) total_failures=$((total_failures + 1)) ;;
+  esac
 
   # Symlink en ~/.claude/skills/<skill> → ~/.config/sdd-own/skills/<skill>
   # Desde ~/.claude/skills/ hacen falta 2 niveles (..) para llegar a $HOME.
   if [[ -d "$HOME/.claude" ]]; then
     rc=0
     ensure_symlink "$CLAUDE_SKILLS_DIR/$skill" "../../.config/sdd-own/skills/$skill" || rc=$?
-    if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
+    case "$rc" in
+      1) total_updated=$((total_updated + 1)) ;;
+      2) total_failures=$((total_failures + 1)) ;;
+    esac
   fi
 done
 
@@ -525,6 +541,7 @@ elif [[ $CHECK_MODE -eq 1 ]]; then
   for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md; do
     if [[ ! -e "$SDD_OWN_SKILLS_DIR/_shared/$f" ]]; then
       printf "   [FALTA]     ~/.config/sdd-own/skills/_shared/%s (bootstrap pendiente)\n" "$f"
+      total_updated=$((total_updated + 1))
     fi
   done
 else
@@ -589,6 +606,7 @@ elif [[ $CHECK_MODE -eq 1 ]]; then
   for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md; do
     if [[ ! -e "$AGENTS_SKILLS_DIR/_shared/$f" ]]; then
       printf "   [FALTA]     %s/_shared/%s (bootstrap compartido pendiente)\n" "${AGENTS_SKILLS_DIR#$HOME/}" "$f"
+      total_updated=$((total_updated + 1))
     fi
   done
 else
@@ -610,13 +628,19 @@ fi
 # OpenCode: desde ~/.config/opencode/skills/ hacen falta 3 niveles para llegar a $HOME.
 rc=0
 ensure_symlink "$OPENCODE_SKILLS_DIR/_shared" "../../../.agents/skills/_shared" || rc=$?
-if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
+case "$rc" in
+  1) total_updated=$((total_updated + 1)) ;;
+  2) total_failures=$((total_failures + 1)) ;;
+esac
 
 # Claude: desde ~/.claude/skills/ hacen falta 2 niveles para llegar a $HOME.
 if [[ -d "$HOME/.claude" ]]; then
   rc=0
   ensure_symlink "$CLAUDE_SKILLS_DIR/_shared" "../../.agents/skills/_shared" || rc=$?
-  if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
+  case "$rc" in
+    1) total_updated=$((total_updated + 1)) ;;
+    2) total_failures=$((total_failures + 1)) ;;
+  esac
 fi
 
 # Prompts propios → original en ~/.config/sdd-own/prompts/sdd/ + symlinks por
@@ -640,6 +664,7 @@ for pf in "${OWN_PROMPTS[@]}"; do
       printf "   [pendiente] crear %s\n" "$SDD_OWN_PROMPTS_SDD_DIR"
     elif [[ $CHECK_MODE -eq 1 ]]; then
       printf "   [FALTA]     %s\n" "$SDD_OWN_PROMPTS_SDD_DIR"
+      total_updated=$((total_updated + 1))
     else
       mkdir -p "$SDD_OWN_PROMPTS_SDD_DIR" || { printf "   [ERROR]     no se pudo crear %s\n" "$SDD_OWN_PROMPTS_SDD_DIR" >&2; total_failures=$((total_failures + 1)); continue; }
     fi
@@ -649,6 +674,7 @@ for pf in "${OWN_PROMPTS[@]}"; do
       printf "   [pendiente] %s -> %s\n" "$pf" "${dest_own_pf#$HOME/}"
     elif [[ $CHECK_MODE -eq 1 ]]; then
       printf "   [DESYNC]    %s difiere del canónico %s\n" "${dest_own_pf#$HOME/}" "$pf"
+      total_updated=$((total_updated + 1))
     else
       mkdir -p "$(dirname "$dest_own_pf")"
       cp "$src_pf" "$dest_own_pf" || { printf "   [ERROR]     no se pudo copiar %s\n" "$dest_own_pf" >&2; total_failures=$((total_failures + 1)); continue; }
@@ -664,14 +690,20 @@ for pf in "${OWN_PROMPTS[@]}"; do
   # que NO se tocan).
   rc=0
   ensure_symlink "$dest_oc_pf" "../../../sdd-own/prompts/sdd/$pf" || rc=$?
-  if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
+  case "$rc" in
+    1) total_updated=$((total_updated + 1)) ;;
+    2) total_failures=$((total_failures + 1)) ;;
+  esac
 
   # 3) Symlink en ~/.claude/prompts/sdd/<pf> → ~/.config/sdd-own/prompts/sdd/<pf>.
   # Desde ~/.claude/prompts/sdd/ hacen falta 3 niveles (..) para llegar a $HOME.
   if [[ -d "$HOME/.claude" ]]; then
     rc=0
     ensure_symlink "$CLAUDE_PROMPTS_SDD_DIR/$pf" "../../../.config/sdd-own/prompts/sdd/$pf" || rc=$?
-    if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
+    case "$rc" in
+      1) total_updated=$((total_updated + 1)) ;;
+      2) total_failures=$((total_failures + 1)) ;;
+    esac
   fi
 done
 echo
@@ -723,7 +755,10 @@ if [[ -d "$HOME/.claude" ]]; then
     _f="${_c##*/}"
     rc=0
     ensure_symlink "$CLAUDE_COMMANDS_DIR/$_f" "../../.config/opencode/commands/$_f" || rc=$?
-    if [[ $rc -eq 2 ]]; then total_failures=$((total_failures + 1)); fi
+    case "$rc" in
+      1) total_updated=$((total_updated + 1)) ;;
+      2) total_failures=$((total_failures + 1)) ;;
+    esac
   done
 fi
 echo
@@ -763,7 +798,7 @@ sync_opencode_config() {
   local merged=""
   local merged_ok=0
   if command -v jq >/dev/null 2>&1; then
-    if merged="$(jq -s '.[0] as $u | .[1] as $f | ($u | .agent = ((.agent // {}) * $f.agent) | if (has("default_agent") | not) then .default_agent = $f.default_agent else . end | if (has("$schema") | not) then .["$schema"] = $f["$schema"] else . end)' "$target" "$fragment" 2>/dev/null)"; then
+    if merged="$(jq -s --indent 2 '.[0] as $u | .[1] as $f | ($u | .agent = ((.agent // {}) * $f.agent) | if (has("default_agent") | not) then .default_agent = $f.default_agent else . end | if (has("$schema") | not) then .["$schema"] = $f["$schema"] else . end)' "$target" "$fragment" 2>/dev/null)"; then
       merged_ok=1
     fi
   fi
@@ -856,6 +891,7 @@ PYEOF
   if [[ ! -e "$target.bak" ]]; then
     cp -- "$target" "$target.bak" || { printf "   [ERROR]     no se pudo crear respaldo %s\n" "$target.bak" >&2; return 2; }
   fi
+  # salida pretty (indent=2); los comentarios del .jsonc no se preservan (M3).
   printf '%s\n' "$merged" > "$target" || { printf "   [ERROR]     no se pudo escribir %s\n" "$target" >&2; return 2; }
   printf "   [actualizado] %s (respaldo en .bak)\n" "$target"
   return 1

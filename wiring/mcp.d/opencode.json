@@ -4,6 +4,7 @@
   "merge": "json-key",
   "root_key": "mcp",
   "server_key": "github",
+  "deps": ["uv", "donsetch"],
   "presence": "[ -n \"${OPENCODE_CONFIG:-}\" ] || [ -f \"$HOME/.config/opencode/opencode.jsonc\" ] || [ -f \"$HOME/.config/opencode/opencode.json\" ]",
   "block": {
     "github": {
@@ -27,6 +28,11 @@
         "-m",
         "src.server"
       ]
+    },
+    "donsetch": {
+      "type": "local",
+      "enabled": true,
+      "command": ["donsetch", "mcp"]
     }
   },
   "alt_docker": {
