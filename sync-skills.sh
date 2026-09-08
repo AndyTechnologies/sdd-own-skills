@@ -101,8 +101,8 @@ SDD_OWN_PROMPTS_SDD_DIR="$SDD_OWN_DIR/prompts/sdd"
 SHARED_BOOTSTRAP=(README.md engram-convention.md openspec-convention.md persistence-contract.md \
   research-lifecycle.md sdd-orchestrator-sections.md sdd-status-contract.md skill-resolver.md)
 
-# Prompts propios que desplegamos (Alan no gestiona estos 2 paths).
-OWN_PROMPTS=(orchestrator.md sdd-rfc-author.md)
+# Prompts propios que desplegamos (Alan no gestiona estos 3 paths).
+OWN_PROMPTS=(orchestrator.md sdd-rfc-author.md sdd-council.md)
 
 # --- Opciones --------------------------------------------------------------
 
@@ -798,7 +798,7 @@ sync_opencode_config() {
   local merged=""
   local merged_ok=0
   if command -v jq >/dev/null 2>&1; then
-    if merged="$(jq -s --indent 2 '.[0] as $u | .[1] as $f | ($u | .agent = ((.agent // {}) * $f.agent) | if (has("default_agent") | not) then .default_agent = $f.default_agent else . end | if (has("$schema") | not) then .["$schema"] = $f["$schema"] else . end)' "$target" "$fragment" 2>/dev/null)"; then
+    if merged="$(jq -s --indent 2 '.[0] as $u | .[1] as $f | ($u | .agent = ((.agent // {}) * $f.agent) | if (has("default_agent") | not) then .default_agent = $f.default_agent else . end | if (has("$schema") | not) then .["$schema"] = $f["$schema"] else . end | .subagent_depth = ($f.subagent_depth // $u.subagent_depth))' "$target" "$fragment" 2>/dev/null)"; then
       merged_ok=1
     fi
   fi
@@ -863,6 +863,10 @@ if "default_agent" not in user:
     user["default_agent"] = frag["default_agent"]
 if "$schema" not in user:
     user["$schema"] = frag.get("$schema")
+if "subagent_depth" in frag:
+    # R1 sanction: the ONLY top-level fragment key beyond agent/default_agent.
+    # Fragment-wins (like agent.*), idempotent; the previous value stays in .bak.
+    user["subagent_depth"] = frag["subagent_depth"]
 sys.stdout.write(json.dumps(user, indent=2, ensure_ascii=False) + "\n")
 PYEOF
 )"; then

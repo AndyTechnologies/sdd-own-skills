@@ -6,8 +6,9 @@
 3. sdd-propose — create the proposal from the approved RFC + exploration.
 4. sdd-spec — write specifications.
 5. sdd-design — create technical design.
-6. sdd-architecture-lint — independently review the design when it touches architecture boundaries (new layers, ports/adapters, dependency injection, module boundaries, external access); register `N/A` and skip for local boundary-free changes.
-7. sdd-tasks — break down into implementation tasks.
+6. sdd-council — ALWAYS after design: delegate the multi-voice council (3 independent lens agents in parallel, acta persisted at `openspec/changes/{change-name}/council.md`). Convergence → continue without user interruption; fork → the user decides (the model never decides forks alone); max 2 rounds, then STOP with a report. Empty/trivial design → `N/A`.
+7. sdd-architecture-lint — ALWAYS after the council with the acta as MANDATORY input: axis 1 (requirements/scope/boundaries) unchanged; axis 2 verifies the acta decisions title-by-title and fails closed if the acta is missing. `N/A` only for an empty/trivial design — never a boundary-conditional skip.
+8. sdd-tasks — break down into implementation tasks.
 
-The quest and the lint are SUPPORT hooks: they never join `nextRecommended` and never alter it; detection is by artifact presence/state, exactly as in `/sdd-continue`. Delegate phase and support work only to dedicated sub-agents (never run support phases inline). In `interactive` mode, pause after each phase and ask before the next; in `auto` mode, run the fast-forward back-to-back with the organic hooks applied.
+The quest, the council, and the lint are SUPPORT hooks: they never join `nextRecommended` and never alter it; detection is by artifact presence/state, exactly as in `/sdd-continue`. Delegate phase and support work only to dedicated sub-agents (never run support phases inline). In `interactive` mode, pause after each phase and ask before the next; in `auto` mode, run the fast-forward back-to-back with the organic hooks applied.
 <!-- sdd-own:cmd-sdd-ff-quest-support:end -->

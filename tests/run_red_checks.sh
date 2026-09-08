@@ -17,6 +17,9 @@
 #   T23 permisos C2         T24 selector no-interactivo T25 selector pty (toggle)
 #   T26 worktree contrato   T27 E1 doc-contract        T28 contract pins overlays
 #   T29 synthetic SWU probe T30 sync + id hygiene       T31 F4 hook pins
+#   T32 council always-fire T33 wiring council/lenses  T34 OWN_PROMPTS + file
+#   T35 acta fail-closed    T36 convergence/fork/2r     T37 fragment SDD-only
+#   T38 subagent_depth 2    T39 merge ambos motores
 #
 # Exit: 0 = todo verde (skips permitidos), 1 = fallos.
 # =============================================================================
@@ -587,6 +590,147 @@ t "T31 F4 hook pins: preflight shape, lossless consent, never skips human, decli
   grep -q 'candidate-scoped' "$orch" || { ko "F4: sin candidate-scoped decline"; bad=1; }
   grep -q 'continues to archive' "$orch" || { ko "F4: sin continues to archive"; bad=1; }
   grep -q 'informational no-op' "$orch" || { ko "F4: sin informational no-op"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T32 council always-fire: orchestrator hooks, arch-lint axis 2, overlays rout ALWAYS"
+{
+  bad=0
+  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
+  grep -q 'design → council (ALWAYS) → arch-lint (ALWAYS, acta mandatory) → gate' "$orch" || { ko "orchestrator: sin cadena council ALWAYS en rule 4"; bad=1; }
+  grep -q 'post-design hooks' "$orch" || { ko "orchestrator: sin hooks item 3"; bad=1; }
+  grep -q 'delegate the post-design council ALWAYS' "$orch" || { ko "orchestrator: hooks sin council ALWAYS"; bad=1; }
+  grep -q 'MANDATORY input' "$orch" || { ko "orchestrator: sin acta MANDATORY"; bad=1; }
+  grep -q 'fails axis 2 closed' "$orch" || { ko "orchestrator: sin fail-closed axis 2"; bad=1; }
+  grep -q 'runs ALWAYS AFTER `design`' "$REPO/overlays/commands/sdd-continue.md" || { ko "sdd-continue: sin council ALWAYS"; bad=1; }
+  grep -q 'sdd-council — ALWAYS after design' "$REPO/overlays/commands/sdd-ff.md" || { ko "sdd-ff: sin council ALWAYS"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T33 wiring council: 4 agentes, allow-lists, prompt file-based, sin __managed_by"
+{
+  bad=0
+  w="$REPO/wiring/opencode.sdd.json"
+  for a in sdd-council sdd-council-arch sdd-council-product sdd-council-risk; do
+    jq -e --arg a "$a" '.agent[$a] != null' "$w" >/dev/null 2>&1 || { ko "agente $a ausente"; bad=1; }
+  done
+  jq -e '.agent["gentle-orchestrator"].permission.task["sdd-council"] == "allow"' "$w" >/dev/null 2>&1 || { ko "orchestrator no permite sdd-council"; bad=1; }
+  for l in sdd-council-arch sdd-council-product sdd-council-risk; do
+    jq -e --arg l "$l" '.agent["sdd-council"].permission.task[$l] == "allow"' "$w" >/dev/null 2>&1 || { ko "council no permite $l"; bad=1; }
+  done
+  jq -e '.agent["sdd-council"].mode == "subagent" and .agent["sdd-council"].hidden == true and (.agent["sdd-council"].permission.task["*"] == "deny")' "$w" >/dev/null 2>&1 || { ko "council mode/hidden/deny-* mal"; bad=1; }
+  jq -e '.agent["sdd-council"].prompt == "{file:./prompts/sdd/sdd-council.md}"' "$w" >/dev/null 2>&1 || { ko "council sin prompt file-based"; bad=1; }
+  for l in sdd-council-arch sdd-council-product sdd-council-risk; do
+    jq -e --arg l "$l" '.agent[$l].mode == "subagent" and .agent[$l].hidden == true and (.agent[$l].permission | length) == 0' "$w" >/dev/null 2>&1 || { ko "lens $l mode/hidden/permission mal"; bad=1; }
+    jq -e --arg l "$l" '.agent[$l].prompt | contains("## Lens:")' "$w" >/dev/null 2>&1 || { ko "lens $l no referencia su seccion"; bad=1; }
+  done
+  jq -e '[.agent["sdd-council"], .agent["sdd-council-arch"], .agent["sdd-council-product"], .agent["sdd-council-risk"]] | map(has("__managed_by")) | all(. == false)' "$w" >/dev/null 2>&1 || { ko "agentes nuevos con __managed_by"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T34 OWN_PROMPTS + files: sdd-council.md instalable, skill full delegate_only"
+{
+  bad=0
+  grep -q 'OWN_PROMPTS=(orchestrator.md sdd-rfc-author.md sdd-council.md)' "$REPO/sync-skills.sh" || { ko "OWN_PROMPTS sin sdd-council.md"; bad=1; }
+  [[ -f "$REPO/wiring/prompts/sdd/sdd-council.md" ]] || { ko "wiring/prompts/sdd/sdd-council.md ausente"; bad=1; }
+  [[ -f "$REPO/skills/sdd-council/SKILL.md" ]] || { ko "skills/sdd-council/SKILL.md ausente"; bad=1; }
+  grep -q 'delegate_only: true' "$REPO/skills/sdd-council/SKILL.md" || { ko "council skill sin delegate_only"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T35 acta fail-closed: axis 2 MANDATORY, title-by-title, 3 lenses, N/A solo trivial"
+{
+  bad=0
+  al="$REPO/skills/sdd-architecture-lint/SKILL.md"
+  grep -q 'Axis 2' "$al" || { ko "arch-lint sin Axis 2"; bad=1; }
+  grep -q 'MANDATORY input' "$al" || { ko "arch-lint sin acta MANDATORY"; bad=1; }
+  grep -q 'FAILS CLOSED' "$al" || { ko "arch-lint sin fail-closed"; bad=1; }
+  grep -q 'title-by-title' "$al" || { ko "arch-lint sin title-by-title"; bad=1; }
+  grep -q 'empty or trivial design' "$al" || { ko "arch-lint sin N/A-trivial"; bad=1; }
+  n="$(grep -c '^## Lens:' "$REPO/skills/sdd-council/SKILL.md")"
+  [[ "$n" == "3" ]] || { ko "council con $n secciones lens (esperado 3)"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T36 convergence/fork: fast-path sin interrupcion, forks al user, 2 rounds STOP"
+{
+  bad=0
+  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
+  grep -q 'does NOT interrupt the user' "$orch" || { ko "orchestrator: sin convergence fast-path"; bad=1; }
+  grep -q 'never decides forks alone' "$orch" || { ko "orchestrator: sin fork-al-user"; bad=1; }
+  grep -q 'Max 2 rounds' "$orch" || { ko "orchestrator: sin budget 2 rounds"; bad=1; }
+  sk="$REPO/skills/sdd-council/SKILL.md"
+  grep -q 'does NOT interrupt the user' "$sk" || { ko "council: sin fast-path"; bad=1; }
+  grep -q 'NEVER decides forks alone' "$sk" || { ko "council: sin fork-al-user"; bad=1; }
+  grep -q 'Max 2 rounds' "$sk" || { ko "council: sin budget 2 rounds"; bad=1; }
+  grep -q '### Decision:' "$sk" || { ko "council: sin acta decisions"; bad=1; }
+  grep -q 'never decides forks alone' "$REPO/overlays/commands/sdd-continue.md" || { ko "sdd-continue: sin fork-al-user"; bad=1; }
+  grep -q 'max 2 rounds' "$REPO/overlays/commands/sdd-continue.md" || { ko "sdd-continue: sin 2-round budget"; bad=1; }
+  grep -q 'never decides forks alone' "$REPO/overlays/commands/sdd-ff.md" || { ko "sdd-ff: sin fork-al-user"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T37 fragment SDD-only: sin mcp ni runtimes; keys sancionadas; default_agent preservado"
+{
+  bad=0
+  w="$REPO/wiring/opencode.sdd.json"
+  jq -e 'has("mcp") | not' "$w" >/dev/null 2>&1 || { ko "fragment con mcp (viola R1)"; bad=1; }
+  for k in providers permission share model; do
+    jq -e --arg k "$k" 'has($k) | not' "$w" >/dev/null 2>&1 || { ko "fragment con llave $k"; bad=1; }
+  done
+  jq -e 'keys | sort == ["$schema","agent","default_agent","subagent_depth"]' "$w" >/dev/null 2>&1 || { ko "keys del fragment no sancionadas"; bad=1; }
+  jq -e '.default_agent | type == "string"' "$w" >/dev/null 2>&1 || { ko "default_agent perdido"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T38 subagent_depth: 2 en fragment y en config instalado (jsonc-first)"
+{
+  bad=0
+  jq -e '.subagent_depth == 2' "$REPO/wiring/opencode.sdd.json" >/dev/null 2>&1 || { ko "fragment sin subagent_depth==2"; bad=1; }
+  ocf="$HOME/.config/opencode/opencode.jsonc"
+  [[ -f "$ocf" ]] || ocf="$HOME/.config/opencode/opencode.json"
+  [[ -f "$ocf" ]] || { ko "config instalado no hallado ($ocf)"; bad=1; }
+  jq -e '.subagent_depth == 2' "$ocf" >/dev/null 2>&1 || { ko "config instalado sin subagent_depth==2 (pre-sync esperado)"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T39 merge extendido en ambos motores: --check zero desyncs con jq y con python forzado"
+{
+  bad=0
+  # Leg 1: engine jq (normal).
+  ( cd "$REPO" && timeout 120 ./sync-skills.sh --check --skip-gentleai-sync ) > "$SB_TMP/t39-jq.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 124 ]] && { ko "leg jq colgado >120s"; bad=1; }
+  d="$(grep -c '^\s*\[DESYNC\]' "$SB_TMP/t39-jq.txt")"
+  [[ "$d" == "0" ]] || { ko "leg jq desyncs = $d (esperado 0)"; bad=1; }
+  grep -q '\[ERROR\]\s*:\s*0\|Errores\s*:\s*0' "$SB_TMP/t39-jq.txt" || { ko "leg jq errores estructurales"; bad=1; }
+
+  # Leg 2: engine python forzado — ocultar jq de PATH con un shim del dir completo.
+  jq_holders=()
+  while IFS= read -r e; do
+    [[ -n "$e" && -x "$e/jq" ]] && jq_holders+=("$e")
+  done < <(printf '%s' "$PATH" | tr ':' '\n')
+  shim="$SB_TMP/nojq"
+  mkdir -p "$shim"
+  for b in bash sh cat cp ln mkdir sed sort uniq diff dirname perl python3 python mktemp chmod touch wc tr date readlink realpath basename grep head tail awk sha256sum env timeout nice; do
+    p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$shim/$b"
+  done
+  clean_path=""
+  while IFS= read -r e; do
+    skip=0
+    for h in "${jq_holders[@]}"; do [[ "$e" == "$h" ]] && skip=1; done
+    [[ -n "$e" && $skip -eq 0 ]] && clean_path="${clean_path:+$clean_path:}$e"
+  done < <(printf '%s' "$PATH" | tr ':' '\n')
+  nojq_env="PATH=$shim:$clean_path"
+  if env "$nojq_env" bash -c 'command -v jq' >/dev/null 2>&1; then
+    ko "shim no oculto jq (command -v jq sigue resolviendo)"; bad=1
+  fi
+  ( cd "$REPO" && env "$nojq_env" timeout 120 ./sync-skills.sh --check --skip-gentleai-sync ) > "$SB_TMP/t39-py.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 124 ]] && { ko "leg python colgado >120s"; bad=1; }
+  d="$(grep -c '^\s*\[DESYNC\]' "$SB_TMP/t39-py.txt")"
+  [[ "$d" == "0" ]] || { ko "leg python desyncs = $d (esperado 0)"; bad=1; }
+  grep -q '\[ERROR\]\s*:\s*0\|Errores\s*:\s*0' "$SB_TMP/t39-py.txt" || { ko "leg python errores estructurales"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
