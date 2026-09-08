@@ -3,6 +3,8 @@
 Contains:
 - ``DryRunResult`` dataclass (data, summary, fingerprint)
 - ``fingerprint(data)`` — SHA-256 of sorted-JSON
+- ``ECHO_PROTOCOL`` — the canonical two-phase echo contract wording shared by
+  every destructive tool's docstring (E1: single source of truth)
 - Pure classifiers: ``classify_mergeability``, ``classify_merged``, ``safe_to_rerun``
 - ``destructive_flow()`` — Template Method for two-phase ops with echo-back
 
@@ -18,6 +20,9 @@ Safety contract (fail-closed):
   fingerprint is computed over that whole object so echoing it verbatim
   confirms; any drift (or a stripped ``dry_run`` key) is treated as evidence
   of a changed effect and refuses.
+- ``confirm_required`` is an ``ok()`` summary MARKER — it never uses ``err()``
+  and it names the exact parameter to echo back (``confirmed_data``) so the
+  model can act on it (E1).
 """
 
 from __future__ import annotations
@@ -54,6 +59,14 @@ def fp(data: dict[str, Any]) -> str:
     return hashlib.sha256(
         json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+ECHO_PROTOCOL = (
+    "Echo protocol: phase 1 dry_run=true returns display_data "
+    "{dry_run:true, ...effect}; phase 2 confirmed=true requires "
+    "confirmed_data=EXACT <display_data object>; a mismatch or omitted "
+    "confirmed_data returns confirm_required (never executes)."
+)
 
 
 # ---------------------------------------------------------------------------
@@ -252,14 +265,14 @@ def destructive_flow(
     if confirmed_data is None:
         return ok(
             display_data,
-            effect.summary + " [confirm_required: echo the dry-run data back]",
+            effect.summary + " [confirm_required: echo the dry-run data back as confirmed_data]",
         )
 
     echoed_fp = fp(confirmed_data)
     if echoed_fp != display_fp:
         return ok(
             display_data,
-            effect.summary + " [confirm_required: dry-run effect changed, re-confirm]",
+            effect.summary + " [confirm_required: dry-run effect changed — echo the NEW display_data back as confirmed_data]",
         )
 
     # Evidence matches → execute exactly once

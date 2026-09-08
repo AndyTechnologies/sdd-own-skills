@@ -176,3 +176,15 @@ Ready to implement <feature-name>
 ## Provenance
 
 Vendored from [`obra/superpowers`](https://github.com/obra/superpowers) — `skills/using-git-worktrees/SKILL.md` (MIT, Copyright 2025 Jesse Vincent). Adaptation is minimal: suite frontmatter (`license`, `metadata` with `author`/`source`) plus this provenance note; the skill content is unchanged. Trigger scope is worktrees only; this skill does not claim PR, issue, or GitHub-automation triggers.
+
+---
+
+## 6c — MCP-Native Worktree Lifecycle (lockstep convention)
+
+When the supervised worktree MCP tools are available (`gh-git-mcp`: `git_worktree_add`, `git_worktree_list`, `git_worktree_remove`), use them exclusively for the SDD change lifecycle — never raw `git worktree` via bash (no-git-crudo invariant).
+
+- **Location convention.** Worktrees live at `~/.agent_worktrees/<basename(repo_path)>/<change-name>` (HOME-relative, resolved via `Path.home()`), never `/tmp` and never repo-sibling directories. The change name must be a safe slug (`^[A-Za-z0-9][A-Za-z0-9._-]*$`).
+- **Branch naming.** Each change's worktree uses a unique branch `sdd/<change>`.
+- **Per-worktree dependencies and `.codegraph/`.** Install dependencies inside the worktree (pnpm hardlinks, out-of-source builds). Each worktree gets its OWN `.codegraph/` index — never copied, never symlinked, never reused from another checkout (its root and checked-out bytes may differ).
+- **Removal safety.** `git_worktree_remove` is two-phase (dry-run → confirm): removal requires a clean worktree (no uncommitted changes), no live agents (worktree lock liveness), and owner match. If unsafe, removal is skipped/deferred — never forced.
+- **Discovery.** `git_worktree_list` reports existing worktrees; the lockstep lifecycle uses it to verify state before add/remove confirms.

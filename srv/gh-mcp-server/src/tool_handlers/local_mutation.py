@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from src.dryrun import DryRunResult, destructive_flow
+from src.dryrun import DryRunResult, ECHO_PROTOCOL, destructive_flow
 from src.envelope import Envelope, err, ok
 
 if TYPE_CHECKING:
@@ -32,7 +32,13 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
     # ------------------------------------------------------------------
     # 1. git_commit
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(
+        description="Stage all changes and commit (two-phase: dry-run → confirm). "
+        + ECHO_PROTOCOL
+        + " dry-run returns a staged summary with no commit; confirm runs "
+        "git add -A then git commit -m <message>. On failed commit the index "
+        "remains staged (partial state is visible, not a mutation).",
+    )
     async def git_commit(
         path: str,
         message: str,
@@ -40,13 +46,7 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
         confirmed: bool = False,
         confirmed_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Stage all changes and commit (two-phase: dry-run → confirm).
-
-        dry-run: returns staged summary with no commit.
-        confirm: runs ``git add -A`` then ``git commit -m <message>``.
-
-        On failed commit, index remains staged (partial state is visible, not a mutation).
-        """
+        """Stage all changes and commit (two-phase: dry-run → confirm)."""
         validation = _validate_worktree(executor, path)
         if validation:
             return dict(validation)
@@ -110,7 +110,12 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
     # ------------------------------------------------------------------
     # 2. git_delete_branch (local)
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(
+        description="Delete a local branch (two-phase: dry-run → confirm). "
+        + ECHO_PROTOCOL
+        + " Verifies branch is merged before allowing deletion. "
+        "force=true uses -D (deletes even if unmerged).",
+    )
     async def git_delete_branch(
         path: str,
         branch: str,
@@ -119,11 +124,7 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
         confirmed: bool = False,
         confirmed_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Delete a local branch (two-phase: dry-run → confirm).
-
-        Verifies branch is merged before allowing deletion.
-        force=true uses -D (deletes even if unmerged).
-        """
+        """Delete a local branch (two-phase: dry-run → confirm)."""
         validation = _validate_worktree(executor, path)
         if validation:
             return dict(validation)

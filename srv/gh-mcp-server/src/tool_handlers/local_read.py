@@ -1,4 +1,4 @@
-"""Local read handlers — 4 ``git_*`` tools.
+"""Local read handlers — 5 ``git_*`` tools.
 
 All tools:
 - Validate ``path`` is a git worktree
@@ -29,7 +29,7 @@ def _validate_worktree(executor: ExecutorProto, path: str) -> Envelope | None:
 
 
 def register(server: FastMCP, executor: ExecutorProto) -> None:
-    """Wire all 4 local read tools into *server*."""
+    """Wire all 5 local read tools into *server*."""
 
     # ------------------------------------------------------------------
     # 1. git_status
@@ -91,3 +91,34 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
         if r.returncode != 0:
             return dict(err("invalid_parameter", r.stderr.strip()))
         return dict(ok({"branches": r.stdout}, f"Branches for {path}"))
+
+    # ------------------------------------------------------------------
+    # 5. git_worktree_list
+    # ------------------------------------------------------------------
+    @server.tool()
+    async def git_worktree_list(path: str) -> dict[str, Any]:
+        """List all git worktrees (including main) for a repo. Idempotent read."""
+        validation = _validate_worktree(executor, path)
+        if validation:
+            return dict(validation)
+        r = executor.run(["git", "-C", path, "worktree", "list", "--porcelain"])
+        if r.returncode != 0:
+            return dict(err("invalid_parameter", r.stderr.strip()))
+        # Porcelain format: blocks of "key value" lines separated by blank lines.
+        worktrees: list[dict[str, str]] = []
+        current: dict[str, str] = {}
+        for line in r.stdout.splitlines():
+            if not line.strip():
+                if current:
+                    worktrees.append(current)
+                    current = {}
+                continue
+            key, _, value = line.partition(" ")
+            current[key] = value
+        if current:
+            worktrees.append(current)
+        summary = "; ".join(
+            f"{w.get('branch', 'detached')} @ {w.get('worktree', '?')}"
+            for w in worktrees
+        )
+        return dict(ok({"worktrees": worktrees}, f"{len(worktrees)} worktree(s): {summary}"))

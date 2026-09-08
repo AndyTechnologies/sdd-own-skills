@@ -64,6 +64,8 @@ mcp_report_pend=0
 mcp_report_skip=0
 mcp_report_error=0
 deps_missing=()
+network_degraded=0
+SELECTED_RUNTIMES=()
 
 # ---- limpieza de tmpfiles en cualquier salida (S1) --------------------------
 # El config tmp de curl contiene el token literal (curl no expande ${VAR} en -K);
@@ -288,6 +290,14 @@ backup_env_file() {
   printf '  [ok]      env file respaldado (.bak) para rotacion\n'
 }
 
+# degrade <mensaje> — degradacion suave ante fallo de red (F5): marca la red como
+# no disponible, avisa al usuario y deja que el flujo continue (NO aborta).
+degrade() {
+  network_degraded=1
+  printf '  [aviso] %s\n' "$1"
+  return 0
+}
+
 # prompt_new_token <motivo> — pide (read -rs), valida <=3, persiste solo con 200
 prompt_new_token() {
   local why="$1"
@@ -306,8 +316,8 @@ prompt_new_token() {
         SDD_OWN_VALIDATION_SCOPES="${st#200|}"
         ok=1; break ;;
       network*)
-        printf '[ERROR] fallo de red al validar el token; no se persiste nada\n' >&2
-        exit 2
+        degrade "fallo de red al validar el token; no se persiste nada"
+        return 0
         ;;
       *)
         printf '  [aviso] token rechazado (HTTP %s); intento %d/3\n' "${st#invalid }" "$try" ;;
@@ -630,6 +640,313 @@ PYEOF
   done <<< "$deps"
 }
 
+# select_runtimes — selector de runtimes para el deploy MCP (F5). Candidatos:
+# union de runtimes declarados en los envelopes filtrando por presencia (misma
+# regla que 5a/5f); si algun envelope declara "selectors", restringe a esa lista
+# (primera no nula). Sin TTY o modo != real: seleccion automatica de todos.
+# Interactivo: espacio = toggle, flechas = mover, Enter = confirmar. La seleccion
+# NUNCA se persiste: rige solo para esta ejecucion (SELECTED_RUNTIMES).
+select_runtimes() {
+  local envelope="" runtime="" presence="" sels="" sel="" union=() list=()
+  local i=0 n=0 cur=0 key="" seq="" mark="" check=""
+  local envelopes_glob=("$SCRIPT_DIR"/wiring/mcp.d/*.json)
+  if [[ -e "${envelopes_glob[0]}" ]]; then
+    for envelope in "${envelopes_glob[@]}"; do
+      runtime="$(jget "$envelope" '.runtime' 2>/dev/null)" || continue
+      union+=("$runtime")
+    done
+  fi
+  # 1) filtro por presencia
+  for runtime in "${union[@]:-}"; do
+    envelope="$SCRIPT_DIR/wiring/mcp.d/$runtime.json"
+    presence="$(jget "$envelope" '.presence // ""' 2>/dev/null || true)"
+    if [[ -z "$presence" ]] || bash -c "$presence" 2>/dev/null; then
+      list+=("$runtime")
+    fi
+  done
+  # 2) restriccion por "selectors" (primera lista no nula entre envelopes)
+  for envelope in "${envelopes_glob[@]:-}"; do
+    sel="$(jget "$envelope" '.selectors // null' 2>/dev/null || true)"
+    if [[ -n "$sel" && "$sel" != "null" ]]; then
+      sels="$sel"
+      break
+    fi
+  done
+  if [[ -n "$sels" ]]; then
+    local filtered=()
+    for runtime in "${list[@]:-}"; do
+      if [[ "$sels" == *"\"$runtime\""* ]]; then
+        filtered+=("$runtime")
+      fi
+    done
+    list=("${filtered[@]:-}")
+  fi
+  if [[ ${#list[@]} -eq 0 ]]; then
+    printf '  [aviso]     sin runtimes declarados/presentes para configurar\n'
+    SELECTED_RUNTIMES=()
+    return 0
+  fi
+  n=${#list[@]}
+  for ((i=0; i<n; i++)); do state[$i]=1; done
+  # 3) sin TTY o modo != real: todos seleccionados (no interactivo)
+  if [[ ! -t 0 || "$MCP_MODE" != "real" ]]; then
+    if [[ ! -t 0 ]]; then sel="sin TTY"; else sel="modo $MCP_MODE"; fi
+    printf '  [ok]        selector: %s — todos los runtimes seleccionados (%s)\n' "$sel" "${list[*]}"
+    SELECTED_RUNTIMES=("${list[@]:-}")
+    return 0
+  fi
+  # 4) loop interactivo
+  cur=0
+  printf '  Runtimes a configurar (espacio = toggle, Enter = confirmar):\n'
+  while :; do
+    for ((i=0; i<n; i++)); do
+      if [[ $i -eq $cur ]]; then mark='>'; else mark=' '; fi
+      if [[ ${state[$i]:-0} -eq 1 ]]; then check='x'; else check=' '; fi
+      printf '    %s [%s] %s\n' "$mark" "$check" "${list[$i]}"
+    done
+    printf '\033[%dA' "$n"
+    # IFS= : read -rsn1 aplica word-splitting del token por IFS; un espacio solo
+    # se dividiria en cero palabras y la tecla llegaria vacia (break inmediato).
+    # Con IFS vacio el caracter crudo se preserva (idioma estandar para teclas).
+    IFS= read -rsn1 key || true
+    case "$key" in
+      " ")
+        state[$cur]=$(( 1 - ${state[$cur]:-0} ))
+        ;;
+      $'\e')
+        IFS= read -rsn2 seq || true
+        case "$seq" in
+          "[A") cur=$(( (cur - 1 + n) % n )) ;;
+          "[B") cur=$(( (cur + 1) % n )) ;;
+        esac
+        ;;
+      ""|$'\n'|$'\r')
+        break
+        ;;
+    esac
+  done
+  printf '\033[%dB' "$n"
+  SELECTED_RUNTIMES=()
+  for ((i=0; i<n; i++)); do
+    if [[ ${state[$i]:-0} -eq 1 ]]; then
+      SELECTED_RUNTIMES+=("${list[$i]}")
+    fi
+  done
+  if [[ ${#SELECTED_RUNTIMES[@]} -eq 0 ]]; then
+    printf '  [aviso]     ningun runtime seleccionado — no se configuran runtimes\n'
+    SELECTED_RUNTIMES=("__none__")
+  else
+    printf '  [ok]        seleccionados: %s\n' "${SELECTED_RUNTIMES[*]}"
+  fi
+}
+
+# deploy_permission_roots <runtime> <roots_json> <target> — despliega el allow de
+# ~/agent_worktrees (C2) en la config del runtime respetando MCP_MODE. Idempotente:
+# si los permisos ya estan → up-to-date (sin reescritura). Mecanica por runtime:
+# opencode external_directory (glob), claude additionalDirectories + allow
+# tool-specs (literal), pi pi-permission-modes (glob + allowWrite literal),
+# codex sandbox_mode workspace-write + writable_roots (literal, TOML).
+deploy_permission_roots() {
+  local runtime="$1" roots="$2" target="$3"
+  local st=""
+  case "$runtime" in
+    opencode|claude|pi)
+      st="$(PERM_TARGET="$target" PERM_RUNTIME="$runtime" PERM_ROOTS="$roots" MCP_MODE="$MCP_MODE" python3 - <<'PYEOF'
+import json, os, re, sys
+
+mode = os.environ.get("MCP_MODE", "real")
+target = os.environ["PERM_TARGET"]
+runtime = os.environ["PERM_RUNTIME"]
+try:
+    roots = json.loads(os.environ["PERM_ROOTS"])
+except Exception:
+    print("no-parse"); sys.exit(0)
+
+def load_jsonc(path):
+    try:
+        text = open(path, encoding="utf-8").read()
+    except OSError:
+        return {}
+    # strip // y /* */ SOLO fuera de strings (los URLs contienen //)
+    out = []
+    in_str = False
+    esc = False
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if in_str:
+            out.append(c)
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            i += 1
+            continue
+        if c == '"':
+            in_str = True
+            out.append(c)
+            i += 1
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "/":
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "*":
+            i += 2
+            while i < n and not (text[i] == "*" and i + 1 < n and text[i + 1] == "/"):
+                i += 1
+            i += 2
+            continue
+        out.append(c)
+        i += 1
+    text = "".join(out)
+    text = re.sub(r",\s*([}\]])", r"\1", text)
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+conf = load_jsonc(target)
+if conf is None or not isinstance(conf, dict):
+    print("no-parse"); sys.exit(0)
+
+changed = False
+if runtime == "opencode":
+    perm = conf.setdefault("permission", {})
+    if not isinstance(perm, dict):
+        print("no-parse"); sys.exit(0)
+    arr = perm.setdefault("external_directory", [])
+    for g in roots:
+        if g not in arr:
+            arr.append(g); changed = True
+elif runtime == "claude":
+    perms = conf.setdefault("permissions", {})
+    if not isinstance(perms, dict):
+        print("no-parse"); sys.exit(0)
+    ad = perms.setdefault("additionalDirectories", [])
+    allow = perms.setdefault("allow", [])
+    for g in roots:
+        lit = g[:-3] if g.endswith("/**") else g
+        if lit not in ad:
+            ad.append(lit); changed = True
+        spec = "Read|Edit|Glob|Grep(%s)" % g
+        if spec not in allow:
+            allow.append(spec); changed = True
+elif runtime == "pi":
+    sb = conf.setdefault("sandbox", {})
+    perm = conf.setdefault("permission", {})
+    if not isinstance(sb, dict) or not isinstance(perm, dict):
+        print("no-parse"); sys.exit(0)
+    aw = sb.setdefault("allowWrite", [])
+    ed = perm.setdefault("external_directory", {})
+    if not isinstance(ed, dict):
+        ed = {"*": "allow"}; perm["external_directory"] = ed
+    for g in roots:
+        lit = g[:-3] if g.endswith("/**") else g
+        if lit not in aw:
+            aw.append(lit); changed = True
+        if g not in ed:
+            rebuilt = {}
+            if "*" in ed:
+                rebuilt["*"] = ed["*"]
+            for k, v in ed.items():
+                if k not in ("*", g):
+                    rebuilt[k] = v
+            rebuilt[g] = "allow"
+            perm["external_directory"] = rebuilt
+            changed = True
+
+if not changed:
+    print("up-to-date"); sys.exit(0)
+if mode != "real":
+    print("pendiente"); sys.exit(0)
+os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+with open(target, "w", encoding="utf-8") as f:
+    json.dump(conf, f, indent=2)
+    f.write("\n")
+print("actualizado")
+PYEOF
+)" || st="runtime-error"
+      ;;
+    codex)
+      st="$(PERM_TARGET="$target" PERM_ROOTS="$roots" MCP_MODE="$MCP_MODE" python3 - <<'PYEOF'
+import json, os, pathlib, sys
+try:
+    import tomllib
+except ImportError:
+    print("no-tomllib"); sys.exit(0)
+try:
+    import tomli_w
+except ImportError:
+    print("no-tomli-w"); sys.exit(0)
+
+mode = os.environ.get("MCP_MODE", "real")
+target = os.environ["PERM_TARGET"]
+try:
+    roots = json.loads(os.environ["PERM_ROOTS"])
+except Exception:
+    print("no-parse"); sys.exit(0)
+p = pathlib.Path(target).expanduser()
+conf = {}
+if p.exists():
+    try:
+        with open(p, "rb") as f:
+            conf = tomllib.load(f)
+    except Exception:
+        print("no-parse"); sys.exit(0)
+changed = False
+if conf.get("sandbox_mode") != "workspace-write":
+    conf["sandbox_mode"] = "workspace-write"; changed = True
+sww = conf.setdefault("sandbox_workspace_write", {})
+if not isinstance(sww, dict):
+    print("no-parse"); sys.exit(0)
+rl = sww.setdefault("writable_roots", [])
+for g in roots:
+    lit = g[:-3] if g.endswith("/**") else g
+    if lit not in rl:
+        rl.append(lit); changed = True
+if not changed:
+    print("up-to-date"); sys.exit(0)
+if mode != "real":
+    print("pendiente"); sys.exit(0)
+p.parent.mkdir(parents=True, exist_ok=True)
+# dumps() a string y luego escritura: si el python fallara (excepcion inesperada)
+# el archivo NO queda truncado (tomli_w.dump directo abre "w" y escribe bytes a
+# un fd de texto — TypeError que ya rompia el script por set -e).
+with open(p, "w", encoding="utf-8") as f:
+    f.write(tomli_w.dumps(conf))
+print("actualizado")
+PYEOF
+)" || st="runtime-error"
+      ;;
+    *)
+      printf '%s\n' "no-runtime"
+      return 0
+      ;;
+  esac
+  case "$st" in
+    up-to-date)
+      printf '  [ok]        %s: permisos %s presentes\n' "$runtime" "${target#$HOME/}"
+      mcp_report_ok=$((mcp_report_ok + 1)) ;;
+    pendiente)
+      printf '  [pendiente] %s: permisos %s se agregarian en modo real\n' "$runtime" "${target#$HOME/}"
+      mcp_report_pend=$((mcp_report_pend + 1)) ;;
+    actualizado)
+      printf '  [actualizado] %s: permisos %s agregados\n' "$runtime" "${target#$HOME/}"
+      mcp_report_updated=$((mcp_report_updated + 1)) ;;
+    no-parse)
+      printf '  [aviso]     %s: %s no parseable — revisar manualmente\n' "$runtime" "${target#$HOME/}" ;;
+    no-tomllib|no-tomli-w)
+      printf '  [aviso]     codex: modulo %s ausente (permisos omitidos)\n' "${st#no-}" ;;
+    *)
+      printf '  [ERROR]     %s: despliegue de permisos fallo (%s)\n' "$runtime" "$st" >&2
+      mcp_report_error=$((mcp_report_error + 1)) ;;
+  esac
+}
+
 # ---------- main ------------------------------------------------------------------
 
 CHECK_SEEN=0
@@ -828,8 +1145,8 @@ elif [[ "$MCP_MODE" == "check" ]]; then
           mcp_exit=1 ;;
         network*)
           token_status="no verificable (red)"
-          printf '  [ERROR]     no se pudo validar el token (fallo de red) — estado estructural\n' >&2
-          mcp_exit=2 ;;
+          degrade "no se pudo validar el token (fallo de red) — estado no verificable"
+          ;;
       esac
     fi
   else
@@ -893,12 +1210,22 @@ else
 fi
 echo
 
-# ---- 5e merges por runtime ---------------------------------------------------------
-echo "  5e — merges por runtime"
+# ---- 5e selector de runtimes (F5) ---------------------------------------------------
+echo "  5e — selector de runtimes"
+select_runtimes
+echo
+
+# ---- 5f merges por runtime ---------------------------------------------------------
+echo "  5f — merges por runtime"
 for envelope in "${envelopes[@]:-}"; do
   runtime="$(jget "$envelope" '.runtime')" || continue
   presence="$(jget "$envelope" '.presence // ""')"
   if [[ -n "$presence" ]] && ! bash -c "$presence"; then continue; fi
+  if [[ "${#SELECTED_RUNTIMES[@]}" -gt 0 ]] && ! [[ " ${SELECTED_RUNTIMES[*]:-} " == *" $runtime "* ]]; then
+    printf '  [skip]      %s: no seleccionado en el selector\n' "$runtime"
+    mcp_report_skip=$((mcp_report_skip + 1))
+    continue
+  fi
   target_mode="$(jget "$envelope" '.target_mode')"
   if [[ "$target_mode" == "opencode-config" ]]; then
     target="$(resolve_opencode_config)"
@@ -938,8 +1265,32 @@ for envelope in "${envelopes[@]:-}"; do
   fi
 done
 
-# ---- 5f snippet del shell: provision del token al entorno de los agentes ----------
-echo "  5f — env snippet (source manual: token disponible para todos los runtimes)"
+# ---- 5g permisos de archivo: allow de ~/agent_worktrees (C2) ------------------------
+echo "  5g — permisos de ~/agent_worktrees (C2)"
+for envelope in "${envelopes[@]:-}"; do
+  runtime="$(jget "$envelope" '.runtime')" || continue
+  presence="$(jget "$envelope" '.presence // ""')"
+  if [[ -n "$presence" ]] && ! bash -c "$presence"; then continue; fi
+  if [[ "${#SELECTED_RUNTIMES[@]}" -gt 0 ]] && ! [[ " ${SELECTED_RUNTIMES[*]:-} " == *" $runtime "* ]]; then
+    continue
+  fi
+  roots="$(jget "$envelope" '.permission_roots // null')"
+  if [[ -z "$roots" || "$roots" == "null" || "$roots" == "[]" ]]; then continue; fi
+  case "$runtime" in
+    pi)
+      target="$HOME/.pi/agent/permission-mode/permission-mode.json" ;;
+    opencode)
+      target="$(resolve_opencode_config)"
+      [[ -n "$target" ]] || continue ;;
+    *)
+      target="$(jget "$envelope" '.target')"
+      [[ "$target" == \~/* ]] && target="${HOME}${target#\~}" ;;
+  esac
+  deploy_permission_roots "$runtime" "$roots" "$target"
+done
+
+# ---- 5h snippet del shell: provision del token al entorno de los agentes -----------
+echo "  5h — env snippet (source manual: token disponible para todos los runtimes)"
 if [[ "$MCP_MODE" == "real" ]]; then
   if [[ -f "$ENV_FILE" ]]; then
     cur="$(read_env_token)"

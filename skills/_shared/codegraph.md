@@ -16,6 +16,6 @@ CodeGraph is the preferred structural/intelligence surface for codebase question
 
 - Never use `gentle-ai codegraph` as a general proxy: only its `init` command exists to validate the project root before initialization. Intelligence queries belong to the upstream `codegraph` CLI.
 - Never run or recommend destructive or administrative lifecycle commands: `codegraph uninit`, `codegraph install`, `codegraph uninstall`, `codegraph upgrade`. Reserve `codegraph index` for explicit index-corruption recovery, never routine use.
-- Create Git worktrees that may need CodeGraph under the user's home directory, preferably as a sibling such as `<repo-parent>/<repo-name>-worktrees/<worktree-name>`. Never place a CodeGraph-dependent worktree under `/tmp`, `/var/tmp`, or `/tmp/opencode`.
+- Create Git worktrees that may need CodeGraph under the user's home directory at `~/.agent_worktrees/<repo-name>/<change-name>` (HOME-relative, never `/tmp`). Never place a CodeGraph-dependent worktree under `/tmp`, `/var/tmp`, or `/tmp/opencode`.
 - Every worktree needs its own `.codegraph/` index. Never copy, symlink, or reuse another checkout's index; its root and checked-out bytes may differ.
 - Phases that only consume the index (explore, apply) must never initialize or mutate CodeGraph state. Initialization and freshness are `sdd-init`'s responsibility.

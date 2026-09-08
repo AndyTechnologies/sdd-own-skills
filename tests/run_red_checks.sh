@@ -11,9 +11,12 @@
 #   T03 flags y uso         T10 higiene/argv (F1)       T17 hard deps (F4)
 #   T04 argv delegado       T11 scopes faltantes        T18 gate F9
 #   T05 no-mutacion host    T12 keep                    T19 check 401 drift
-#   T06 no-mutacion check   T13 replace (F5)            T20 check red estructural
+#   T06 no-mutacion check   T13 replace (F5)            T20 check red degradada
 #   T07 no-mutacion dry-run T14 colision invalid        T21 regresion + README (F7)
 #                                                       T22 env snippets POSIX+fish
+#   T23 permisos C2         T24 selector no-interactivo T25 selector pty (toggle)
+#   T26 worktree contrato   T27 E1 doc-contract        T28 contract pins overlays
+#   T29 synthetic SWU probe T30 sync + id hygiene       T31 F4 hook pins
 #
 # Exit: 0 = todo verde (skips permitidos), 1 = fallos.
 # =============================================================================
@@ -146,13 +149,14 @@ t "T08 token invalido (401): 3 intentos, nada persistido, exit 2"
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T09 red fallida en modo real: nada persistido, exit 2"
+t "T09 red fallida en modo real: degradacion suave (F5), nada persistido, exit 0"
 {
   bad=0
   init_sandbox; start_fake_api 200; stop_fake_api
-  run_setup_pty 30 'Token de GitHub (PAT): =ghp_NET\n'
-  [[ "$(cat "$SB_TMP/exit")" == "2" ]] || { ko "exit $(cat "$SB_TMP/exit") != 2"; bad=1; }
-  grep -q "fallo de red" "$SB_TMP/out.txt" || { ko "sin mensaje de fallo de red"; bad=1; }
+  run_setup_pty 30 'Token de GitHub (PAT): =ghp_NET\n;Runtimes a configurar=\n'
+  [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0 (degradacion, no aborto)"; bad=1; }
+  grep -q "\[aviso\].*fallo de red" "$SB_TMP/out.txt" || { ko "sin aviso de degradacion por red"; bad=1; }
+  grep -q "no se persiste nada" "$SB_TMP/out.txt" || { ko "sin mensaje de no-persistencia"; bad=1; }
   [[ -e "$SB_HOME/.config/sdd-own/github-mcp.env" ]] && { ko "env file creado sin validacion"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
@@ -164,7 +168,7 @@ t "T10 higiene de secretos y argv (F1)"
   exp_mask="${tok:0:4}....${tok: -4}"
   init_sandbox; start_fake_api 200
   add_env SDD_OWN_DEBUG_CURL_CONFIG="$SB_TMP/curl-config.txt"
-  run_setup_pty 45 "Token de GitHub (PAT): =${tok}\\n;Cambiar el token antes de continuar? [s/N] =n\\n"
+  run_setup_pty 45 "Token de GitHub (PAT): =${tok}\\n;Cambiar el token antes de continuar? [s/N] =n\\n;Runtimes a configurar=\\n"
   [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
   envf="$SB_HOME/.config/sdd-own/github-mcp.env"
   [[ "$(stat -c %a "$envf")" == "600" ]] || { ko "mode $(stat -c %a "$envf") != 600"; bad=1; }
@@ -186,7 +190,7 @@ t "T11 scopes faltantes: aviso + opcion de cambio, run continua"
 {
   bad=0
   init_sandbox; start_fake_api 200 "read:org"
-  run_setup_pty 45 'Token de GitHub (PAT): =ghp_SCOPES\n;Cambiar el token antes de continuar? [s/N] =n\n'
+  run_setup_pty 45 'Token de GitHub (PAT): =ghp_SCOPES\n;Cambiar el token antes de continuar? [s/N] =n\n;Runtimes a configurar=\n'
   [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
   grep -q "faltan scopes clasicos" "$SB_TMP/out.txt" || { ko "sin aviso de scopes faltantes"; bad=1; }
   [[ -f "$SB_HOME/.config/sdd-own/github-mcp.env" ]] || { ko "token no persistido"; bad=1; }
@@ -201,7 +205,7 @@ t "T12 keep: token existente valido conservado (k)"
   init_sandbox; start_fake_api 200
   seed_env_file "ghp_T1KEEP123"
   m0="$(env_file_mtime)"
-  run_setup_pty 45 'Conservar el token existente? [k/R] =k\n'
+  run_setup_pty 45 'Conservar el token existente? [k/R] =k\n;Runtimes a configurar=\n'
   [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
   grep -q "conservado (sin reescritura)" "$SB_TMP/out.txt" || { ko "sin reporte keep"; bad=1; }
   env_file_lines | grep -q "ghp_T1KEEP123" || { ko "env file no conserva el token"; bad=1; }
@@ -215,7 +219,7 @@ t "T13 replace (F5): R respalda .bak 0600 y rota; a lo sumo un .bak"
   bad=0
   init_sandbox; start_fake_api 200
   seed_env_file "ghp_T1REPLACE"
-  run_setup_pty 45 'Conservar el token existente? [k/R] =R\n;Token de GitHub (PAT): =ghp_T2REPLACE\n;Cambiar el token antes de continuar? [s/N] =n\n'
+  run_setup_pty 45 'Conservar el token existente? [k/R] =R\n;Token de GitHub (PAT): =ghp_T2REPLACE\n;Cambiar el token antes de continuar? [s/N] =n\n;Runtimes a configurar=\n'
   [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
   bak="$SB_HOME/.config/sdd-own/github-mcp.env.bak"
   [[ -f "$bak" ]] || { ko "sin .bak tras replace"; bad=1; }
@@ -233,7 +237,7 @@ t "T14 colision: env file invalido existente se reemplaza con .bak del invalido"
   bad=0
   init_sandbox; start_fake_api 200 "" 1   # primer request 401, resto 200
   seed_env_file "ghp_STALEINV"
-  run_setup_pty 45 'Token de GitHub (PAT): =ghp_NEWVALID\n;Cambiar el token antes de continuar? [s/N] =n\n'
+  run_setup_pty 45 'Token de GitHub (PAT): =ghp_NEWVALID\n;Cambiar el token antes de continuar? [s/N] =n\n;Runtimes a configurar=\n'
   [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
   grep -q "reemplazo del token invalido" "$SB_TMP/out.txt" || { ko "sin flujo de reemplazo del invalido"; bad=1; }
   grep -q "ghp_STALEINV" "$SB_HOME/.config/sdd-own/github-mcp.env.bak" || { ko ".bak no conserva el invalido previo"; bad=1; }
@@ -258,7 +262,7 @@ t "T15 presence/creacion (F2): pi crea target sin .bak; re-run up-to-date; resto
   jq -e '.mcpServers.github.url == "https://api.githubcopilot.com/mcp/"' "$pif" >/dev/null 2>&1 || { ko "bloque pi invalido"; bad=1; }
   [[ -e "$pif.bak" ]] && { ko "pi recien creado con .bak"; bad=1; }
   ocf="$SB_HOME/.config/opencode/opencode.jsonc"
-  [[ -e "$ocf.bak" ]] || { ko "opencode existente sin .bak en su primer merge"; bad=1; }
+  ls "$ocf".bak.* >/dev/null 2>&1 || { ko "opencode existente sin .bak en su primer merge"; bad=1; }
   jq -e '.mcp.github' "$ocf" >/dev/null 2>&1 || { ko "opencode: mcp.github no mergeado"; bad=1; }
   jq -e '.mcp.codegraph' "$ocf" >/dev/null 2>&1 || { ko "opencode: mcp.codegraph perdido en el merge"; bad=1; }
   snapshot_tree "$SB_HOME" "$SB_TMP/t1.txt"
@@ -362,15 +366,16 @@ t "T19 --check + token invalido → exit 1 (drift)"
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T20 --check + API inalcanzable → exit 2 (estructural)"
+t "T20 --check + API inalcanzable → degradacion (F5): exit 0, aviso, sin estructural"
 {
   bad=0
   init_sandbox
   SB_PORT="$(api_dead_port)"
   seed_env_file "ghp_NETCHECK"
   run_setup --check </dev/null
-  [[ "$(cat "$SB_TMP/exit")" == "2" ]] || { ko "exit $(cat "$SB_TMP/exit") != 2"; bad=1; }
-  grep -q "estado estructural" "$SB_TMP/out.txt" || { ko "sin reporte estructural"; bad=1; }
+  [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0 (degradacion, no estructural)"; bad=1; }
+  grep -q "\[aviso\].*fallo de red" "$SB_TMP/out.txt" || { ko "sin aviso de degradacion por red"; bad=1; }
+  grep -q "estado estructural" "$SB_TMP/out.txt" && { ko "se reporta estado estructural en degradacion"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
@@ -406,7 +411,7 @@ t "T22 env snippets: env.sh (POSIX) + env.fish (fish) 0600, export/set -gx, inst
     *)    rc_expected=".bashrc" ;;
   esac
   init_sandbox; start_fake_api 200
-  run_setup_pty 45 'Token de GitHub (PAT): =ghp_T22SNIP\n;Cambiar el token antes de continuar? [s/N] =n\n'
+  run_setup_pty 45 'Token de GitHub (PAT): =ghp_T22SNIP\n;Cambiar el token antes de continuar? [s/N] =n\n;Runtimes a configurar=\n'
   [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
   s="$SB_HOME/.config/sdd-own/env.sh"
   f="$SB_HOME/.config/sdd-own/env.fish"
@@ -420,6 +425,168 @@ t "T22 env snippets: env.sh (POSIX) + env.fish (fish) 0600, export/set -gx, inst
   grep -q "ghp_T22SNIP" "$f" || { ko "env.fish sin token"; bad=1; }
   out_contains "source" || { ko "sin instruccion de source en la salida"; bad=1; }
   grep -q "$rc_expected" "$SB_TMP/out.txt" || { ko "instruccion no nombra $rc_expected (shell del host)"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T23 permisos C2: opencode external_directory con ~/agent_worktrees/**; idempotente"
+{
+  bad=0
+  init_sandbox; start_fake_api 200
+  seed_env_file "ghp_PERM001"
+  run_setup </dev/null
+  [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
+  ocf="$SB_HOME/.config/opencode/opencode.jsonc"
+  jq -e '.permission.external_directory | index("~/agent_worktrees/**")' "$ocf" >/dev/null 2>&1 \
+    || { ko "permission.external_directory sin ~/agent_worktrees/**"; bad=1; }
+  jq -e '.mcp.codegraph' "$ocf" >/dev/null 2>&1 || { ko "mcp.codegraph perdido por el patcher de permisos"; bad=1; }
+  grep -q "permisos .*agregados" "$SB_TMP/out.txt" || { ko "sin reporte [actualizado] de permisos"; bad=1; }
+  m1="$(stat -c %Y "$ocf")"
+  sleep 1.1
+  run_setup </dev/null
+  [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "re-run exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
+  grep -q "permisos .*presentes" "$SB_TMP/out.txt" || { ko "re-run sin reporte de permisos presentes"; bad=1; }
+  m2="$(stat -c %Y "$ocf")"
+  [[ "$m1" == "$m2" ]] || { ko "re-run reescribio la config (permisos no idempotentes)"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T24 selector no interactivo (--check): todos los runtimes, sin prompts"
+{
+  bad=0
+  init_sandbox; start_fake_api 200
+  seed_env_file "ghp_SELCHK"
+  run_setup --check </dev/null
+  [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
+  grep -q "todos los runtimes seleccionados" "$SB_TMP/out.txt" || { ko "sin seleccion automatica de todos en --check"; bad=1; }
+  grep -q "Runtimes a configurar (espacio" "$SB_TMP/out.txt" && { ko "selector interactivo mostrado en --check"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T25 selector interactivo (pty): espacio deselecciona opencode; pi se mergea"
+{
+  bad=0
+  init_sandbox; start_fake_api 200
+  seed_env_file "ghp_SELPTY"
+  run_setup_pty 45 'Conservar el token existente? [k/R] =k\n;Runtimes a configurar= \n'
+  [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
+  grep -q "seleccionados: pi" "$SB_TMP/out.txt" || { ko "sin reporte de seleccion final (pi)"; bad=1; }
+  grep -q "no seleccionado en el selector" "$SB_TMP/out.txt" || { ko "sin [skip] del runtime deseleccionado"; bad=1; }
+  pif="$SB_HOME/.pi/agent/mcp.json"
+  [[ -f "$pif" ]] || { ko "pi mcp.json no creado"; bad=1; }
+  jq -e '.mcpServers.github' "$pif" >/dev/null 2>&1 || { ko "bloque pi ausente"; bad=1; }
+  ocf="$SB_HOME/.config/opencode/opencode.jsonc"
+  if jq -e '.mcp.github' "$ocf" >/dev/null 2>&1; then
+    ko "opencode mergeado pese a estar deseleccionado"; bad=1
+  fi
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T26 worktree MCP contrato: 3 tools, Path.home(), destructive_flow, catalogo cerrado"
+{
+  bad=0
+  src="$REPO/srv/gh-mcp-server/src"
+  grep -q "register_worktree_mutation" "$src/tool_handlers/__init__.py" || { ko "familia worktree no registrada"; bad=1; }
+  grep -q "git_worktree_add" "$src/tool_handlers/worktree_mutation.py" || { ko "git_worktree_add ausente"; bad=1; }
+  grep -q "git_worktree_remove" "$src/tool_handlers/worktree_mutation.py" || { ko "git_worktree_remove ausente"; bad=1; }
+  grep -q "git_worktree_list" "$src/tool_handlers/local_read.py" || { ko "git_worktree_list ausente en local_read"; bad=1; }
+  grep -q "Path.home()" "$src/tool_handlers/worktree_mutation.py" || { ko "resolucion HOME-relative ausente (Path.home())"; bad=1; }
+  grep -q "destructive_flow" "$src/tool_handlers/worktree_mutation.py" || { ko "two-phase destructive_flow no usado en worktree"; bad=1; }
+  for et in auth_required repo_not_found network_error not_found not_a_repo dirty_worktree not_safe commit_failed invalid_parameter worktree_exists active_agents owned_by_other; do
+    grep -q "$et" "$src/envelope.py" || { ko "catalogo cerrado sin $et"; bad=1; }
+  done
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T27 E1 doc-contract: 7 descripciones dos-fases citan ECHO_PROTOCOL; confirm_required nunca err()"
+{
+  bad=0
+  src="$REPO/srv/gh-mcp-server/src"
+  n="$(grep -rh '+ ECHO_PROTOCOL' "$src"/tool_handlers/*.py | wc -l)"
+  [[ "$n" == "7" ]] || { ko "descripciones con ECHO_PROTOCOL = $n (esperado 7)"; bad=1; }
+  hits="$(grep -rn --include='*.py' 'err("confirm_required"\|err('\''confirm_required'\''' "$src" | wc -l)"
+  [[ "$hits" == "0" ]] || { ko "confirm_required usado como err() ($hits hits)"; bad=1; }
+  grep -q 'confirm_required' "$src/dryrun.py" || { ko "confirm_required ausente en dryrun.py (marker ok)"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+# ---------------- Grupo 7: SDD workflow hardening pins ------------------------
+
+t "T28 contract pins: fail-closed, untrusted DATA, 4 tokens, delimited evidence, not-verifiable, blocked(edit_authority_missing)"
+{
+  bad=0
+  # Orchestrator rule 2 pins
+  grep -q 'fail-closed' "$REPO/wiring/prompts/sdd/orchestrator.md" || { ko "orchestrator: sin fail-closed"; bad=1; }
+  grep -q 'untrusted' "$REPO/wiring/prompts/sdd/orchestrator.md" || { ko "orchestrator: sin untrusted"; bad=1; }
+  grep -q 'start/finish/verification/rollback' "$REPO/wiring/prompts/sdd/orchestrator.md" || { ko "orchestrator: sin 4 tokens"; bad=1; }
+  # shared-untrusted-data block pins
+  grep -q 'fail-closed' "$REPO/overlays/shared/sdd-phase-common.md" || { ko "phase-common: sin fail-closed"; bad=1; }
+  grep -q 'untrusted DATA' "$REPO/overlays/shared/sdd-phase-common.md" || { ko "phase-common: sin untrusted DATA"; bad=1; }
+  grep -q 'start/finish/verification/rollback' "$REPO/overlays/shared/sdd-phase-common.md" || { ko "phase-common: sin 4 tokens"; bad=1; }
+  grep -q 'delimited' "$REPO/overlays/shared/sdd-phase-common.md" || { ko "phase-common: sin delimited"; bad=1; }
+  # Overlay sdd-tasks: SWU shape
+  grep -q 'fail-closed' "$REPO/overlays/skills/sdd-tasks/SKILL.md" || { ko "sdd-tasks: sin fail-closed"; bad=1; }
+  grep -q 'start/finish/verification/rollback' "$REPO/overlays/skills/sdd-tasks/SKILL.md" || { ko "sdd-tasks: sin 4 tokens"; bad=1; }
+  # Overlay sdd-apply: SWU validate + edit authority
+  grep -q 'fail-closed' "$REPO/overlays/skills/sdd-apply/SKILL.md" || { ko "sdd-apply: sin fail-closed"; bad=1; }
+  grep -q 'blocked(edit_authority_missing)' "$REPO/overlays/skills/sdd-apply/SKILL.md" || { ko "sdd-apply: sin blocked(edit_authority_missing)"; bad=1; }
+  # Overlay sdd-verify: evidence shape + edit authority
+  grep -q 'not-verifiable' "$REPO/overlays/skills/sdd-verify/SKILL.md" || { ko "sdd-verify: sin not-verifiable"; bad=1; }
+  grep -q 'delimited' "$REPO/overlays/skills/sdd-verify/SKILL.md" || { ko "sdd-verify: sin delimited"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T29 synthetic SWU probe: 4 tokens present in tasks; apply has fail-closed chain"
+{
+  bad=0
+  # Extract a synthetic SWU block and assert all 4 tokens.
+  # Pins the archived change dir (post-archive probe re-point, 2026-09-08).
+  tasks_file="$REPO/openspec/changes/archive/2026-09-08-sdd-workflow-hardening/tasks.md"
+  [[ -f "$tasks_file" ]] || { ko "T29: tasks archivado no hallado: $tasks_file"; bad=1; }
+  swu_block="$(grep -A4 '```sh' "$tasks_file" | head -5)"
+  for tok in start finish verification rollback; do
+    echo "$swu_block" | grep -q "^${tok}:" || { ko "SWU probe: token $tok ausente en tasks.md"; bad=1; }
+  done
+  # Apply overlay has the fail-closed rejection chain
+  grep -q 'fail-closed' "$REPO/overlays/skills/sdd-apply/SKILL.md" || { ko "apply: fail-closed ausente"; bad=1; }
+  grep -q 'NEVER executed' "$REPO/overlays/skills/sdd-apply/SKILL.md" || { ko "apply: NEVER executed ausente"; bad=1; }
+  grep -q 'blocked' "$REPO/overlays/skills/sdd-apply/SKILL.md" || { ko "apply: blocked ausente"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T30 sync idempotency + id hygiene: zero desyncs post-sync, 0 errors"
+{
+  bad=0
+  # Post-sync state: full sync applied by orchestration. The invariant is now
+  # zero desyncs, exit 0, Errores 0 — not the pre-sync 4-desync shape.
+  ( cd "$REPO" && timeout 120 ./sync-skills.sh --check --skip-gentleai-sync ) > "$SB_TMP/t30-check.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 124 ]] && { ko "sync-skills.sh --check colgado >120s (stall ambiental)"; bad=1; }
+  # Post-sync invariant: zero DESYNC lines (sync already applied).
+  expect_desync="$(grep -c '^\s*\[DESYNC\]' "$SB_TMP/t30-check.txt")"
+  [[ "$expect_desync" == "0" ]] || { ko "check desyncs = $expect_desync (esperado 0: full sync applied)"; bad=1; }
+  grep -q '\[ERROR\]\s*:\s*0\|Errores\s*:\s*0' "$SB_TMP/t30-check.txt" || { ko "check reporta errores estructurales"; bad=1; }
+  [[ "$rc" -eq 0 ]] || { ko "check en estado post-sync exit $rc != 0"; bad=1; }
+  # Duplicate id check across all overlay files: a unique id MUST live in
+  # exactly one file (its :start/:end marker pair). Count ids that span files.
+  dup_count="$(for f in "$REPO"/overlays/skills/*/SKILL.md; do
+    grep -o 'sdd-own:sdd-[a-z-]*' "$f" 2>/dev/null | sort -u
+  done | sort | uniq -d | wc -l)"
+  [[ "$dup_count" == "0" ]] || { ko "ids duplicados en overlays: $dup_count"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T31 F4 hook pins: preflight shape, lossless consent, never skips human, decline continues"
+{
+  bad=0
+  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
+  grep -q 'gentle-ai review status' "$orch" || { ko "F4: sin preflight command"; bad=1; }
+  grep -q 'review-integration/v2' "$orch" || { ko "F4: sin contract version"; bad=1; }
+  grep -q 'next-transition' "$orch" || { ko "F4: sin --next-transition"; bad=1; }
+  grep -q 'consent/v3' "$orch" || { ko "F4: sin consent/v3"; bad=1; }
+  grep -q 'never skips human authorization' "$orch" || { ko "F4: sin never skips human authorization"; bad=1; }
+  grep -q 'candidate-scoped' "$orch" || { ko "F4: sin candidate-scoped decline"; bad=1; }
+  grep -q 'continues to archive' "$orch" || { ko "F4: sin continues to archive"; bad=1; }
+  grep -q 'informational no-op' "$orch" || { ko "F4: sin informational no-op"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 

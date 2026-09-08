@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from src.dryrun import DryRunResult, classify_mergeability, classify_merged, safe_to_rerun, destructive_flow
+from src.dryrun import DryRunResult, ECHO_PROTOCOL, classify_mergeability, classify_merged, safe_to_rerun, destructive_flow
 from src.envelope import Envelope, err, ok
 
 if TYPE_CHECKING:
@@ -24,7 +24,11 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
     # ------------------------------------------------------------------
     # 1. gh_merge_pull_request
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(
+        description="Merge a pull request (two-phase: dry-run → confirm). "
+        + ECHO_PROTOCOL
+        + " method: squash | merge | rebase. auto: defer merge until checks pass (GitHub merge queue).",
+    )
     async def gh_merge_pull_request(
         owner: str,
         repo: str,
@@ -36,11 +40,7 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
         confirmed: bool = False,
         confirmed_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Merge a pull request (two-phase: dry-run → confirm).
-
-        method: squash | merge | rebase
-        auto: defer merge until checks pass (GitHub merge queue).
-        """
+        """Merge a pull request (two-phase: dry-run → confirm)."""
         def compute_dry_run() -> DryRunResult:
             # Gather PR state
             pr_r = executor.run(["gh", "pr", "view", "-R", f"{owner}/{repo}",
@@ -108,7 +108,11 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
     # ------------------------------------------------------------------
     # 2. gh_delete_branch
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(
+        description="Delete a remote branch (two-phase: dry-run → confirm). "
+        + ECHO_PROTOCOL
+        + " Verifies the branch is merged before allowing deletion.",
+    )
     async def gh_delete_branch(
         owner: str,
         repo: str,
@@ -117,10 +121,7 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
         confirmed: bool = False,
         confirmed_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Delete a remote branch (two-phase: dry-run → confirm).
-
-        Verifies the branch is merged before allowing deletion.
-        """
+        """Delete a remote branch (two-phase: dry-run → confirm)."""
         def compute_dry_run() -> DryRunResult:
             # Get default branch
             repo_r = executor.run(["gh", "repo", "view", f"{owner}/{repo}",
@@ -167,7 +168,11 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
     # ------------------------------------------------------------------
     # 3. gh_rerun_workflow
     # ------------------------------------------------------------------
-    @server.tool()
+    @server.tool(
+        description="Re-run a workflow (two-phase: dry-run → confirm). "
+        + ECHO_PROTOCOL
+        + " failed_only: re-run only failed jobs.",
+    )
     async def gh_rerun_workflow(
         owner: str,
         repo: str,
@@ -177,10 +182,7 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
         confirmed: bool = False,
         confirmed_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Re-run a workflow (two-phase: dry-run → confirm).
-
-        failed_only: re-run only failed jobs.
-        """
+        """Re-run a workflow (two-phase: dry-run → confirm)."""
         def compute_dry_run() -> DryRunResult:
             r = executor.run(["gh", "run", "view", str(run_id),
                               "-R", f"{owner}/{repo}", "--json",

@@ -163,7 +163,7 @@ set -a; source ~/.config/sdd-own/github-mcp.env; set +a
 
 **Variante Docker** (sin token en disco): `MCP_GITHUB_TRANSPORT=docker ./setup.sh` usa el contenedor oficial (`ghcr.io/github/github-mcp-server`) con `--env-file`, y los bloques por runtime apuntan al binario docker en vez del endpoint remoto. Requiere `docker` en el PATH.
 
-**Semántica de salida**: `0` = todo bien; `1` = estructura/conflicto (flags excluyentes, modo real sin TTY con token necesario, o token inválido/rechazado en check); `2` = fallo estructural (sync falló, o red/API inalcanzable). En `--check`, un MCP no configurado con token ausente es **estado limpio válido** (exit 0); solo los rechazos del API (401/403) marcan token drift (exit 1).
+**Semántica de salida**: `0` = todo bien; `1` = estructura/conflicto (flags excluyentes, modo real sin TTY con token necesario, o token inválido/rechazado en check); `2` = fallo estructural (sync falló). La red/API inalcanzable **no** es estructural: degrada con `[aviso]` y exit 0 (modo real y `--check`, T09/T20). En `--check`, un MCP no configurado con token ausente es **estado limpio válido** (exit 0); solo los rechazos del API (401/403) marcan token drift (exit 1).
 
 **Seams de test** (no tocar en producción): `MCP_DEBUG_SYNC_ARGS=<file>` (escribe `exit=<n>` + argv de la delegación; `MCP_DEBUG_SYNC_ARGS_EXIT` simula el exit del sync), `SDD_OWN_GH_API` (base URL de la API), `SDD_OWN_DEBUG_CURL_CONFIG=<path>` (dump del config temporal de curl — **contiene el token**, solo diagnóstico y borra el dump después), `MCP_GITHUB_TRANSPORT`.
 

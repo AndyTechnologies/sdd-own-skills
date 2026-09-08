@@ -72,25 +72,23 @@ def main():
                     break
                 output.extend(chunk)
             if answers:
-                p, a = answers[0]
-                # Los prompts de retry (p. ej. "Token de GitHub (PAT): ") son
-                # identicos entre intentos: matchear por CONTEO de apariciones,
-                # no por pertenencia — si no, los answers de retry se disparan
-                # en rafaga contra la primera ocurrencia. El conteo requerido
-                # es 1 + los prompts IGUALES ya respondidos (cada answer se
-                # atribuye a su propia ocurrencia): si un answer distinto se
-                # envio en medio (p. ej. "Mantener..." -> "Token..."), el
-                # segundo prompt NO se cuenta como ocurrencia extra del primero.
-                needed = 1 + sum(1 for fp in fired if fp == p)
-                if bytes(output).count(p) >= needed:
-                    # Race con read -s: el harness ve el prompt cuando el hijo lo
-                    # printf-ea, pero el hijo todavia no entro a read (que apaga
-                    # ECHO). Esperar 50ms para que el termios del read -rs este
-                    # activo; si no, el kernel ECOA el answer y queda en la salida.
-                    time.sleep(0.05)
-                    os.write(fd, a)
-                    fired.append(p)
-                    answers.pop(0)
+                # Barrido completo (scan-all): dispara el PRIMER answer pendiente
+                # cuyo prompt matchea la salida acumulada con el conteo correcto
+                # de ocurrencias. Asi un answer no consumido (p. ej. el "Cambiar
+                # el token?" cuando los scopes ya estan completos) NO bloquea
+                # answers posteriores (p. ej. el selector "Runtimes a configurar").
+                for ai, (p, a) in enumerate(answers):
+                    needed = 1 + sum(1 for fp in fired if fp == p)
+                    if bytes(output).count(p) >= needed:
+                        # Race con read -s: el harness ve el prompt cuando el hijo lo
+                        # printf-ea, pero el hijo todavia no entro a read (que apaga
+                        # ECHO). Esperar 50ms para que el termios del read -rs este
+                        # activo; si no, el kernel ECOA el answer y queda en la salida.
+                        time.sleep(0.05)
+                        os.write(fd, a)
+                        fired.append(p)
+                        answers.pop(ai)
+                        break
             wpid, status = os.waitpid(pid, os.WNOHANG)
             if wpid == pid:
                 save_output()
