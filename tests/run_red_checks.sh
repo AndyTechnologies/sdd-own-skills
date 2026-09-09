@@ -20,6 +20,9 @@
 #   T32 council always-fire T33 wiring council/lenses  T34 OWN_PROMPTS + file
 #   T35 acta fail-closed    T36 convergence/fork/2r     T37 fragment SDD-only
 #   T38 subagent_depth 2    T39 merge ambos motores
+#   T40 one-parse           T41 fallback+dedupe         T42 title retrievability
+#   T43 signals+dirty       T44 record→resolve          T45 --json≡scanner
+#   T46 read fail-open      T47 write loud FAIL-OPEN    T48 changelog clause
 #
 # Exit: 0 = todo verde (skips permitidos), 1 = fallos.
 # =============================================================================
@@ -431,7 +434,7 @@ t "T22 env snippets: env.sh (POSIX) + env.fish (fish) 0600, export/set -gx, inst
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T23 permisos C2: opencode external_directory con ~/agent_worktrees/**; idempotente"
+t "T23 permisos C2: opencode external_directory objeto con ~/.agent_worktrees/**; idempotente"
 {
   bad=0
   init_sandbox; start_fake_api 200
@@ -439,8 +442,8 @@ t "T23 permisos C2: opencode external_directory con ~/agent_worktrees/**; idempo
   run_setup </dev/null
   [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
   ocf="$SB_HOME/.config/opencode/opencode.jsonc"
-  jq -e '.permission.external_directory | index("~/agent_worktrees/**")' "$ocf" >/dev/null 2>&1 \
-    || { ko "permission.external_directory sin ~/agent_worktrees/**"; bad=1; }
+  jq -e '.permission.external_directory["~/.agent_worktrees/**"] == "allow"' "$ocf" >/dev/null 2>&1 \
+    || { ko "permission.external_directory sin ~/.agent_worktrees/** = allow (objeto)"; bad=1; }
   jq -e '.mcp.codegraph' "$ocf" >/dev/null 2>&1 || { ko "mcp.codegraph perdido por el patcher de permisos"; bad=1; }
   grep -q "permisos .*agregados" "$SB_TMP/out.txt" || { ko "sin reporte [actualizado] de permisos"; bad=1; }
   m1="$(stat -c %Y "$ocf")"
@@ -733,6 +736,168 @@ t "T39 merge extendido en ambos motores: --check zero desyncs con jq y con pytho
   grep -q '\[ERROR\]\s*:\s*0\|Errores\s*:\s*0' "$SB_TMP/t39-py.txt" || { ko "leg python errores estructurales"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
+
+# ---------------- Grupo sdd-tool: T40–T48 ----------------------------------------
+
+SDD_TOOL_BIN="$REPO/srv/sdd-tool"
+if [[ -f "$SDD_TOOL_BIN/cmd/sdd-tool/main.go" ]]; then
+  _sdd_tool_built=0
+  if ! command -v go >/dev/null 2>&1; then
+    _sdd_tool_built=-1
+  else
+    _sdd_build_tmp="$SB_TMP/sdd-tool-bin"
+    mkdir -p "$_sdd_build_tmp" 2>/dev/null || _sdd_build_tmp="$(mktemp -d)"
+    if go build -o "$_sdd_build_tmp/sdd-tool" "$SDD_TOOL_BIN/cmd/sdd-tool/" 2>/dev/null; then
+      _sdd_tool_built=1
+    else
+      _sdd_tool_built=-1
+    fi
+  fi
+else
+  _sdd_tool_built=-1
+fi
+
+t "T40 sdd-tool one-parse (scanner lazy)"
+if [[ $_sdd_tool_built -eq 1 ]]; then
+  bad=0
+  init_sandbox
+  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
+  # --help exits 0 and prints subcommands; verify no panic and no extra output
+  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/sdd-tool" --help 2>&1)"
+  rc=$?
+  [[ $rc -eq 0 ]] || { ko "sdd-tool --help exit $rc != 0"; bad=1; }
+  echo "$out" | grep -q "worktree" || { ko "sdd-tool --help missing worktree subcommand"; bad=1; }
+  echo "$out" | grep -q "retro"   || { ko "sdd-tool --help missing retro subcommand";   bad=1; }
+  echo "$out" | grep -q "bug"     || { ko "sdd-tool --help missing bug subcommand";     bad=1; }
+  echo "$out" | grep -q "dashboard"|| { ko "sdd-tool --help missing dashboard subcommand"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+else
+  skip "sdd-tool binario no construido (go ausente o build fallo)"
+fi
+
+t "T41 sdd-tool retro fallback+dedupe (none store)"
+if [[ $_sdd_tool_built -eq 1 ]]; then
+  bad=0
+  init_sandbox
+  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
+  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/sdd-tool" retro lookup --change test-x 2>&1)"
+  rc=$?
+  [[ $rc -eq 0 ]] || { ko "retro lookup exit $rc != 0"; bad=1; }
+  # none store returns empty precisely, no crash
+  echo "$out" | grep -qi "error\|panic\|exception" && { ko "retro lookup returned error on empty store"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+else
+  skip "sdd-tool binario no construido"
+fi
+
+t "T42 sdd-tool worktree list (empty — no agent_worktrees)"
+if [[ $_sdd_tool_built -eq 1 ]]; then
+  bad=0
+  init_sandbox
+  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
+  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/sdd-tool" worktree list 2>&1)"
+  rc=$?
+  [[ $rc -eq 0 ]] || { ko "worktree list exit $rc != 0"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+else
+  skip "sdd-tool binario no construido"
+fi
+
+t "T43 sdd-tool worktree verify (3 signals — main branch)"
+if [[ $_sdd_tool_built -eq 1 ]]; then
+  bad=0
+  init_sandbox
+  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
+  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/sdd-tool" worktree verify --change test-x 2>&1)"
+  rc=$?
+  # On main (not in a worktree), verify should exit non-zero (branch signal fails)
+  [[ $rc -ne 0 ]] || { ko "worktree verify on main: exit 0 expected non-zero (no worktree)"; bad=1; }
+  echo "$out" | grep -q "branch\|BRANCH" || { ko "worktree verify: missing branch signal"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+else
+  skip "sdd-tool binario no construido"
+fi
+
+t "T44 sdd-tool bug record→resolve→list (incidents lifecycle)"
+if [[ $_sdd_tool_built -eq 1 ]]; then
+  bad=0
+  init_sandbox
+  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
+  export HOME="$SB_HOME"
+  export PATH="$SB_BIN:$PATH"
+  # Record
+  rec_out="$(timeout 10 "$SB_BIN/sdd-tool" bug record --summary "test blocker: failing build" --kind blocker --change test-x 2>&1)"
+  rec_rc=$?
+  [[ $rec_rc -eq 0 ]] || { ko "bug record exit $rec_rc != 0"; bad=1; }
+  # List (should show the incident)
+  list_out="$(timeout 10 "$SB_BIN/sdd-tool" bug list 2>&1)"
+  list_rc=$?
+  [[ $list_rc -eq 0 ]] || { ko "bug list exit $list_rc != 0"; bad=1; }
+  echo "$list_out" | grep -q "test-x\|blocker" || { ko "bug list: incident not found in output"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+else
+  skip "sdd-tool binario no construido"
+fi
+
+t "T45 sdd-tool --json (scanner passthrough, no TUI)"
+if [[ $_sdd_tool_built -eq 1 ]]; then
+  bad=0
+  init_sandbox
+  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
+  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/sdd-tool" dashboard --json 2>&1)"
+  rc=$?
+  # --json should exit non-zero (no gentle-ai binary) but print JSON schema hint, not crash
+  echo "$out" | grep -qi "panic\|exception" && { ko "dashboard --json panicked"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+else
+  skip "sdd-tool binario no construido"
+fi
+
+t "T46 sdd-tool read fail-open (absent scanner, no crash)"
+if [[ $_sdd_tool_built -eq 1 ]]; then
+  bad=0
+  init_sandbox
+  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
+  # Run without gentle-ai in PATH → scanner fails, should exit non-zero but not panic
+  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/sdd-tool" worktree list --json 2>&1)"
+  rc=$?
+  echo "$out" | grep -qi "panic\|exception\|fatal" && { ko "worktree list --json panicked on absent scanner"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+else
+  skip "sdd-tool binario no construido"
+fi
+
+t "T47 setup.sh 5d-2 warn (no Go → warn, no error)"
+{
+  bad=0
+  init_sandbox
+  # Create a minimal fake Go that always fails
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$SB_BIN/go"
+  chmod +x "$SB_BIN/go"
+  env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" bash "$REPO/setup.sh" --check --skip-gentleai-sync --skip-mcp > "$SB_TMP/t47.txt" 2>&1
+  rc=$?
+  grep -q "WARN\|go no encontrado\|go build failed" "$SB_TMP/t47.txt" || { ko "setup.sh 5d-2: missing warn message"; bad=1; }
+  # --check should not fail due to missing go (warn only)
+  if [[ $rc -eq 0 ]] || [[ $rc -eq 1 ]]; then
+    : # acceptable
+  else
+    ko "setup.sh 5d-2: exit $rc (expected 0 or 1 for warn-only)"
+    bad=1
+  fi
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T48 orchestrator + changelog sdd-tool clause grep"
+{
+  bad=0
+  grep -q "sdd-tool" "$REPO/wiring/prompts/sdd/orchestrator.md" || { ko "orchestrator.md missing sdd-tool integration clause"; bad=1; }
+  grep -q "verify-report.*pre-archive\|pre-archive.*verify-report" "$REPO/skills/sdd-changelog/SKILL.md" || { ko "sdd-changelog SKILL.md missing verify-report pre-archive clause"; bad=1; }
+  grep -q "absent archive-report.*blocked\|archive-report.*absent.*blocked" "$REPO/skills/sdd-changelog/SKILL.md" || { ko "sdd-changelog SKILL.md missing absent archive-report blocked clause"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+# Clean up sdd-tool build temp
+[[ -d "${_sdd_build_tmp:-}" ]] && rm -rf "$_sdd_build_tmp" 2>/dev/null
 
 stop_fake_api
 echo

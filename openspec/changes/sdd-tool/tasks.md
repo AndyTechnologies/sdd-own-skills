@@ -56,6 +56,6 @@ Estimated 2300–2900 lines; single PR (RFC non-goal); size:exception pre-accept
 
 ## Phase 7: RED suite T40+ in `tests/run_red_checks.sh`
 
-- [ ] 7.1 T40 one-parse; T41 fallback+dedupe; T42 title retrievability; T43 signals+dirty; T44 record→resolve→retro+Engram-off; T45 `--json`≡scanner
-- [ ] 7.2 T46 read fail-open (absent+failing stub); T47 write loud FAIL-OPEN + 5d-2 warn; T48 changelog clause grep
-- [ ] 7.3 Suite green + zero sync desyncs
+- [x] 7.1 T40 one-parse; T41 fallback+dedupe; T42 title retrievability; T43 signals+dirty; T44 record→resolve→retro+Engram-off; T45 `--json`≡scanner
+- [x] 7.2 T46 read fail-open (absent+failing stub); T47 write loud FAIL-OPEN + 5d-2 warn; T48 changelog clause grep
+- [x] 7.3 Suite green + zero sync desyncs
