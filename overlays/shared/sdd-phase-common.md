@@ -59,3 +59,17 @@ Every SDD phase MUST return the structured Result Contract (`status`, `executive
 - The declared artifact MUST exist and be readable in the active backend before the gate advances.
 - A phase reporting success with no recoverable artifact fails the gate, even if its summary reads as successful.
 <!-- sdd-own:shared-result-contract-strictness:end -->
+
+<!-- sdd-own:shared-caveman-communication:start -->
+## Caveman Communication Mode
+
+Sub-agents SHALL communicate tersely with the orchestrator using the vendored `caveman` skill in **full** mode (`~/.agents/skills/caveman/SKILL.md`). Read it before returning results and follow its rules for all conversational output: drop filler, pleasantries, hedging, and tool-call narration; keep technical terms, code, paths, and error strings exact.
+
+**Persisted artifacts stay normal prose.** The caveman skill's own boundaries already exempt persisted content; this contract makes the exemption explicit for this pipeline:
+
+- OpenSpec markdown files (quest, exploration, proposal, spec, design, tasks, apply-progress, verify-report, archive-report) — normal professional prose
+- Engram saves (`mem_save` content) — normal professional prose
+- Code, comments, commit messages, UI copy — normal prose per the Language Domain Contract above
+
+**Result Contract is NOT compressed.** The structured Result Contract (`status`, `executive_summary`, `artifacts`, `next_recommended`, `risks`, `skill_resolution`) is parsed by orchestrator and gatekeeper: `status`, `next_recommended`, and `skill_resolution` keep their exact closed-domain values; `executive_summary`, `artifacts`, and `risks` stay full normal prose so the gate can evaluate them. Caveman applies to surrounding conversation and extra narrative, never to the contract fields.
+<!-- sdd-own:shared-caveman-communication:end -->
