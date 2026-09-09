@@ -56,6 +56,14 @@ Estimated 2300–2900 lines; single PR (RFC non-goal); size:exception pre-accept
 
 ## Phase 7: RED suite T40+ in `tests/run_red_checks.sh`
 
-- [x] 7.1 T40 one-parse; T41 fallback+dedupe; T42 title retrievability; T43 signals+dirty; T44 record→resolve→retro+Engram-off; T45 `--json`≡scanner
-- [x] 7.2 T46 read fail-open (absent+failing stub); T47 write loud FAIL-OPEN + 5d-2 warn; T48 changelog clause grep
+- [x] 7.1 T40 one-parse; T41 fallback+dedupe; T42 title retrievability; T42b worktree list; T43 signals+dirty; T44 record→resolve→retro+Engram-off; T45 `--json`≡scanner
+- [x] 7.2 T46 read fail-open (absent+failing stub); T47 write FAIL-OPEN marker (unusable DB); T47b 5d-2 warn; T48 changelog clause grep
 - [x] 7.3 Suite green + zero sync desyncs
+
+## Corrective Run (2026-09-09)
+
+Applied after gatekeeper review found:
+1. D6 driver drift (go-sqlite3 CGO → modernc.org/sqlite pure Go) — **fixed**
+2. T42 name mismatch (worktree list vs title retrievability) — **fixed**: T42 restored to engram title-key filter, worktree list moved to T42b
+3. T47 incomplete (5d-2 warn only, no FAIL-OPEN write check) — **fixed**: added T47 for bug record unusable-DB FAIL-OPEN marker test
+4. apply-progress.md disclosures added (baseline failures, CGO guard, empty attempt ledger)

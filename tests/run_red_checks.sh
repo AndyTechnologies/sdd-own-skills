@@ -21,8 +21,9 @@
 #   T35 acta fail-closed    T36 convergence/fork/2r     T37 fragment SDD-only
 #   T38 subagent_depth 2    T39 merge ambos motores
 #   T40 one-parse           T41 fallback+dedupe         T42 title retrievability
-#   T43 signals+dirty       T44 record→resolve          T45 --json≡scanner
-#   T46 read fail-open      T47 write loud FAIL-OPEN    T48 changelog clause
+#   T42b worktree list      T43 signals+dirty            T44 record→resolve
+#   T45 --json≡scanner      T46 read fail-open           T47 write FAIL-OPEN
+#   T47b 5d-2 warn          T48 changelog clause
 #
 # Exit: 0 = todo verde (skips permitidos), 1 = fallos.
 # =============================================================================
@@ -793,7 +794,28 @@ else
   skip "sdd-tool binario no construido"
 fi
 
-t "T42 sdd-tool worktree list (empty — no agent_worktrees)"
+t "T42 sdd-tool title retrievability (engram title-key filter)"
+if [[ $_sdd_tool_built -eq 1 ]]; then
+  bad=0
+  # Unit-level proof: engram title filter only returns sdd/*/retrospective entries.
+  # Build the binary and run retro lookup which exercises the engram search →
+  # title-prefix filter path (even when engram CLI is absent, the adapter
+  # returns gracefully).
+  init_sandbox
+  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
+  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/sdd-tool" retro lookup --mode engram --change test-x 2>&1)"
+  rc=$?
+  # engram CLI absent → lookup returns 0 with empty result (fail-open read)
+  [[ $rc -eq 0 ]] || { ko "retro lookup (engram mode) exit $rc != 0"; bad=1; }
+  # Verify the binary was compiled with the title filter path (integration:
+  # go test covers parseSearchOutput + title prefix logic)
+  go test ./internal/engram/... 2>/dev/null || { ko "engram unit tests (title filter) failed"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+else
+  skip "sdd-tool binario no construido"
+fi
+
+t "T42b sdd-tool worktree list (empty — no agent_worktrees)"
 if [[ $_sdd_tool_built -eq 1 ]]; then
   bad=0
   init_sandbox
@@ -870,7 +892,28 @@ else
   skip "sdd-tool binario no construido"
 fi
 
-t "T47 setup.sh 5d-2 warn (no Go → warn, no error)"
+t "T47 sdd-tool write FAIL-OPEN (bug record exits non-zero with marker when DB unusable)"
+if [[ $_sdd_tool_built -eq 1 ]]; then
+  bad=0
+  init_sandbox
+  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
+  # Make the DB path unusable: put a regular file where the incidents.db
+  # directory tree should be, so MkdirAll fails.
+  unsafedir="$SB_HOME/.config/sdd-own/srv/sdd-tool"
+  mkdir -p "$(dirname "$unsafedir")"
+  rm -rf "$unsafedir"
+  echo "not-a-directory" > "$unsafedir"
+  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/sdd-tool" bug record --change test-x --summary "should fail" --kind blocker 2>&1)"
+  rc=$?
+  # D2: write failure must be loud FAIL-OPEN, never silent success
+  [[ $rc -ne 0 ]] || { ko "bug record: exit 0 on unusable DB (should fail loudly)"; bad=1; }
+  echo "$out" | grep -qi "FAIL-OPEN" || { ko "bug record: missing FAIL-OPEN marker on write failure"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+else
+  skip "sdd-tool binario no construido"
+fi
+
+t "T47b setup.sh 5d-2 warn (no Go → warn, no error)"
 {
   bad=0
   init_sandbox

@@ -14,7 +14,7 @@ import (
 
 	"sdd-tool/internal/scrub"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // Incident represents one recorded incident.
@@ -48,7 +48,7 @@ func NewRepository(dbPath string) (*Repository, error) {
 	}
 	os.MkdirAll(filepath.Dir(dbPath), 0o755)
 
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("open incidents db: %w", err)
 	}
