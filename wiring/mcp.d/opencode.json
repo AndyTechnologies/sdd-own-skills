@@ -5,7 +5,7 @@
   "root_key": "mcp",
   "server_key": "github",
   "selectors": ["opencode", "pi", "claude", "codex"],
-  "permission_roots": ["~/agent_worktrees/**"],
+  "permission_roots": ["~/.agent_worktrees/**"],
   "deps": ["uv", "donsetch"],
   "presence": "[ -n \"${OPENCODE_CONFIG:-}\" ] || [ -f \"$HOME/.config/opencode/opencode.jsonc\" ] || [ -f \"$HOME/.config/opencode/opencode.json\" ]",
   "block": {

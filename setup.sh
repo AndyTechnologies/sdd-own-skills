@@ -864,6 +864,12 @@ elif runtime == "pi":
     ed = perm.setdefault("external_directory", {})
     if not isinstance(ed, dict):
         ed = {"*": "allow"}; perm["external_directory"] = ed
+    # limpiar el patrón legacy sin punto (~/agent_worktrees) → no cubre el root real
+    for legacy in ("~/agent_worktrees", "~/agent_worktrees/**"):
+        if legacy in aw:
+            aw.remove(legacy); changed = True
+        if legacy in ed:
+            del ed[legacy]; changed = True
     for g in roots:
         lit = g[:-3] if g.endswith("/**") else g
         if lit not in aw:
@@ -1249,7 +1255,7 @@ if command -v go >/dev/null 2>&1; then
       mcp_report_pend=$((mcp_report_pend + 1))
     else
       mkdir -p "$(dirname "$SDD_TOOL_BIN")"
-      if go build -o "$SDD_TOOL_BIN" "$SDD_TOOL_SRC/cmd/sdd-tool/" 2>&1; then
+      if go build -o "$SDD_TOOL_BIN" "$SDD_TOOL_SRC/cmd/sdd-tool/" 2>&1 && [[ -x "$SDD_TOOL_BIN" ]]; then
         chmod 755 "$SDD_TOOL_BIN"
         printf '  [compiled]   %s\n' "${SDD_TOOL_BIN#$HOME/}"
         mcp_report_updated=$((mcp_report_updated + 1))
@@ -1321,7 +1327,7 @@ for envelope in "${envelopes[@]:-}"; do
   fi
 done
 
-# ---- 5g permisos de archivo: allow de ~/agent_worktrees (C2) ------------------------
+# ---- 5g permisos de archivo: allow de ~/.agent_worktrees (C2) ------------------------
 echo "  5g — permisos de ~/.agent_worktrees (C2)"
 for envelope in "${envelopes[@]:-}"; do
   runtime="$(jget "$envelope" '.runtime')" || continue

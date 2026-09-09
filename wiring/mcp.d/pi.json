@@ -6,7 +6,7 @@
   "root_key": "mcpServers",
   "server_key": "github",
   "selectors": ["opencode", "pi", "claude", "codex"],
-  "permission_roots": ["~/agent_worktrees/**"],
+  "permission_roots": ["~/.agent_worktrees/**"],
   "deps": ["uv", "donsetch"],
   "presence": "command -v pi >/dev/null 2>&1",
   "block": {

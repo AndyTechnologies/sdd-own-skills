@@ -6,7 +6,7 @@
   "root_key": "mcp_servers",
   "server_key": "github",
   "selectors": ["opencode", "pi", "claude", "codex"],
-  "permission_roots": ["~/agent_worktrees/**"],
+  "permission_roots": ["~/.agent_worktrees/**"],
   "presence": "command -v codex >/dev/null 2>&1",
   "block": {
     "url": "https://api.githubcopilot.com/mcp/",
