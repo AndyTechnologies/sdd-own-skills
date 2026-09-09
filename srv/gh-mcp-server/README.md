@@ -13,6 +13,14 @@ Local FastMCP server exposing typed `gh_*`/`git_*` tools over the `gh` and `git`
 | Local read | `git_status`, `git_diff`, `git_log`, `git_branch` | 4 |
 | Local mutation | `git_commit`, `git_delete_branch` | 2 |
 
+`git_commit` accepts an optional `paths` list: when provided, only those
+paths are staged and committed (dry-run and confirm both scoped); without
+`paths` it stages all changes (`git add -A`), preserving the original behavior.
+
+`gh_merge_pull_request` validates `method` against an allow-list
+(`squash`/`merge`/`rebase`) and rejects anything else with `invalid_parameter`
+before any API call.
+
 ## Safety Contract
 
 - **Two-phase destructive ops**: merge PR, delete branch, re-run workflow, and local branch delete require dry-run → confirm with echo-back evidence.

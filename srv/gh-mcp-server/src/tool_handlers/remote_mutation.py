@@ -18,6 +18,9 @@ if TYPE_CHECKING:
     from src.executor import ExecutorProto
 
 
+_MERGE_METHODS = frozenset({"squash", "merge", "rebase"})
+
+
 def register(server: FastMCP, executor: ExecutorProto) -> None:
     """Wire all 3 remote mutation tools into *server*."""
 
@@ -41,6 +44,12 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
         confirmed_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Merge a pull request (two-phase: dry-run → confirm)."""
+        if method not in _MERGE_METHODS:
+            return dict(err(
+                "invalid_parameter",
+                f"method must be one of: {', '.join(sorted(_MERGE_METHODS))}",
+                hint="use squash, merge, or rebase",
+            ))
         def compute_dry_run() -> DryRunResult:
             # Gather PR state
             pr_r = executor.run(["gh", "pr", "view", "-R", f"{owner}/{repo}",

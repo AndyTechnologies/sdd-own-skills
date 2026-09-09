@@ -9,6 +9,7 @@ All tools:
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 from src.envelope import Envelope, err, ok
@@ -35,7 +36,6 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
         r = executor.run(["gh", "api", "user"])
         if r.returncode != 0:
             return dict(err("repo_not_found", r.stderr.strip()))
-        import json
         data = json.loads(r.stdout)
         return dict(ok(
             {"login": data.get("login"), "name": data.get("name"), "plan": data.get("plan")},
@@ -55,7 +55,6 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
                           "defaultBranchRef,visibility,isPrivate,url"])
         if r.returncode != 0:
             return dict(err("repo_not_found", f"Repository {owner}/{repo} not found"))
-        import json
         data = json.loads(r.stdout)
         return dict(ok(data, f"Repository {owner}/{repo}"))
 
@@ -72,7 +71,6 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
                           "name,description,isPrivate", "--limit", str(limit)])
         if r.returncode != 0:
             return dict(err("repo_not_found", r.stderr.strip()))
-        import json
         data = json.loads(r.stdout)
         return dict(ok({"repositories": data}, f"Found {len(data)} repositories"))
 
@@ -89,7 +87,6 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
                           "number,title,state,labels", "--limit", str(limit)])
         if r.returncode != 0:
             return dict(err("repo_not_found", r.stderr.strip()))
-        import json
         data = json.loads(r.stdout)
         return dict(ok({"issues": data}, f"Found {len(data)} issues"))
 
@@ -107,7 +104,6 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
                           "number,title,state,body,labels,assignees"])
         if r.returncode != 0:
             return dict(err("not_found", f"Issue #{number} not found in {owner}/{repo}"))
-        import json
         data = json.loads(r.stdout)
         return dict(ok(data, f"Issue #{number}: {data.get('title', '')}"))
 
@@ -124,7 +120,6 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
                           "number,title,state,headRefName,baseRefName", "--limit", str(limit)])
         if r.returncode != 0:
             return dict(err("repo_not_found", r.stderr.strip()))
-        import json
         data = json.loads(r.stdout)
         return dict(ok({"pull_requests": data}, f"Found {len(data)} pull requests"))
 
@@ -142,7 +137,6 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
                           "number,title,state,headRefName,baseRefName,mergeable,url"])
         if r.returncode != 0:
             return dict(err("not_found", f"PR #{number} not found in {owner}/{repo}"))
-        import json
         data = json.loads(r.stdout)
         return dict(ok(data, f"PR #{number}: {data.get('title', '')}"))
 
@@ -160,7 +154,6 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
                           "statusCheckRollup,mergeStateStatus"])
         if r.returncode != 0:
             return dict(err("not_found", f"PR #{number} not found"))
-        import json
         data = json.loads(r.stdout)
         checks = data.get("statusCheckRollup", [])
         passing = sum(1 for c in checks if c.get("conclusion") == "success")
@@ -193,7 +186,6 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
                           "--paginate", "-q", f".[0:{limit}]"])
         if r.returncode != 0:
             return dict(err("repo_not_found", r.stderr.strip()))
-        import json
         data = json.loads(r.stdout)
         summary = [
             {"sha": c["sha"][:7], "message": c["commit"]["message"].split("\n")[0]}
@@ -214,7 +206,6 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
                           "id,name,status,conclusion,headSha", "--limit", str(limit)])
         if r.returncode != 0:
             return dict(err("repo_not_found", r.stderr.strip()))
-        import json
         data = json.loads(r.stdout)
         return dict(ok({"workflow_runs": data}, f"Found {len(data)} workflow runs"))
 
@@ -232,7 +223,6 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
                           "status,conclusion,name,headSha,jobs"])
         if r.returncode != 0:
             return dict(err("not_found", f"Workflow run {run_id} not found"))
-        import json
         data = json.loads(r.stdout)
         return dict(ok(data, f"Run {run_id}: {data.get('status', '?')}"))
 
@@ -269,7 +259,6 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
                           "-f", f"q={query}", "-f", f"per_page={limit}"])
         if r.returncode != 0:
             return dict(err("network_error", r.stderr.strip()))
-        import json
         data = json.loads(r.stdout)
         items = data.get("items", [])
         summary_items = [

@@ -12,20 +12,13 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
+from src._common import validate_worktree as _validate_worktree
 from src.envelope import Envelope, err, ok
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
     from src.executor import ExecutorProto
-
-
-def _validate_worktree(executor: ExecutorProto, path: str) -> Envelope | None:
-    """Return an error envelope if *path* is not a git worktree."""
-    r = executor.run(["git", "-C", path, "rev-parse", "--is-inside-work-tree"])
-    if r.returncode != 0 or "true" not in r.stdout.strip().lower():
-        return err("not_a_repo", f"Path {path} is not a git worktree", hint="point path at a repo")
-    return None
 
 
 def register(server: FastMCP, executor: ExecutorProto) -> None:
