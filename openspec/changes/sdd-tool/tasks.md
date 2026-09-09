@@ -38,13 +38,13 @@ Estimated 2300–2900 lines; single PR (RFC non-goal); size:exception pre-accept
 
 ## Phase 4: Dashboard
 
-- [ ] 4.1 `internal/dashboard` bubbletea: table + detail pane (status/next/blocked); ↑↓/Enter/r/q; help: snapshot process-lifetime, `r` re-parses once
-- [ ] 4.2 `--json` = scanner passthrough; no polling; ledger untouched
+- [x] 4.1 `internal/dashboard` bubbletea: table + detail pane (status/next/blocked); ↑↓/Enter/r/q; help: snapshot process-lifetime, `r` re-parses once
+- [x] 4.2 `--json` = scanner passthrough; no polling; ledger untouched
 
 ## Phase 5: Incidents
 
-- [ ] 5.1 `internal/incidents`: modernc sqlite `~/.config/sdd-own/srv/sdd-tool/incidents.db` (+`--db`), design schema; shared Scrub
-- [ ] 5.2 `bug record|resolve|list`: resolve binds obs id via `engram timeline` probe; Engram off → `fallback_path`, never fabricate; resolved → retro verify-phase
+- [x] 5.1 `internal/incidents`: modernc sqlite `~/.config/sdd-own/srv/sdd-tool/incidents.db` (+`--db`), design schema; shared Scrub
+- [x] 5.2 `bug record|resolve|list`: resolve binds obs id via `engram timeline` probe; Engram off → `fallback_path`, never fabricate; resolved → retro verify-phase
 
 ## Phase 6: Wiring (rollout `./sync-skills.sh` real + `./setup.sh`)
 
