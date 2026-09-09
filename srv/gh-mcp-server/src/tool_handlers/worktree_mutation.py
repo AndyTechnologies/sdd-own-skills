@@ -1,17 +1,22 @@
 """Worktree mutation handlers — 2 ``git_worktree_*`` tools (F6).
 
 - ``git_worktree_add``: two-phase via ``destructive_flow``. The canonical
-  target is derived, never taken raw: ``~/.agent_worktrees/<basename(repo_path)>/<change>``
-  resolved with ``Path.home()``; ``change`` must match the safe-slug rule
+  target is derived, never taken raw: ``~/.agent_worktrees/<git-root-basename>/<change>``
+  resolved with ``Path.home()``; the git root comes from
+  ``git rev-parse --show-toplevel`` (so ``/repo``, ``/repo/sub`` and ``/repo/.``
+  land in the SAME namespace); ``change`` must match the safe-slug rule
   ``^[A-Za-z0-9][A-Za-z0-9._-]*$`` (rejects ``/``, ``\\``, ``..``, empty).
   ``.sdd-agent-lock`` is written IMMEDIATELY after worktree creation (before
-  deps/``.codegraph``); ``codegraph init`` is best-effort.
-- ``git_worktree_remove``: two-phase via ``destructive_flow`` with three typed
-  pre-checks OUTSIDE the flow (same pattern as ``_validate_worktree`` in
-  ``local_mutation.py``): dirty worktree → ``dirty_worktree``; live lock PID
-  (``kill -0``) → ``active_agents``; lock owner != caller owner →
-  ``owned_by_other``. The server NEVER accepts a raw worktree path — only
-  ``(repo_path, change, owner)`` (C3 cross-repo/cross-worktree boundary).
+  deps/``.codegraph``); ``codegraph init`` is best-effort. The dry-run also
+  detects an existing ``sdd/<change>`` branch (``branch_exists`` → ``safe:false``)
+  so it never promises an op the confirm would reject.
+- ``git_worktree_remove``: two-phase via ``destructive_flow`` with pre-checks
+  OUTSIDE the flow (same pattern as ``_validate_worktree`` in
+  ``local_mutation.py``): dirty worktree → ``dirty_worktree``; existing lock
+  from another owner → ``owned_by_other``; corrupt lock → ``locked_unreadable``
+  (missing lock never blocks). The server NEVER accepts a raw worktree
+  path — only ``(repo_path, change, owner)`` (C3 cross-repo/cross-worktree
+  boundary).
 - Server-owned artifacts (``.codegraph/``, ``.sdd-agent-lock``) are untracked
   by construction, so the dirty check ignores only those two porcelain entries;
   everything else (user untracked/modified) stays dirty. ``execute`` pre-removes
@@ -29,6 +34,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from src._common import validate_worktree as _validate_worktree
 from src.dryrun import DryRunResult, ECHO_PROTOCOL, destructive_flow
 from src.envelope import Envelope, err, ok
 
@@ -83,42 +89,47 @@ def validate_safe_slug(change: str) -> str | None:
     return None
 
 
-def canonical_worktree_path(repo_path: str, change: str) -> str:
+def canonical_worktree_path(executor: ExecutorProto, repo_path: str, change: str) -> str:
     """Derive the canonical worktree path — caller input is never used raw.
 
-    ``~/.agent_worktrees/<basename(repo_path)>/<change>`` resolved via
-    ``Path.home()``; the repo basename is ``normpath``'d so trailing
-    separators and traversal tricks collapse into the namespace root.
+    ``~/.agent_worktrees/<gent-root-basename>/<change>`` resolved via
+    ``Path.home()``. The git root is resolved with
+    ``git rev-parse --show-toplevel`` so that ``/repo``, ``/repo/sub`` and
+    ``/repo/.`` all land in the SAME namespace (basename of the real root,
+    not of whatever subdir the caller passed).
     """
-    base = os.path.basename(os.path.normpath(repo_path))
+    root = repo_path
+    r = executor.run(["git", "-C", repo_path, "rev-parse", "--show-toplevel"])
+    if r.returncode == 0 and r.stdout.strip():
+        root = r.stdout.strip()
+    base = os.path.basename(os.path.normpath(root))
     return str(Path.home() / ".agent_worktrees" / base / change)
 
-
-def _validate_worktree(executor: ExecutorProto, path: str) -> Envelope | None:
-    """Return an error envelope if *path* is not a git worktree."""
-    r = executor.run(["git", "-C", path, "rev-parse", "--is-inside-work-tree"])
-    if r.returncode != 0 or "true" not in r.stdout.strip().lower():
-        return err("not_a_repo", f"Path {path} is not a git worktree", hint="point path at a repo")
-    return None
-
-
-# ---------------------------------------------------------------------------
-# .sdd-agent-lock helpers
-# ---------------------------------------------------------------------------
 
 def lock_path(worktree: str) -> str:
     """Path of the agent lock inside a worktree root."""
     return os.path.join(worktree, _LOCK_FILENAME)
 
 
-def read_lock(worktree: str) -> dict[str, Any] | None:
-    """Read and parse ``.sdd-agent-lock``. ``None`` if absent or corrupt."""
+def read_lock(worktree: str) -> tuple[dict[str, Any] | None, str]:
+    """Read and parse ``.sdd-agent-lock``.
+
+    Returns ``(lock, status)`` where status is:
+    - ``"ok"`` — valid JSON dict
+    - ``"missing"`` — no lock file (no owner)
+    - ``"corrupt"`` — file exists but is not a valid JSON dict (fail-closed:
+      the caller cannot trust owner/liveness from it)
+    """
     try:
         with open(lock_path(worktree), encoding="utf-8") as fh:
             data = json.load(fh)
-        return data if isinstance(data, dict) else None
+        if isinstance(data, dict):
+            return data, "ok"
+        return None, "corrupt"
+    except FileNotFoundError:
+        return None, "missing"
     except (OSError, json.JSONDecodeError):
-        return None
+        return None, "corrupt"
 
 
 def lock_owner(lock: dict[str, Any] | None) -> str | None:
@@ -130,7 +141,14 @@ def lock_owner(lock: dict[str, Any] | None) -> str | None:
 
 
 def lock_has_live_pid(lock: dict[str, Any] | None) -> bool:
-    """``kill -0`` liveness probe for the lock PID. Stale/absent → ``False``."""
+    """``kill -0`` liveness probe for the lock PID. Stale/absent → ``False``.
+
+    NOTE: the lock is written by the MCP sidecar process, so its PID is the
+    sidecar's own PID — which stays alive for the whole session. It is NOT a
+    meaningful "is an agent working here" signal. Removal gates on `dirty` +
+    `owner` instead (see ``git_worktree_remove``). Kept as a pure helper for
+    potential future use where a real agent registers its own PID.
+    """
     if not lock:
         return False
     try:
@@ -202,7 +220,7 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
                 hint="change must match ^[A-Za-z0-9][A-Za-z0-9._-]*$",
             ))
 
-        target = canonical_worktree_path(repo_path, change)
+        target = canonical_worktree_path(executor, repo_path, change)
         if os.path.isdir(target):
             return dict(err(
                 "worktree_exists",
@@ -218,6 +236,24 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
                 "change": change,
                 "safe": not os.path.isdir(target),
             }
+            # Branch collision: `git worktree add -b sdd/<change>` fails hard when
+            # the branch already exists (e.g. leftover from a stale worktree), but
+            # the target dir may not. Detect it here so the dry-run is honest
+            # (safe:false) instead of promising an op that the confirm will reject.
+            ref = executor.run(
+                ["git", "-C", repo_path, "show-ref", "--verify", "--quiet",
+                 f"refs/heads/{branch}"]
+            )
+            if ref.returncode == 0:
+                data["safe"] = False
+                data["branch_exists"] = True
+                return DryRunResult(
+                    data=data,
+                    summary=(
+                        f"Refusing to create worktree {target}: branch {branch} "
+                        "already exists"
+                    ),
+                )
             return DryRunResult(
                 data=data,
                 summary=f"Plan: create worktree {target} on branch {branch}",
@@ -276,7 +312,7 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
         "~/.agent_worktrees/<repo-name>/<change> (two-phase: dry-run → confirm). "
         + ECHO_PROTOCOL
         + " Denies (typed, outside the two-phase flow): dirty worktree → "
-        "dirty_worktree; live lock PID → active_agents; lock owner != owner arg → "
+        "dirty_worktree; lock owner != owner arg → "
         "owned_by_other. Never accepts a raw worktree path — (repo_path, change, owner) only.",
     )
     async def git_worktree_remove(
@@ -300,7 +336,7 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
                 hint="change must match ^[A-Za-z0-9][A-Za-z0-9._-]*$ — raw paths are never accepted",
             ))
 
-        target = canonical_worktree_path(repo_path, change)
+        target = canonical_worktree_path(executor, repo_path, change)
         if not os.path.isdir(target):
             return dict(err(
                 "not_found",
@@ -319,20 +355,22 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
                 hint="commit or stash first",
             ))
 
-        # Pre-check 2 — live agent (kill -0 on the lock PID)
-        lock = read_lock(target)
-        if lock_has_live_pid(lock):
+        # Pre-check 2 — lock owner must match the caller (caller-asserted, advisory).
+        # A missing lock means no session claimed this worktree: it does NOT
+        # block removal (the dirty check is the real data-loss gate). A corrupt
+        # lock is fail-closed (cannot verify owner). An existing lock from
+        # another owner blocks removal.
+        lock, lock_status = read_lock(target)
+        if lock_status == "corrupt":
             return dict(err(
-                "active_agents",
-                f"Worktree {target} has a live agent (lock pid {lock.get('pid')})",
-                hint="wait for the agent session to finish",
+                "locked_unreadable",
+                f"Worktree {target} lock file is corrupt — cannot verify owner",
+                hint="inspect ~/.agent_worktrees/<repo>/<change>/.sdd-agent-lock manually",
             ))
-
-        # Pre-check 3 — lock owner must match the caller (caller-asserted, advisory)
-        if lock_owner(lock) != owner:
+        if lock_status == "ok" and lock_owner(lock) != owner:
             return dict(err(
                 "owned_by_other",
-                f"Worktree {target} lock owner {lock_owner(lock) or '(none)'} != {owner}",
+                f"Worktree {target} lock owner {lock_owner(lock)} != {owner}",
                 hint="only the owning session may remove it (or an explicit two-phase recovery)",
             ))
 
@@ -342,16 +380,19 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
             dirty, status_err = _status_dirty(executor, target)
             if status_err:
                 dirty = True  # fail-closed: cannot verify cleanliness
-            lock_now = read_lock(target)
-            live = lock_has_live_pid(lock_now)
-            owner_match = lock_owner(lock_now) == owner
+            lock_now, lock_status_now = read_lock(target)
+            # missing lock → no owner claim (does not block); corrupt → cannot
+            # verify owner → fail-closed; ok → owner must match.
+            if lock_status_now == "corrupt":
+                owner_match = False
+            else:
+                owner_match = True if lock_status_now == "missing" else lock_owner(lock_now) == owner
             data: dict[str, Any] = {
                 "path": target,
                 "change": change,
                 "dirty": dirty,
-                "live_agents": live,
                 "lock_owner": lock_owner(lock_now),
-                "safe": (not dirty) and (not live) and owner_match,
+                "safe": (not dirty) and owner_match,
             }
             if not data["safe"]:
                 return DryRunResult(

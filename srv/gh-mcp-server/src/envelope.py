@@ -7,7 +7,8 @@ construct it so handlers never build the shape by hand.
 Error catalog (closed set, RFC §4.1):
     auth_required, repo_not_found, network_error, not_found,
     not_a_repo, dirty_worktree, not_safe, commit_failed,
-    invalid_parameter, worktree_exists, active_agents, owned_by_other
+    invalid_parameter, worktree_exists, active_agents, owned_by_other,
+    locked_unreadable
 
 Note: ``confirm_required`` is a summary marker on ``ok()`` envelopes (see
 ``dryrun.destructive_flow``), NEVER an ``error.type``. ``not_safe`` (from the
