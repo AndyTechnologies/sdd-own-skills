@@ -752,13 +752,23 @@ if [[ -f "$SDD_TOOL_BIN/cmd/sdd-tool/main.go" ]]; then
   fi
   if [[ -n "$_go_bin" ]]; then
     _sdd_build_tmp="$(mktemp -d)"
-    if "$_go_bin" build -o "$_sdd_build_tmp/sdd-tool" "$SDD_TOOL_BIN/cmd/sdd-tool/" 2>/dev/null; then
+    # Build from the MODULE root (go.mod live en srv/sdd-tool/; el root del
+    # repo no tiene go.mod, asi que construir "$SDD_TOOL_BIN/cmd/sdd-tool/"
+    # desde REPO falla silenciosamente). Un fallo de build aca debe ser LOUD,
+    # nunca un skip silencioso de T40-T47.
+    if ( cd "$SDD_TOOL_BIN" && "$_go_bin" build -o "$_sdd_build_tmp/sdd-tool" ./cmd/sdd-tool/ ) 2>"$_sdd_build_tmp/build-err.txt"; then
       _sdd_tool_built=1
     else
+      echo "  [ERROR] sdd-tool build fallo (module root: $SDD_TOOL_BIN):" >&2
+      sed 's/^/    /' "$_sdd_build_tmp/build-err.txt" >&2
       rm -rf "$_sdd_build_tmp"
       _sdd_build_tmp=""
     fi
+  else
+    echo "  [ERROR] go no encontrado en PATH ni ubicaciones comunes; no se puede construir sdd-tool" >&2
   fi
+else
+  echo "  [ERROR] faltan fuentes de sdd-tool ($SDD_TOOL_BIN/cmd/sdd-tool/main.go); bloque T40-T48 roto" >&2
 fi
 
 t "T40 sdd-tool one-parse (scanner lazy)"
@@ -808,8 +818,9 @@ if [[ $_sdd_tool_built -eq 1 ]]; then
   # engram CLI absent → lookup returns 0 with empty result (fail-open read)
   [[ $rc -eq 0 ]] || { ko "retro lookup (engram mode) exit $rc != 0"; bad=1; }
   # Verify the binary was compiled with the title filter path (integration:
-  # go test covers parseSearchOutput + title prefix logic)
-  go test ./internal/engram/... 2>/dev/null || { ko "engram unit tests (title filter) failed"; bad=1; }
+  # go test covers parseSearchOutput + title prefix logic). go.mod vive en
+  # srv/sdd-tool/ — correr desde el module root, no del root del repo.
+  ( cd "$SDD_TOOL_BIN" && go test ./internal/engram/... 2>/dev/null ) || { ko "engram unit tests (title filter) failed"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 else
   skip "sdd-tool binario no construido"
@@ -833,11 +844,19 @@ if [[ $_sdd_tool_built -eq 1 ]]; then
   bad=0
   init_sandbox
   cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
+  # Stub gentle-ai (scanner signal 3): sin el stub el sandbox no tiene
+  # gentle-ai, el scanner falla y verify aborta en "FAIL-OPEN: scanner parse
+  # failed (signal 3)" sin emitir la linea de branch — el test quedaria
+  # rojo pese a que la senal de branch es la que se quiere ejercitar.
+  printf '#!/usr/bin/env bash\nprintf '\''{"artifactStore":"openspec","changes":[]}'\''\n' > "$SB_BIN/gentle-ai"
+  chmod +x "$SB_BIN/gentle-ai"
   out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/sdd-tool" worktree verify --change test-x 2>&1)"
   rc=$?
   # On main (not in a worktree), verify should exit non-zero (branch signal fails)
   [[ $rc -ne 0 ]] || { ko "worktree verify on main: exit 0 expected non-zero (no worktree)"; bad=1; }
-  echo "$out" | grep -q "branch\|BRANCH" || { ko "worktree verify: missing branch signal"; bad=1; }
+  # Case-insensitive: el binario emite "Branch:" (B mayuscula) — un grep
+  # "branch\|BRANCH" sensible a mayusculas jamas matchea "Branch:".
+  echo "$out" | grep -qi "branch" || { ko "worktree verify: missing branch signal"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 else
   skip "sdd-tool binario no construido"
@@ -920,13 +939,17 @@ t "T47b setup.sh 5d-2 warn (no Go → warn, no error)"
   # Create a minimal fake Go that always fails (used only if real mode reaches 5d-2)
   printf '#!/usr/bin/env bash\nexit 1\n' > "$SB_BIN/go"
   chmod +x "$SB_BIN/go"
-  # --check mode: 5d-2 only checks binary presence, never runs go build
-  env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" bash "$REPO/setup.sh" --check --skip-gentleai-sync > "$SB_TMP/t47.txt" 2>&1
-  rc=$?
+  # Route through the sandbox seam (MCP_DEBUG_SYNC_ARGS, igual que los tests
+  # hermanos via run_setup): el sync-skills.sh REAL no debe correr dentro del
+  # sandbox vacio (gate F9 → exit 2). Con el seam, 5d-2 se evalua en --check:
+  # binario ausente → "pendiente", warn-only, exit 0.
+  run_setup --check --skip-gentleai-sync
+  rc="$(cat "$SB_TMP/exit")"
   # In --check mode, missing binary → "pendiente" message; warn/error only in real mode
-  grep -qi "sdd-tool\|pendiente\|WARN\|go no encontrado" "$SB_TMP/t47.txt" || { ko "setup.sh 5d-2: missing sdd-tool check message"; bad=1; }
-  # --check should not hard-fail due to missing go
-  if [[ $rc -le 1 ]]; then
+  grep -qi "sdd-tool\|pendiente\|WARN\|go no encontrado" "$SB_TMP/out.txt" || { ko "setup.sh 5d-2: missing sdd-tool check message"; bad=1; }
+  # --check should not hard-fail due to missing go: 0 = clean, 1 = drift;
+  # 2 (gate F9) must never fire from a stub sync.
+  if [[ "$rc" -le 1 ]]; then
     : # acceptable (0 = clean, 1 = drift detected elsewhere)
   else
     ko "setup.sh 5d-2: exit $rc (expected ≤1 for warn-only check)"

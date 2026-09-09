@@ -20,9 +20,9 @@ import (
 
 // Precis holds the structured retro lookup result.
 type Precis struct {
-	Count    int        `json:"count"`
-	Retros   []RetroEntry `json:"retros"`
-	Text_    string     `json:"-"`
+	Count  int          `json:"count"`
+	Retros []RetroEntry `json:"retros"`
+	Text_  string       `json:"-"`
 }
 
 // RetroEntry is one deduped retrospective in the precis.
@@ -180,16 +180,23 @@ type retroEntry struct {
 	change string
 	body   string
 	source string
-ftime   time.Time
+	ftime  time.Time
 }
 
 func scanDir(dir, changeFilter, source string) []retroEntry {
 	var entries []retroEntry
 	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+		if err != nil || info == nil {
 			return nil
 		}
-		if info.Name() != "retrospective.md" {
+		// The active scan walks openspec/changes recursively, which INCLUDES
+		// archive/. Skipping it (unless archive/ is the walk root itself, i.e.
+		// the dedicated archive scan) prevents the same retrospective.md from
+		// being matched twice and breaking dedupe-by-change-name.
+		if info.IsDir() && info.Name() == "archive" && path != dir {
+			return filepath.SkipDir
+		}
+		if info.IsDir() || info.Name() != "retrospective.md" {
 			return nil
 		}
 		data, err := os.ReadFile(path)
@@ -207,6 +214,16 @@ func scanDir(dir, changeFilter, source string) []retroEntry {
 	return entries
 }
 
+// stripDatePrefix strips a leading YYYY-MM-DD- archive prefix from a change
+// directory name: "2026-09-09-test-x" → "test-x"; "test-x" stays "test-x".
+func stripDatePrefix(name string) string {
+	// len("2026-09-09-") == 11
+	if len(name) >= 11 && name[4] == '-' && name[7] == '-' && name[10] == '-' {
+		return name[11:]
+	}
+	return name
+}
+
 func extractChangeFromPath(path, baseDir string) string {
 	rel, err := filepath.Rel(baseDir, filepath.Dir(path))
 	if err != nil {
@@ -214,14 +231,13 @@ func extractChangeFromPath(path, baseDir string) string {
 	}
 	parts := strings.SplitN(rel, string(filepath.Separator), 2)
 	if len(parts) > 1 {
-		// For archive: strip date prefix
-		name := parts[1]
-		if idx := strings.Index(name, "-"); idx > 0 && idx <= 10 {
-			return name[idx+1:]
-		}
-		return name
+		// Deep path (e.g. archive/2026-09-09-test-x from the active scan): the
+		// change name is the deepest segment with any date prefix stripped.
+		return stripDatePrefix(parts[len(parts)-1])
 	}
-	return parts[0]
+	// Single segment (e.g. 2026-09-09-test-x from the archive scan): strip the
+	// archive date prefix so the canonical name is "test-x", not the raw dir.
+	return stripDatePrefix(parts[0])
 }
 
 func buildPrecis(entries []retroEntry, verifyDomain bool) *Precis {

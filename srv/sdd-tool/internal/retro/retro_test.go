@@ -92,6 +92,101 @@ func TestExtractChangeFromTopic(t *testing.T) {
 	}
 }
 
+func TestStripDatePrefix(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"2026-09-09-test-x", "test-x"},
+		{"test-x", "test-x"},
+		{"2026-01-01-foo", "foo"},
+		{"my-change-name", "my-change-name"},
+		{"x", "x"},
+	}
+	for _, c := range cases {
+		if got := stripDatePrefix(c.in); got != c.want {
+			t.Errorf("stripDatePrefix(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestExtractChangeFromPathActive(t *testing.T) {
+	base := filepath.Join("openspec", "changes")
+	path := filepath.Join(base, "test-x", "retrospective.md")
+	if got := extractChangeFromPath(path, base); got != "test-x" {
+		t.Fatalf("active path: got %q, want %q", got, "test-x")
+	}
+}
+
+func TestExtractChangeFromPathArchiveSinglePart(t *testing.T) {
+	// Archive scan: baseDir = openspec/changes/archive, rel = 1 part
+	// ("2026-09-09-test-x") — must normalize to "test-x".
+	base := filepath.Join("openspec", "changes", "archive")
+	path := filepath.Join(base, "2026-09-09-test-x", "retrospective.md")
+	if got := extractChangeFromPath(path, base); got != "test-x" {
+		t.Fatalf("archive 1-part path: got %q, want %q", got, "test-x")
+	}
+}
+
+func TestExtractChangeFromPathArchiveTwoPart(t *testing.T) {
+	// Active scan walking into archive: baseDir = openspec/changes, rel = 2
+	// parts ("archive/2026-09-09-test-x") — must normalize to "test-x".
+	base := filepath.Join("openspec", "changes")
+	path := filepath.Join(base, "archive", "2026-09-09-test-x", "retrospective.md")
+	if got := extractChangeFromPath(path, base); got != "test-x" {
+		t.Fatalf("archive 2-part path: got %q, want %q", got, "test-x")
+	}
+}
+
+func TestScanDirSkipsArchiveSubdirAndDedupes(t *testing.T) {
+	root := t.TempDir()
+	changes := filepath.Join(root, "openspec", "changes")
+	archive := filepath.Join(changes, "archive")
+	if err := os.MkdirAll(filepath.Join(changes, "my-change"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(archive, "2026-09-09-my-change"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := []byte("## What Worked\n\nAll good.\n")
+	if err := os.WriteFile(filepath.Join(changes, "my-change", "retrospective.md"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(archive, "2026-09-09-my-change", "retrospective.md"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Active scan must NOT see the archived retro (no double match).
+	active := scanDir(changes, "", "openspec")
+	if len(active) != 1 {
+		t.Fatalf("active scan: got %d entries, want 1 (archive subdir must be skipped)", len(active))
+	}
+	if active[0].change != "my-change" {
+		t.Fatalf("active scan: change %q, want %q", active[0].change, "my-change")
+	}
+
+	// Archive scan finds the archived retro with the date prefix stripped.
+	archived := scanDir(archive, "", "openspec")
+	if len(archived) != 1 {
+		t.Fatalf("archive scan: got %d entries, want 1", len(archived))
+	}
+	if archived[0].change != "my-change" {
+		t.Fatalf("archive scan: change %q, want %q", archived[0].change, "my-change")
+	}
+
+	// Change-filtered lookup resolves the archived retro.
+	filtered := scanDir(archive, "my-change", "openspec")
+	if len(filtered) != 1 || filtered[0].change != "my-change" {
+		t.Fatalf("archive change-filtered: got %d entries %+v, want exactly my-change", len(filtered), filtered)
+	}
+
+	// Combined precis: active + archived retros for the same change dedupe to ONE.
+	precis := buildPrecis(append(active, archived...), false)
+	if precis.Count != 1 {
+		t.Fatalf("dedupe: precis count %d, want 1", precis.Count)
+	}
+	if precis.Retros[0].Change != "my-change" {
+		t.Fatalf("dedupe: change %q, want %q", precis.Retros[0].Change, "my-change")
+	}
+}
+
 func contains(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsSubstr(s, sub))
 }
