@@ -48,11 +48,11 @@ Estimated 2300–2900 lines; single PR (RFC non-goal); size:exception pre-accept
 
 ## Phase 6: Wiring (rollout `./sync-skills.sh` real + `./setup.sh`)
 
-- [ ] 6.1 `setup.sh` 5d-2 (post-L1211): `go build -o "$SDD_OWN_DIR/bin/sdd-tool"`; check/dry-run/real; no Go/build → warn only
-- [ ] 6.2 `.gitignore`: `srv/sdd-tool/bin/`
-- [ ] 6.3 `wiring/prompts/sdd/orchestrator.md`: injection (explore/propose/design/council-lens; verify → verify-domain only); archive-close verify→changelog→retro persist→archive + changelog pre-archive+verify-report; rule 5 + incident hook — all fail-open
-- [ ] 6.4 `skills/sdd-changelog/SKILL.md` direct edit (never `overlays/skills/sdd-changelog/`): verify-report = pre-archive input; "absent archive-report → blocked" post-archive only
-- [ ] 6.5 Gate: `./sync-skills.sh --check` zero desyncs; grep installed `~/.config/sdd-own/{prompts/sdd/orchestrator.md,skills/sdd-changelog/SKILL.md}` (read-only)
+- [x] 6.1 `setup.sh` 5d-2 (post-L1211): `go build -o "$SDD_OWN_DIR/bin/sdd-tool"`; check/dry-run/real; no Go/build → warn only
+- [x] 6.2 `.gitignore`: `srv/sdd-tool/bin/`
+- [x] 6.3 `wiring/prompts/sdd/orchestrator.md`: injection (explore/propose/design/council-lens; verify → verify-domain only); archive-close verify→changelog→retro persist→archive + changelog pre-archive+verify-report; rule 5 + incident hook — all fail-open
+- [x] 6.4 `skills/sdd-changelog/SKILL.md` direct edit (never `overlays/skills/sdd-changelog/`): verify-report = pre-archive input; "absent archive-report → blocked" post-archive only
+- [x] 6.5 Gate: `./sync-skills.sh --check` zero desyncs; grep installed `~/.config/sdd-own/{prompts/sdd/orchestrator.md,skills/sdd-changelog/SKILL.md}` (read-only)
 
 ## Phase 7: RED suite T40+ in `tests/run_red_checks.sh`
 

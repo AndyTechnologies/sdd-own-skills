@@ -682,3 +682,29 @@ The user controls receipt-driven development with a switch: `gentle-ai review mo
 - Delivery under a disabled switch follows ordinary repository policy and reports `disabled/unmanaged`, never a fabricated approval.
 - Never enable receipt-driven development on the user's behalf unless the user explicitly asks for it.
 <!-- /gentle-ai:agent-routing -->
+
+<!-- sdd-own:sdd-tool-integration:start -->
+### SDD-Tool integration (fail-open)
+
+The `sdd-tool` CLI (`$HOME/.config/sdd-own/bin/sdd-tool`) provides subcommands for worktree lifecycle, retrospective persistence, dashboard, and incident recording. It is a read-dominant surface: listing and lookup are best-effort (warn-continue on failure, D2); writes that fail exit non-zero with a loud FAIL-OPEN marker and never block the pipeline.
+
+**Injection points (read-only, fail-open):**
+- **`sdd-explore`**: After exploration completes, run `sdd-tool retro lookup --change <name> --json` to surface any prior retrospective context; present it as non-binding background to the user.
+- **`sdd-propose`**: After proposal is confirmed, run `sdd-tool worktree list --json` to verify the proposal's change has a live worktree; report any mismatch but never block.
+- **`sdd-design`**: After design completes, run `sdd-tool dashboard --json` (scanner passthrough) to surface current pipeline status as design context; no TUI, no writes.
+- **`sdd-council-lens`**: No injection — council lenses are blind review; tooling surface would compromise independence.
+
+**Verify → verify-domain only:**
+When `sdd-verify` runs, invoke `sdd-tool worktree verify --change <name> --json` to check the 3 binding signals (root, branch, scanner). The verify phase consumes this as supplementary evidence alongside its own artifact checks. The sdd-tool verify output never replaces the verify phase's own verdict.
+
+**Archive-close chain:**
+After `sdd-verify` passes AND before `sdd-archive` launches:
+1. `sdd-changelog` runs (pre-archive hook, organic phase) and produces a changelog entry; it receives the `verify-report` as mandatory input (not just spec + archive).
+2. `sdd-tool retro persist --change <name> --verify-domain` persists the retrospective (openspec file pre-archive + Engram mirror if available); `none` store → hint only, never block.
+3. `sdd-archive` closes the change.
+
+**Incident hook (fail-open):**
+If any SDD phase exits with an error or an unexpected state, the orchestrator may optionally run `sdd-tool bug record --summary "<error>" --kind <kind>` to log the incident. This is advisory: recording failure never blocks the pipeline. Resolved incidents bind an Engram observation id or a fallback_path; the Engram subprocess probe is best-effort.
+
+All sdd-tool invocations follow D2: reads are warn-continue, writes are non-zero loud FAIL-OPEN. The tool never mutates `nextRecommended`, `blockedReasons`, or the ledger.
+<!-- sdd-own:sdd-tool-integration:end -->

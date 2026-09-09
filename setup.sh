@@ -63,6 +63,7 @@ mcp_report_updated=0
 mcp_report_pend=0
 mcp_report_skip=0
 mcp_report_error=0
+mcp_report_warn=0
 deps_missing=()
 network_degraded=0
 SELECTED_RUNTIMES=()
@@ -741,10 +742,10 @@ select_runtimes() {
 }
 
 # deploy_permission_roots <runtime> <roots_json> <target> — despliega el allow de
-# ~/agent_worktrees (C2) en la config del runtime respetando MCP_MODE. Idempotente:
+# ~/.agent_worktrees (C2) en la config del runtime respetando MCP_MODE. Idempotente:
 # si los permisos ya estan → up-to-date (sin reescritura). Mecanica por runtime:
-# opencode external_directory (glob), claude additionalDirectories + allow
-# tool-specs (literal), pi pi-permission-modes (glob + allowWrite literal),
+# opencode external_directory (objeto {glob: 'allow'}), claude additionalDirectories
+# + allow tool-specs (literal), pi pi-permission-modes (glob + allowWrite literal),
 # codex sandbox_mode workspace-write + writable_roots (literal, TOML).
 deploy_permission_roots() {
   local runtime="$1" roots="$2" target="$3"
@@ -818,10 +819,29 @@ if runtime == "opencode":
     perm = conf.setdefault("permission", {})
     if not isinstance(perm, dict):
         print("no-parse"); sys.exit(0)
-    arr = perm.setdefault("external_directory", [])
+    ed = perm.setdefault("external_directory", {})
+    if not isinstance(ed, dict):
+        # migracion: formato legacy array (contrato viejo) → objeto {item: allow}
+        items = list(ed) if isinstance(ed, list) else []
+        ed = {it: "allow" for it in items}
+        perm["external_directory"] = ed
+        changed = True
     for g in roots:
-        if g not in arr:
-            arr.append(g); changed = True
+        # el patrón legacy sin punto (~/agent_worktrees) no cubre el root real
+        legacy = g.replace("~/.agent_worktrees", "~/agent_worktrees", 1)
+        if legacy in ed:
+            del ed[legacy]
+            changed = True
+        if ed.get(g) != "allow":
+            rebuilt = {}
+            if "*" in ed:
+                rebuilt["*"] = ed["*"]
+            for k, v in ed.items():
+                if k not in ("*", g):
+                    rebuilt[k] = v
+            rebuilt[g] = "allow"
+            perm["external_directory"] = rebuilt
+            changed = True
 elif runtime == "claude":
     perms = conf.setdefault("permissions", {})
     if not isinstance(perms, dict):
@@ -1210,6 +1230,42 @@ else
 fi
 echo
 
+# ---- 5d-2 preflight: build sdd-tool (Go binary) ------------------------------------
+echo "  5d-2 — build sdd-tool (Go binary)"
+if command -v go >/dev/null 2>&1; then
+  SDD_TOOL_BIN="$ENV_DIR/bin/sdd-tool"
+  SDD_TOOL_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/srv/sdd-tool"
+  if [[ -d "$SDD_TOOL_SRC" ]] && [[ -f "$SDD_TOOL_SRC/cmd/sdd-tool/main.go" ]]; then
+    if [[ "$MCP_MODE" == "check" ]]; then
+      if [[ -x "$SDD_TOOL_BIN" ]]; then
+        printf '  [up-to-date] %s\n' "${SDD_TOOL_BIN#$HOME/}"
+        mcp_report_ok=$((mcp_report_ok + 1))
+      else
+        printf '  [pendiente]  sdd-tool no compilado; se construira en modo real\n'
+        mcp_report_pend=$((mcp_report_pend + 1))
+      fi
+    elif [[ "$MCP_MODE" == "dry-run" ]]; then
+      printf '  [pendiente]  compilar %s (dry-run no ejecuta go build)\n' "${SDD_TOOL_BIN#$HOME/}"
+      mcp_report_pend=$((mcp_report_pend + 1))
+    else
+      mkdir -p "$(dirname "$SDD_TOOL_BIN")"
+      if go build -o "$SDD_TOOL_BIN" "$SDD_TOOL_SRC/cmd/sdd-tool/" 2>&1; then
+        chmod 755 "$SDD_TOOL_BIN"
+        printf '  [compiled]   %s\n' "${SDD_TOOL_BIN#$HOME/}"
+        mcp_report_updated=$((mcp_report_updated + 1))
+      else
+        printf '  [WARN]       go build failed; sdd-tool no disponible (no bloqueante)\n' >&2
+        mcp_report_warn=$((mcp_report_warn + 1))
+      fi
+    fi
+  else
+    printf '  [skip]       srv/sdd-tool no encontrado en el repo\n'
+  fi
+else
+  printf '  [WARN]       go no encontrado; sdd-tool no compilado (no bloqueante)\n' >&2
+fi
+echo
+
 # ---- 5e selector de runtimes (F5) ---------------------------------------------------
 echo "  5e — selector de runtimes"
 select_runtimes
@@ -1266,7 +1322,7 @@ for envelope in "${envelopes[@]:-}"; do
 done
 
 # ---- 5g permisos de archivo: allow de ~/agent_worktrees (C2) ------------------------
-echo "  5g — permisos de ~/agent_worktrees (C2)"
+echo "  5g — permisos de ~/.agent_worktrees (C2)"
 for envelope in "${envelopes[@]:-}"; do
   runtime="$(jget "$envelope" '.runtime')" || continue
   presence="$(jget "$envelope" '.presence // ""')"
@@ -1336,8 +1392,9 @@ printf '  Token GitHub    : %s%s\n' "$token_status" "$([[ -n "$token_masked" ]] 
 printf '  MCP [up-to-date]: %d\n' "$mcp_report_ok"
 printf '  MCP [actualizado]: %d\n' "$mcp_report_updated"
 printf '  MCP [pendiente] : %d\n' "$mcp_report_pend"
-printf '  MCP [aviso]     : %d (runtimes ausentes / saltados)\n' "$mcp_report_skip"
-printf '  MCP [ERROR]     : %d\n' "$mcp_report_error"
+ printf '  MCP [aviso]     : %d (runtimes ausentes / saltados)\n' "$mcp_report_skip"
+ printf '  MCP [ERROR]     : %d\n' "$mcp_report_error"
+ printf '  MCP [WARN]      : %d (builds no bloqueantes)\n' "$mcp_report_warn"
 if [[ ${#deps_missing[@]} -gt 0 ]]; then
   printf '  Dependencias faltantes:\n'
   for dep_missing in "${deps_missing[@]}"; do

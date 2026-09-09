@@ -8,3 +8,6 @@
 __pycache__/
 *.pyc
 .venv/
+
+# Go build output (sdd-tool)
+srv/sdd-tool/bin/

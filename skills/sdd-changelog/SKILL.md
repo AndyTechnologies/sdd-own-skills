@@ -30,6 +30,7 @@ This is an **organic post-archive epilogue**: the orchestrator delegates you aft
 From the orchestrator:
 - Change name
 - Artifact store mode (`engram | openspec | hybrid | none`)
+- **verify-report** (pre-archive input — passed BEFORE archive completes; contains the evidence-backed outcome from verification)
 - The archive-report locator (required), or an explicit statement that it must be retrieved
 - Optional: the delivery strategy / release context (e.g. "library release", "internal tool", "no public release")
 
@@ -53,7 +54,7 @@ Retrieve the archived change's final artifacts per the persistence mode above. R
 2. **verify-report** — to state the evidence-backed outcome (verdict, tests passed, no CRITICAL remaining).
 3. **archive-report** — to confirm the change's final state AT CLOSE (per the archive's Final-State Authority, not stale intermediate snapshots).
 
-Never re-run verification and never re-read stale `apply-progress`/`verify-report` claims as current facts. The archive-report is the terminal record; if it is absent, return `blocked` — the changelog cannot be synthesized without the closed state.
+Never re-run verification and never re-read stale `apply-progress`/`verify-report` claims as current facts. The archive-report is the terminal record; if it is absent, return `blocked` — the changelog cannot be synthesized without the closed state. (The verify-report is a pre-archive input; its absence does not block the changelog — only the archive-report's absence does.)
 
 ## Step 3: Classify Semantic Version (SemVer)
 
