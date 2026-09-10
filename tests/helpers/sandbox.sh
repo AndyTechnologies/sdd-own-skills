@@ -12,10 +12,12 @@ SB_BIN=""
 SB_TMP=""
 SB_PORT=""
 declare -a SB_API_PIDS=()
+declare -a SB_ROOTS=()
 
 # init_sandbox — crea un sandbox fresco: HOME aislado, bin/ y tmp/.
 init_sandbox() {
   SB_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/sdd-red.XXXXXX")"
+  SB_ROOTS+=("$SB_ROOT")
   SB_HOME="$SB_ROOT/home"
   SB_BIN="$SB_ROOT/bin"
   SB_TMP="$SB_ROOT/tmp"
@@ -74,6 +76,18 @@ stop_fake_api() {
     [[ -n "$pid" ]] && wait "$pid" 2>/dev/null || true
   done
   SB_API_PIDS=()
+}
+
+# cleanup_sandboxes — borra TODOS los sandboxes creados en la corrida.
+# La causa histórica de tmpfs lleno era que el trap EXIT solo paraba fake APIs
+# y nunca removía $SB_ROOT; un corte de luz/internet dejaba decenas de dirs
+# ~/.80MB huérfanos que convertían write errors en falsos FAILs de contrato.
+cleanup_sandboxes() {
+  local root
+  for root in "${SB_ROOTS[@]:-}"; do
+    [[ -n "$root" && -d "$root" ]] && rm -rf "$root" 2>/dev/null || true
+  done
+  SB_ROOTS=()
 }
 
 # api_dead_port — SB_PORT a un puerto sin listener (fallo de red determinista)

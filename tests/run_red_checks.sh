@@ -53,8 +53,8 @@ ok()  { PASS=$((PASS + 1)); printf '  [PASS] %-9s %s\n' "($(_t_elapsed))" "$TEST
 ko()  { FAIL=$((FAIL + 1)); FAILURES+=("$TEST_NAME"); printf '  [FAIL] %-9s %s: %s\n' "($(_t_elapsed))" "$TEST_NAME" "$1"; }
 skip(){ SKIP=$((SKIP + 1)); printf '  [SKIP] %-9s %s: %s\n' "($(_t_elapsed))" "$TEST_NAME" "$1"; }
 
-cleanup() { stop_fake_api; }
-trap cleanup EXIT
+cleanup() { stop_fake_api; cleanup_sandboxes; }
+trap cleanup EXIT INT TERM
 
 echo "== RED checks de setup.sh (repo: $REPO)"
 echo
@@ -493,28 +493,30 @@ t "T25 selector interactivo (pty): espacio deselecciona opencode; pi se mergea"
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T26 worktree MCP contrato: 3 tools, Path.home(), destructive_flow, catalogo cerrado"
+t "T26 worktree MCP contrato: 4 tools, Path.home(), destructive_flow, catalogo cerrado"
 {
   bad=0
   src="$REPO/srv/gh-mcp-server/src"
   grep -q "register_worktree_mutation" "$src/tool_handlers/__init__.py" || { ko "familia worktree no registrada"; bad=1; }
   grep -q "git_worktree_add" "$src/tool_handlers/worktree_mutation.py" || { ko "git_worktree_add ausente"; bad=1; }
   grep -q "git_worktree_remove" "$src/tool_handlers/worktree_mutation.py" || { ko "git_worktree_remove ausente"; bad=1; }
+  grep -q "git_worktree_acquire" "$src/tool_handlers/worktree_mutation.py" || { ko "git_worktree_acquire ausente"; bad=1; }
+  grep -q "git_worktree_release" "$src/tool_handlers/worktree_mutation.py" || { ko "git_worktree_release ausente"; bad=1; }
   grep -q "git_worktree_list" "$src/tool_handlers/local_read.py" || { ko "git_worktree_list ausente en local_read"; bad=1; }
-  grep -q "Path.home()" "$src/tool_handlers/worktree_mutation.py" || { ko "resolucion HOME-relative ausente (Path.home())"; bad=1; }
+  grep -q "Path.home()" "$src/worktree_state.py" || { ko "resolucion HOME-relative ausente (Path.home() en worktree_state)"; bad=1; }
   grep -q "destructive_flow" "$src/tool_handlers/worktree_mutation.py" || { ko "two-phase destructive_flow no usado en worktree"; bad=1; }
-  for et in auth_required repo_not_found network_error not_found not_a_repo dirty_worktree not_safe commit_failed invalid_parameter worktree_exists active_agents owned_by_other; do
+  for et in auth_required repo_not_found network_error not_found not_a_repo dirty_worktree not_safe commit_failed invalid_parameter worktree_exists active_agents owned_by_other locked_unreadable corrupt_worktree; do
     grep -q "$et" "$src/envelope.py" || { ko "catalogo cerrado sin $et"; bad=1; }
   done
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T27 E1 doc-contract: 7 descripciones dos-fases citan ECHO_PROTOCOL; confirm_required nunca err()"
+t "T27 E1 doc-contract: 10 descripciones dos-fases citan ECHO_PROTOCOL; confirm_required nunca err()"
 {
   bad=0
   src="$REPO/srv/gh-mcp-server/src"
   n="$(grep -rh '+ ECHO_PROTOCOL' "$src"/tool_handlers/*.py | wc -l)"
-  [[ "$n" == "7" ]] || { ko "descripciones con ECHO_PROTOCOL = $n (esperado 7)"; bad=1; }
+  [[ "$n" == "10" ]] || { ko "descripciones con ECHO_PROTOCOL = $n (esperado 10)"; bad=1; }
   hits="$(grep -rn --include='*.py' 'err("confirm_required"\|err('\''confirm_required'\''' "$src" | wc -l)"
   [[ "$hits" == "0" ]] || { ko "confirm_required usado como err() ($hits hits)"; bad=1; }
   grep -q 'confirm_required' "$src/dryrun.py" || { ko "confirm_required ausente en dryrun.py (marker ok)"; bad=1; }
