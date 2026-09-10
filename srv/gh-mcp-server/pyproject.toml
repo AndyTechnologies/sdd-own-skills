@@ -4,3 +4,10 @@ version = "0.1.0"
 description = "Local FastMCP server exposing typed gh_*/git_* tools over the gh and git CLIs"
 requires-python = ">=3.12"
 dependencies = ["fastmcp>=2"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -63,7 +63,9 @@ func passStr(ok bool) string {
 }
 
 // List enumerates worktrees under ~/.agent_worktrees/<repo>/<change>
-// by inspecting each scanner change entry for a convention path.
+// by inspecting each scanner change entry for a convention path. The repo
+// namespace is derived dynamically from the current working directory's git
+// root (RepoNameFromGitRoot) — never hardcoded.
 func List(snap *scanner.Status) []Worktree {
 	var trees []Worktree
 	if snap == nil {
@@ -73,14 +75,23 @@ func List(snap *scanner.Status) []Worktree {
 	if err != nil {
 		return trees
 	}
+	repoName := RepoNameFromGitRoot(cwd())
 	for _, ch := range snap.Changes {
-		path := filepath.Join(home, ".agent_worktrees", "sdd-own-skills", ch.Name)
+		path := filepath.Join(home, ".agent_worktrees", repoName, ch.Name)
 		if info, err := os.Stat(path); err == nil && info.IsDir() {
 			branch := "sdd/" + ch.Name
 			trees = append(trees, Worktree{Path: path, Branch: branch})
 		}
 	}
 	return trees
+}
+
+func cwd() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return cwd
 }
 
 // Verify checks three binding signals for a worktree.

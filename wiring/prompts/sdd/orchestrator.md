@@ -690,7 +690,7 @@ The `sdd-tool` CLI (`$HOME/.config/sdd-own/bin/sdd-tool`) provides subcommands f
 
 **Injection points (read-only, fail-open):**
 - **`sdd-explore`**: After exploration completes, run `sdd-tool retro lookup --change <name> --json` to surface any prior retrospective context; present it as non-binding background to the user.
-- **`sdd-propose`**: After proposal is confirmed, run `sdd-tool worktree list --json` to verify the proposal's change has a live worktree; report any mismatch but never block.
+- **`sdd-propose`**: After proposal is confirmed, claim the change's lifecycle worktree via `git_worktree_acquire` (created/attached/claimed/already_mine; typed denials are blocking), then run `sdd-tool worktree list --json` to verify the proposal's change has a live worktree; report any mismatch but never block.
 - **`sdd-design`**: After design completes, run `sdd-tool dashboard --json` (scanner passthrough) to surface current pipeline status as design context; no TUI, no writes.
 - **`sdd-council-lens`**: No injection — council lenses are blind review; tooling surface would compromise independence.
 
@@ -708,3 +708,14 @@ If any SDD phase exits with an error or an unexpected state, the orchestrator ma
 
 All sdd-tool invocations follow D2: reads are warn-continue, writes are non-zero loud FAIL-OPEN. The tool never mutates `nextRecommended`, `blockedReasons`, or the ledger.
 <!-- sdd-own:sdd-tool-integration:end -->
+
+<!-- sdd-own:worktree-lifecycle-v2:start -->
+### Worktree Lifecycle v2 — appended acquire-gate section
+
+Phases needing a worktree SHALL call `git_worktree_acquire(repo_path, change, owner, session, store="hybrid")` BEFORE `sdd-tool worktree verify`; route only on `{created|attached|claimed|reclaimed|already_mine}`. Note: `reclaimed` is intentionally reserved — unreachable with current signals (PID-alive cannot prove abandonment); a future session-liveness beacon activates it. Route set kept intact for forward compatibility.
+- `exists_stale` (dead PID — lock v1/≠2 or v2) → auto re-claim (`claimed`), no prompt; `already_mine` (owner+session match) → proceed, no mutation. Live-PID v1/≠2 or same-owner-different-session locks are real conflicts → blocking prompt, never silent.
+- Blocking prompt ONLY on real conflicts (`owned_by_other`, `locked_unreadable`, `corrupt_worktree`): relay the typed envelope and wait — never silently take over.
+- Release: archive-close or explicit abandon only, never between phases; dirty OK; non-owner = no-op.
+- Continuation without a change name: `git_worktree_list` + apply-progress cross-ref → 1 direct+notice; 2–5 one `question` (change+phase+dirty); >5 table (index|change|branch|state|last_seen|dirty|phase) + validated input (number/name/alias; unambiguous single match, else re-present); 0 informative + propose `/sdd-new`. Selection → acquire → verify binding signals → resume apply-progress.
+- Double-apply assertion: this block is idempotent — exactly ONE `sdd-own:worktree-lifecycle-v2:start/end` block must exist after every sync; `./sync-skills.sh --check` == 0 desyncs.
+<!-- sdd-own:worktree-lifecycle-v2:end -->

@@ -55,33 +55,40 @@ Adding the skill SHALL NOT break the rest of the suite: `./sync-skills.sh --chec
 
 ### Requirement: MCP worktree lifecycle extension
 
-The vendored `using-git-worktrees` skill SHALL gain an additive section (6c) covering the MCP-native worktree lifecycle. The extension SHALL document: worktree location convention (`~/.agent_worktrees/<basename(repo_path)>/<change-name>`, HOME-relative, resolved via `Path.home()`), branch naming (`sdd/<change>`), per-worktree dependency installation (pnpm hardlinks, out-of-source builds), own `.codegraph/` index (never copied or symlinked), and removal safety checks (no uncommitted changes, no live agents, owner match). The extension SHALL reference the `git_worktree_add`/`list`/`remove` MCP tools and NEVER instruct raw `git worktree` via bash (no-git-crudo invariant). Existing content preceding section 6c SHALL NOT be modified or removed.
+The vendored `using-git-worktrees` skill SHALL gain an additive section (6c) covering the MCP-native worktree lifecycle with acquire/release semantics. The extension SHALL document: worktree location convention (`~/.agent_worktrees/<basename(repo_path)>/<change-name>`), branch naming (`sdd/<change>`), per-worktree dependency installation, own `.codegraph/` index (never copied/symlinked), and the 7-state model (absent/absent_branch_exists/exists_inactive/exists_stale/exists_active_mine/exists_active_other/corrupt). The extension SHALL reference `git_worktree_acquire`, `git_worktree_release`, `git_worktree_list` as primary tools and `git_worktree_add`/`git_worktree_remove` as retrocompat wrappers. It SHALL document acquire states (created/attached/claimed/reclaimed/already_mine), typed denials (owned_by_other/locked_unreadable), and the release-only-claims contract. The no-git-crudo invariant MUST be preserved.
+(Previously: referenced add/remove/remove as primary tools with no state model)
 
-#### Scenario: MCP tools documented (AC6)
+#### Scenario: Acquire/release documented
 
 - GIVEN the skill file is reviewed at section 6c
-- WHEN a user reads the worktree lifecycle section
-- THEN it documents all three MCP tools: add, list, remove
-- AND references the two-phase dry-run pattern for add and remove
+- WHEN a user reads the lifecycle section
+- THEN it documents acquire, release, and list as primary tools
+- AND add/remove are documented as thin retrocompat wrappers
 
-#### Scenario: Per-worktree isolation documented (AC6)
+#### Scenario: State model documented
 
-- GIVEN a worktree is created via MCP tools
-- WHEN the skill's 6c guidance is followed
-- THEN `.codegraph/` is initialized separately per worktree
-- AND dependencies are installed per-worktree (not shared with main)
-- AND location follows the `~/.agent_worktrees/<basename(repo_path)>/<change-name>` convention
+- GIVEN the skill's 6c section
+- WHEN the lifecycle section is reviewed
+- THEN the 7-state model is described
+- AND acquire paths for each state are summarized
 
-#### Scenario: No-git-crudo preserved (AC6)
+#### Scenario: Denial semantics documented
+
+- GIVEN the skill's 6c section
+- WHEN acquire denial is described
+- THEN `owned_by_other` and `locked_unreadable` are documented as typed errors
+- AND the user is guided on how to resolve them
+
+#### Scenario: No-git-crudo preserved
 
 - GIVEN the skill's full content is reviewed
 - WHEN worktree operations are described
-- THEN all worktree ops route through `git_worktree_*` MCP tools
-- AND no raw `git worktree` commands appear in the instructions
+- THEN all worktree ops route through MCP tools
+- AND no raw `git worktree` commands appear
 
-#### Scenario: Non-regression (AC7)
+#### Scenario: Non-regression
 
-- GIVEN the skill file with the 6c extension applied
+- GIVEN the skill file with modified 6c section
 - WHEN `./sync-skills.sh --check` runs
 - THEN zero desyncs are reported
-- AND existing vendored content (all existing content) is byte-identical to the pre-change state
+- AND existing vendored content (all pre-6c) is preserved

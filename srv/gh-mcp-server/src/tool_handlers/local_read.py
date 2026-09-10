@@ -9,11 +9,11 @@ All tools:
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Any
 
+from src import worktree_state as ws
 from src._common import validate_worktree as _validate_worktree
-from src.envelope import Envelope, err, ok
+from src.envelope import err, ok
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
@@ -90,28 +90,10 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
     # ------------------------------------------------------------------
     @server.tool()
     async def git_worktree_list(path: str) -> dict[str, Any]:
-        """List all git worktrees (including main) for a repo. Idempotent read."""
+        """List all git worktrees (including main) for a repo, enriched with
+        lifecycle state (state, owner, session, last_seen, dirty, is_main)."""
         validation = _validate_worktree(executor, path)
         if validation:
             return dict(validation)
-        r = executor.run(["git", "-C", path, "worktree", "list", "--porcelain"])
-        if r.returncode != 0:
-            return dict(err("invalid_parameter", r.stderr.strip()))
-        # Porcelain format: blocks of "key value" lines separated by blank lines.
-        worktrees: list[dict[str, str]] = []
-        current: dict[str, str] = {}
-        for line in r.stdout.splitlines():
-            if not line.strip():
-                if current:
-                    worktrees.append(current)
-                    current = {}
-                continue
-            key, _, value = line.partition(" ")
-            current[key] = value
-        if current:
-            worktrees.append(current)
-        summary = "; ".join(
-            f"{w.get('branch', 'detached')} @ {w.get('worktree', '?')}"
-            for w in worktrees
-        )
-        return dict(ok({"worktrees": worktrees}, f"{len(worktrees)} worktree(s): {summary}"))
+        result = ws.enriched_worktree_list(executor, path)
+        return dict(result)
