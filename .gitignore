@@ -11,3 +11,6 @@ __pycache__/
 
 # Go build output (sdd-tool)
 srv/sdd-tool/bin/
+
+# Índice local de CodeGraph (base de datos + daemon del proyecto)
+.codegraph/
