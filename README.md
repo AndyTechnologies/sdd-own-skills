@@ -33,6 +33,7 @@ Cada carpeta es nuestra y se **full-instala**: la copia física ORIGINAL va a `~
 | `using-git-worktrees` | Aislamiento de workspace vía worktrees: tools nativas primero, fallback `git worktree`, verificación de seguridad. **Procedencia: vendida de [obra/superpowers](https://github.com/obra/superpowers) (MIT, Jesse Vincent); adaptación mínima (frontmatter de suite + nota de provenance).** |
 | `test-fixing` | Arreglar tests fallidos agrupando por causa raíz (red → diagnóstico → patch → re-run) hasta suite verde; stack-neutral. **Procedencia: adaptada de [mhattingpete/claude-skills-marketplace](https://github.com/mhattingpete/claude-skills-marketplace) `engineering-workflow-plugin/skills/test-fixing` (Apache-2.0).** |
 | `github-automation` | Automatización/operaciones de GitHub vía el MCP oficial (superficie `github_*`): repos, issues, branches, commits, PR review/merge/status (no creación), Actions y code search; cero tokens en la skill. **Authoría propia: sdd-own-skills (fresh reauthoring, repo MIT).** |
+| `archify` | Diagramas de arquitectura/workflow/sequence/dataflow/lifecycle como HTML autocontenido (JSON IR tipado → render+validación con Node, sin dependencias). **Procedencia: [tt-a1i/archify](https://github.com/tt-a1i/archify) (MIT), vendida tal cual desde el release asset estable v2.16.0.** |
 
 Las skills vendidas vienen de [Gentleman-Programming/Gentleman-Skills](https://github.com/Gentleman-Programming/Gentleman-Skills) (`curated/`), repo **MIT**; cada `SKILL.md` conserva su frontmatter tal cual (4 con `license: Apache-2.0` declarada, `github-pr` sin campo de licencia — se respeta la licencia del archivo individual). No se renombró contenido ni se alteró el frontmatter.
 
@@ -173,6 +174,15 @@ set -a; source ~/.config/sdd-own/github-mcp.env; set +a
 
 El pipeline canónico de Alan (instalado por `gentle-ai sync`) se extendió con bloques `sdd-own` anexados por overlays. Los cambios principales:
 
+### 0. El flujo completo de un vistazo
+
+![Flujo SDD configurado](docs/diagrams/sdd-flow.png)
+
+Diagrama del pipeline SDD que configura este repo (generado con nuestra skill `archify`, quality `showcase`). Muestra el camino principal — `Preflight + Init` → `Quest/RFC` → `Explore` → `Propose` → `Spec` → `Design` → `Council` (3 lentes en paralelo, siempre) → `Arch Lint` (con el acta obligatoria) → `Tasks` → `Apply` → `Verify + Archive` — más la lane de decisiones humanas (fork real del council, rework por gate fail) y las cards con fases orgánicas, gates humanos y bloqueos.
+
+- **HTML interactivo**: [`docs/diagrams/sdd-flow.html`](docs/diagrams/sdd-flow.html) (autocontenido, ábrelo en el navegador; incluye 3 vistas guiadas).
+- **Fuente editable**: [`docs/diagrams/sdd-flow.workflow.json`](docs/diagrams/sdd-flow.workflow.json) (JSON IR schema v2; editar y re-renderizar/validar con la skill `archify`).
+
 ### 1. El RFC aprobado es la source of truth (`sdd-quest` v3.1 → exclusiva)
 
 - **`sdd-quest` corre ANTES del explore** (es una skill exclusiva nuestra). Entrevista al usuario una pregunta a la vez (tope duro de 50), produce un RFC lenguaje-agnóstico y exige **aprobación explícita del usuario** (`Approval: approved`).
@@ -222,7 +232,7 @@ sdd-own-skills/
 │   ├── mcp.d/                      # definiciones declarativas MCP por runtime (opencode/pi/claude/codex)
 │   └── prompts/sdd/                # orchestrator.md + sdd-rfc-author.md (nuestros)
 ├── engram-snapshot/                # artifacts de Engram (diseño/implementación del quest gate)
-├── docs/                           # issue-3332-rfc-gate.md
+├── docs/                           # issue-3332-rfc-gate.md, diagrams/ (flujo SDD: PNG + HTML + JSON IR)
 └── .gitignore                      # ignora .atl/ (registry con rutas absolutas locales)
 ```
 
@@ -239,5 +249,6 @@ sdd-own-skills/
 - `using-git-worktrees` viene de [obra/superpowers](https://github.com/obra/superpowers) (`tools/git/worktrees/SKILL.md`, **MIT**, Copyright 2025 Jesse Vincent); se adaptó solo el frontmatter (suite `sdd-own-skills` + metadata original + nota de provenance) sin tocar el contenido.
 - `test-fixing` viene de [mhattingpete/claude-skills-marketplace](https://github.com/mhattingpete/claude-skills-marketplace) `engineering-workflow-plugin/skills/test-fixing` (**Apache-2.0**); se adaptó para ser stack-neutral conservando la estructura de diagnóstico.
 - `github-automation` es de autoría propia (fresh reauthoring) y no deriva de ninguna fuente externa.
+- `archify` viene de [tt-a1i/archify](https://github.com/tt-a1i/archify) (**MIT**); se vendió el paquete estable tal cual (release asset `archify.zip` v2.16.0, ver `skills/archify/README.md` y `skill-release.json`). Runtime sin dependencias externas (Node builtins).
 
 **Skills de Alan no versionadas aquí**: las demás skills del ecosistema (`sdd-apply`, `sdd-verify`, `branch-pr`, `go-testing`, etc.) las instala `gentle-ai sync` desde sus fuentes canónicas; este repo solo las personaliza vía overlays. Se respeta la licencia declarada en cada una según su autor upstream.

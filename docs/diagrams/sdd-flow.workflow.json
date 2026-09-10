@@ -1,0 +1,111 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Flujo SDD configurado (gentle-orchestrator)",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "happy-path",
+        "label": "Camino principal",
+        "focus": ["preflight", "quest", "explore", "propose", "spec", "design", "council", "archlint", "tasks", "apply", "done"],
+        "note": "El pipeline SDD completo desde el preflight hasta archivar."
+      },
+      {
+        "id": "council-fork",
+        "label": "Fork del council",
+        "focus": ["design", "council", "fork", "archlint"],
+        "note": "El fork real lo decide el humano; convergencia continúa sin interrumpir."
+      },
+      {
+        "id": "gates",
+        "label": "Gates y bloqueos",
+        "focus": ["preflight", "quest", "fork", "apply", "done", "rework"],
+        "note": "Puntos donde el flujo para por consentimiento, fallo de gate o evidencia inválida."
+      }
+    ]
+  },
+  "lanes": [
+    { "id": "user", "label": "Humano · Gates", "variant": "exception" },
+    { "id": "plan", "label": "Planificación" },
+    { "id": "review", "label": "Revisión y calidad" },
+    { "id": "gates", "label": "Decisiones humanas", "variant": "exception" },
+    { "id": "build", "label": "Implementación" },
+    { "id": "close", "label": "Cierre" }
+  ],
+  "phases": [
+    { "id": "phase_gates", "label": "Arranque y claridad", "fromCol": 0, "toCol": 1 },
+    { "id": "phase_plan", "label": "Planificar y revisar", "fromCol": 2, "toCol": 4 },
+    { "id": "phase_close", "label": "Ejecutar y cerrar", "fromCol": 5, "toCol": 5 }
+  ],
+  "groups": [
+    { "id": "g_hardgates", "label": "Hard gates", "lane": "user", "fromCol": 0, "toCol": 1, "variant": "security" },
+    { "id": "g_review", "label": "Cadena obligatoria", "lane": "review", "fromCol": 4, "toCol": 5, "variant": "emphasis" }
+  ],
+  "mainPath": ["preflight", "quest", "explore", "propose", "spec", "design", "council", "archlint", "tasks", "apply", "done"],
+  "semanticChecks": {
+    "allowedRoots": ["preflight"],
+    "allowedTerminals": ["done", "fork", "rework"],
+    "requiredPaths": [
+      { "from": "design", "to": "council" },
+      { "from": "council", "to": "archlint" }
+    ]
+  },
+  "nodes": [
+    { "id": "preflight", "lane": "user", "col": 0, "type": "security", "label": "Preflight + Init", "sublabel": "modo · store · PRs · presupuesto", "tag": "hard gate", "width": 148 },
+    { "id": "quest", "lane": "user", "col": 1, "type": "frontend", "label": "Quest / RFC", "sublabel": "entrevista + aprobación", "tag": "mandato", "width": 132 },
+    { "id": "explore", "lane": "plan", "col": 1, "type": "backend", "label": "Explore", "sublabel": "código + alternativas", "tag": "research si gap", "width": 132 },
+    { "id": "propose", "lane": "plan", "col": 2, "type": "backend", "label": "Propose", "sublabel": "intención · alcance", "width": 132 },
+    { "id": "spec", "lane": "plan", "col": 3, "type": "backend", "label": "Spec", "sublabel": "requisitos + escenarios", "width": 132 },
+    { "id": "design", "lane": "plan", "col": 4, "type": "backend", "label": "Design", "sublabel": "arquitectura", "width": 132 },
+    { "id": "council", "lane": "review", "col": 4, "type": "messagebus", "label": "Council", "sublabel": "3 lentes en paralelo", "tag": "acta", "width": 132 },
+    { "id": "archlint", "lane": "review", "col": 5, "type": "security", "label": "Arch Lint", "sublabel": "clean/hexagonal", "tag": "acta obligatoria", "width": 132 },
+    { "id": "tasks", "lane": "plan", "col": 5, "type": "backend", "label": "Tasks", "sublabel": "work units + forecast", "width": 132 },
+    { "id": "apply", "lane": "build", "col": 5, "type": "backend", "label": "Apply", "sublabel": "implementación por unidades", "width": 132 },
+    { "id": "done", "lane": "close", "col": 5, "type": "database", "label": "Verify + Archive", "sublabel": "evidencia · changelog", "width": 148 },
+    { "id": "fork", "lane": "gates", "col": 4, "type": "security", "label": "Fork del Council", "sublabel": "el humano decide · máx 2 rondas", "width": 148 },
+    { "id": "rework", "lane": "gates", "col": 5, "type": "security", "label": "Rework", "sublabel": "1 re-run por fase · 2º fallo STOP", "width": 148 }
+  ],
+  "edges": [
+    { "id": "preflight-quest", "from": "preflight", "to": "quest", "variant": "default" },
+    { "id": "quest-explore", "from": "quest", "to": "explore", "label": "aprobado", "variant": "emphasis" },
+    { "id": "explore-propose", "from": "explore", "to": "propose", "variant": "default" },
+    { "id": "propose-spec", "from": "propose", "to": "spec", "variant": "default" },
+    { "id": "spec-design", "from": "spec", "to": "design", "variant": "default" },
+    { "id": "design-council", "from": "design", "to": "council", "label": "siempre", "variant": "emphasis" },
+    { "id": "council-archlint", "from": "council", "to": "archlint", "label": "acta", "variant": "emphasis" },
+    { "id": "archlint-tasks", "from": "archlint", "to": "tasks", "variant": "default" },
+    { "id": "tasks-apply", "from": "tasks", "to": "apply", "label": "work units", "variant": "emphasis" },
+    { "id": "apply-done", "from": "apply", "to": "done", "label": "evidencia", "variant": "emphasis" },
+    { "id": "council-fork", "from": "council", "to": "fork", "label": "fork real", "variant": "security", "role": "branch" },
+    { "id": "apply-rework", "from": "apply", "to": "rework", "label": "gate fail", "variant": "security", "role": "error" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Fases orgánicas (opt-in)",
+      "items": [
+        "Research: solo si hay gap de conocimiento externo y corre antes de propose",
+        "Changelog: post-archive, narrativa de release; opt-out si no hay cambio visible"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Gates humanos",
+      "items": [
+        "Modo interactive: pausa entre fases con proceed / adjust / stop",
+        "Council con fork real: los frames los decide el usuario (máx 2 rondas)",
+        "Review Workload: forecast >400 líneas pide split o size:exception"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Bloqueos y fallas",
+      "items": [
+        "blockedReasons no vacío: resolver bloqueos y parar",
+        "Gatekeeper: 2º fallo consecutivo de una fase → STOP con reporte",
+        "Arch-lint con findings → re-lanzar design con el acta como evidencia"
+      ]
+    }
+  ]
+}
