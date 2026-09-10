@@ -174,6 +174,59 @@ def classify_merged(*, compare_status: str | None) -> DryRunResult:
     )
 
 
+def classify_push(
+    *,
+    branch: str | None,
+    upstream: str | None,
+    ahead: int,
+    behind: int,
+    dirty_count: int,
+) -> DryRunResult:
+    """Compute dry-run data for ``git_push`` (local branch → its upstream).
+
+    Fail closed: pushing is only provably safe when the current HEAD is on a
+    named branch (not detached), an upstream is configured, and there is at
+    least one commit ahead of it. Being behind is NOT a blocker (a plain push
+    cannot force; the remote rejects a non-fast-forward itself).
+    """
+    data: dict[str, Any] = {
+        "branch": branch,
+        "upstream": upstream,
+        "ahead": ahead,
+        "behind": behind,
+        "dirty_count": dirty_count,
+    }
+
+    if branch is None:
+        data["safe"] = False
+        return DryRunResult(
+            data=data,
+            summary="Detached HEAD — nothing to push (checkout a branch first)",
+        )
+
+    if upstream is None:
+        data["safe"] = False
+        return DryRunResult(
+            data=data,
+            summary=f"Branch {branch} has no upstream — nothing to push (set tracking first)",
+        )
+
+    if ahead <= 0:
+        data["safe"] = False
+        return DryRunResult(
+            data=data,
+            summary=f"Nothing to push — {branch} is up to date with {upstream}",
+        )
+
+    data["safe"] = True
+    detail = f"{behind} behind" if behind > 0 else "in sync"
+    dirty = f", {dirty_count} dirty" if dirty_count > 0 else ""
+    return DryRunResult(
+        data=data,
+        summary=f"Push {ahead} commit(s) from {branch} → {upstream} ({detail}{dirty})",
+    )
+
+
 def safe_to_rerun(
     *,
     status: str | None,

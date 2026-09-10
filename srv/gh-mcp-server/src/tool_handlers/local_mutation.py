@@ -1,9 +1,11 @@
-"""Local mutation handlers — 2 ``git_*`` tools.
+"""Local mutation handlers — 3 ``git_*`` tools.
 
 - ``git_commit``: two-phase (dry-run = staged summary; confirm = two sequential
   executor calls: ``add <paths>`` when ``paths`` is given, else ``add -A``, then
   ``commit``). Documents staged-index-on-failed-commit.
 - ``git_delete_branch``: two-phase via ``destructive_flow``, ``--merged`` guard.
+- ``git_push``: two-phase via ``destructive_flow``; dry-run classifies the local
+  branch/upstream/ahead state (``classify_push``), confirm runs ``git push``.
 """
 
 from __future__ import annotations
@@ -11,13 +13,50 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from src._common import validate_worktree as _validate_worktree
-from src.dryrun import DryRunResult, ECHO_PROTOCOL, destructive_flow
+from src.dryrun import DryRunResult, ECHO_PROTOCOL, classify_push, destructive_flow
 from src.envelope import Envelope, err, ok
 
 if TYPE_CHECKING:
     from fastmcp import FastMCP
 
     from src.executor import ExecutorProto
+
+
+def _push_state(executor: ExecutorProto, path: str) -> DryRunResult:
+    """Collect local push state and classify it (detached / no-upstream / ahead)."""
+    # Named branch? (detached HEAD → fail closed)
+    sym = executor.run(["git", "-C", path, "symbolic-ref", "-q", "--short", "HEAD"])
+    branch = sym.stdout.strip() if sym.returncode == 0 else None
+
+    upstream: str | None = None
+    ahead = 0
+    behind = 0
+    if branch:
+        up = executor.run(["git", "-C", path, "rev-parse", "--abbrev-ref", "@{u}"])
+        if up.returncode == 0:
+            upstream = up.stdout.strip()
+            # left-right count: "AHEAD\tBEHIND" (HEAD side, upstream side)
+            cnt = executor.run(
+                ["git", "-C", path, "rev-list", "--left-right", "--count", "HEAD...@{u}"]
+            )
+            if cnt.returncode == 0:
+                parts = cnt.stdout.split()
+                if len(parts) == 2:
+                    ahead = int(parts[0] or 0)
+                    behind = int(parts[1] or 0)
+
+    dirty = 0
+    st = executor.run(["git", "-C", path, "status", "--porcelain"])
+    if st.returncode == 0:
+        dirty = len([l for l in st.stdout.splitlines() if l.strip()])
+
+    return classify_push(
+        branch=branch,
+        upstream=upstream,
+        ahead=ahead,
+        behind=behind,
+        dirty_count=dirty,
+    )
 
 
 def _matches_any_path(porcelain_line: str, paths: list[str]) -> bool:
@@ -42,7 +81,7 @@ def _matches_any_path(porcelain_line: str, paths: list[str]) -> bool:
 
 
 def register(server: FastMCP, executor: ExecutorProto) -> None:
-    """Wire all 2 local mutation tools into *server*."""
+    """Wire all 3 local mutation tools into *server*."""
 
     # ------------------------------------------------------------------
     # 1. git_commit
@@ -192,6 +231,48 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
             if r.returncode != 0:
                 return err("invalid_parameter", r.stderr.strip())
             return ok(None, f"Branch {branch} deleted")
+
+        result = destructive_flow(
+            remote=False,
+            executor=executor,
+            compute_dry_run=compute_dry_run,
+            execute=execute,
+            dry_run=dry_run,
+            confirmed=confirmed,
+            confirmed_data=confirmed_data,
+        )
+        return dict(result)
+
+    # ------------------------------------------------------------------
+    # 3. git_push (local)
+    # ------------------------------------------------------------------
+    @server.tool(
+        description="Push the current branch to its upstream (two-phase: dry-run → confirm). "
+        + ECHO_PROTOCOL
+        + " Dry-run classifies local state only (branch, upstream, ahead/behind, "
+        "dirty count) — no network. Refuses detached HEAD, no-upstream branches, "
+        "and nothing-to-push. Confirm runs `git push` (no force; the remote "
+        "rejects a non-fast-forward itself).",
+    )
+    async def git_push(
+        path: str,
+        dry_run: bool = True,
+        confirmed: bool = False,
+        confirmed_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Push the current branch to its upstream (two-phase: dry-run → confirm)."""
+        validation = _validate_worktree(executor, path)
+        if validation:
+            return dict(validation)
+
+        def compute_dry_run() -> DryRunResult:
+            return _push_state(executor, path)
+
+        def execute() -> Envelope:
+            r = executor.run(["git", "-C", path, "push"])
+            if r.returncode != 0:
+                return err("push_failed", r.stderr.strip() or r.stdout.strip())
+            return ok(None, "Pushed")
 
         result = destructive_flow(
             remote=False,
