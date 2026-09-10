@@ -42,11 +42,16 @@ fi
 PASS=0; FAIL=0; SKIP=0
 declare -a FAILURES=()
 TEST_NAME=""
+TEST_START=0
+START_EPOCH="$(date +%s)"
+TEST_EPOCH="$START_EPOCH"
 
-t()   { TEST_NAME="$1"; }
-ok()  { PASS=$((PASS + 1)); printf '  [PASS] %s\n' "$TEST_NAME"; }
-ko()  { FAIL=$((FAIL + 1)); FAILURES+=("$TEST_NAME"); printf '  [FAIL] %s: %s\n' "$TEST_NAME" "$1"; }
-skip(){ SKIP=$((SKIP + 1)); printf '  [SKIP] %s: %s\n' "$TEST_NAME" "$1"; }
+_t_elapsed() { echo "$(( $(date +%s) - TEST_START ))s"; }
+
+t()   { TEST_NAME="$1"; TEST_START="$(date +%s)"; }
+ok()  { PASS=$((PASS + 1)); printf '  [PASS] %-9s %s\n' "($(_t_elapsed))" "$TEST_NAME"; }
+ko()  { FAIL=$((FAIL + 1)); FAILURES+=("$TEST_NAME"); printf '  [FAIL] %-9s %s: %s\n' "($(_t_elapsed))" "$TEST_NAME" "$1"; }
+skip(){ SKIP=$((SKIP + 1)); printf '  [SKIP] %-9s %s: %s\n' "($(_t_elapsed))" "$TEST_NAME" "$1"; }
 
 cleanup() { stop_fake_api; }
 trap cleanup EXIT
@@ -973,7 +978,7 @@ t "T48 orchestrator + changelog sdd-tool clause grep"
 stop_fake_api
 echo
 echo "== Resumen RED checks =="
-printf '  PASS: %d   FAIL: %d   SKIP: %d\n' "$PASS" "$FAIL" "$SKIP"
+printf '  PASS: %d   FAIL: %d   SKIP: %d   (%ds total)\n' "$PASS" "$FAIL" "$SKIP" "$(( $(date +%s) - START_EPOCH ))"
 if [[ ${#FAILURES[@]} -gt 0 ]]; then
   printf '  Fallos: %s\n' "${FAILURES[*]}"
   exit 1

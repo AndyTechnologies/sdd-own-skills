@@ -11,7 +11,7 @@ SB_HOME=""
 SB_BIN=""
 SB_TMP=""
 SB_PORT=""
-SB_API_PID=""
+declare -a SB_API_PIDS=()
 
 # init_sandbox — crea un sandbox fresco: HOME aislado, bin/ y tmp/.
 init_sandbox() {
@@ -46,13 +46,16 @@ add_bin_script() {
   chmod +x "$SB_BIN/$1"
 }
 
-# start_fake_api [code] [scopes] [fail_first] — levanta la API fake; SB_PORT
+# start_fake_api [code] [scopes] [fail_first] — levanta la API fake; SB_PORT.
+# Cada llamada registra su PID en SB_API_PIDS; stop_fake_api mata TODOS.
+# El hijo redirige stdout/stderr a archivos del sandbox para jamás heredar los
+# FDs del runner (un orphan con el pipe del runner abierto cuelga al llamador).
 start_fake_api() {
   FAKE_API_CODE="${1:-200}" FAKE_API_SCOPES="${2:-repo, read:org, workflow}" \
     FAKE_API_FAIL_FIRST="${3:-0}" \
     FAKE_API_LOG="$SB_TMP/api.log" FAKE_API_CMDLINE="$SB_TMP/api.cmdlines" \
-    python3 "$HELPERS/fake_api.py" > "$SB_TMP/api.port" &
-  SB_API_PID=$!
+    python3 "$HELPERS/fake_api.py" > "$SB_TMP/api.port" 2> "$SB_TMP/api.stderr" &
+  SB_API_PIDS+=("$!")
   local i
   for i in $(seq 1 100); do
     [[ -s "$SB_TMP/api.port" ]] && break
@@ -61,11 +64,16 @@ start_fake_api() {
   SB_PORT="$(head -1 "$SB_TMP/api.port" 2>/dev/null || true)"
 }
 
-# stop_fake_api — frena la API fake
+# stop_fake_api — frena TODAS las APIs fake registradas
 stop_fake_api() {
-  [[ -n "$SB_API_PID" ]] && kill "$SB_API_PID" 2>/dev/null || true
-  wait "$SB_API_PID" 2>/dev/null || true
-  SB_API_PID=""
+  local pid
+  for pid in "${SB_API_PIDS[@]:-}"; do
+    [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
+  done
+  for pid in "${SB_API_PIDS[@]:-}"; do
+    [[ -n "$pid" ]] && wait "$pid" 2>/dev/null || true
+  done
+  SB_API_PIDS=()
 }
 
 # api_dead_port — SB_PORT a un puerto sin listener (fallo de red determinista)
