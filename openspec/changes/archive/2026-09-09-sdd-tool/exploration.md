@@ -1,0 +1,59 @@
+# Exploration: sdd-tool (Go CLI — 4 GAPs + bug/incident overlay)
+
+## Current State
+
+The approved RFC (`openspec/changes/sdd-tool/quest.md`, `## Approval: approved`) mandates one Go CLI (`sdd-tool`) covering retrospective persistence (store-aware), prior-context injection (incl. verify-domain filtering), worktree re-entry, and an on-demand Bubbletea dashboard, plus a bug/incident overlay, with thin orchestrator-contract overlay clauses. Hard rules: never write `~/.engram/engram.db` (subprocess only), never mutate routing/ledger, always fail open, one shared scanner, store-first retro lookup with cross-store fallback, precis 3–5 × ≤15 lines, persist order verify → changelog → retro persist → archive, `setup.sh` step 5d-2 optional Go build fail-open.
+
+Verified repo facts:
+
+- **Stack**: Go 1.27.0 (`go1.27.0-X:nodwarf5 linux/amd64`) at `/usr/lib/go/bin/go`; `go` resolves on PATH (`/usr/sbin/go`). gentle-ai 2.7.0 at `/home/andy/go/bin/gentle-ai`. GOPATH bin on PATH precedent exists.
+- **srv/ shipped-tool pattern**: `srv/gh-mcp-server/` (Python/uv project) is deployed by `setup.sh` step 5d (lines 1163–1211) to `~/.config/sdd-own/srv/gh-mcp-server` with `cp -R` + diff-based sync honoring check/dry-run/real modes. Step 5d-2 (optional `go build`, fail-open warning) plugs in after the 5d block, before the 5e runtime selector (line 1213). `sync-skills.sh` provably ignores `srv/` (prior exploration, 2026-09-06-gh-git-mcp: it only iterates `skills/`, `overlays/`, `wiring/prompts/sdd`, `wiring/opencode.sdd.json`). `.gitignore` is minimal (`.atl/`, `.pi/`, `__pycache__/`, `*.pyc`, `.venv/`) — a built Go binary needs an additive entry (precedent: `.venv/`).
+- **OpenSpec layout**: `openspec/config.yaml` (`strict_tdd: false`, `verify.build_command: "bash -n sync-skills.sh"`, `verify.test_command: ""`); `openspec/changes/{change}/` + `openspec/changes/archive/{YYYY-MM-DD}-{change}/`. Archive close (Alan `sdd-archive` v2.0, installed) is a WHOLE-FOLDER mechanical move (`git mv`/`mv` + snapshot + `diff -r` readback, archive-report additive-excluded). Any file present in `openspec/changes/{change}/` before the archive launch travels into the archive folder with the move.
+- **No retro practice exists today**: zero retro files in any archived change, zero retro observations in Engram (`engram search "retrospective" --project sdd-own-skills` → no retro hits), no retro field anywhere except the quest itself. GAP 1 is greenfield; the tool creates the practice.
+- **Gentle-ai surface** (live-verified): `gentle-ai sdd-status --json` works and emits schema `gentle-ai.sdd-status` v2 with `changeName`, `artifactStore`, `planningHome`, `changeRoot`, `artifactPaths`, `contextFiles`, `artifacts`, `taskProgress`, `dependencies`, `applyState`, `actionContext`, `relationships`, `remediationState`, `nextRecommended`, `blockedReasons` — this is the single shared-scanner data source. `gentle-ai sdd-attempt` exists (`acquire|settle|status|begin|finish|reset|repair`); the tool only READS status, never touches the ledger. Note: `artifactStore` currently reports `openspec` for this repo — distinct from the tool's declared retro store mode (`both`), which is an input per the RFC.
+- **Engram bridge** (live-verified): `engram` 1.20.0 at `/home/andy/.local/bin/engram`; DB at `~/.engram/engram.db` (7.2 MB + `-wal`/`-shm`) — the never-write target is real. CLI subprocess surface: `search <query> [--type|--project|--scope|--limit]`, `save <title> <msg> [--type|--project|--scope|--topic TOPIC_KEY]`. `save --topic "sdd/{change}/retrospective" --type learning` maps directly onto the RFC's retro persist. No `capture_prompt` flag exists on the CLI — CLI saves are prompt-context-free by construction, satisfying the RFC's `capture_prompt: false` requirement. `search` matches title/content only (empirically: an observation titled with a topic key resolves by that string; a topic-only query for a differently-titled observation misses).
+- **Worktree reality**: `~/.agent_worktrees/` does not exist today; the repo is on `main` only. The convention is real in code: `srv/gh-mcp-server/src/tool_handlers/worktree_mutation.py` derives `~/.agent_worktrees/<basename(repo_path)>/<change>`, branch `sdd/<change>`, `.sdd-agent-lock`, safe-slug `^[A-Za-z0-9][A-Za-z0-9._-]*$`, and dirty-detection ignores server-owned artifacts only (`.codegraph/`, `.sdd-agent-lock`). Orchestrator contract rule 5 (Worktree lifecycle) mandates the same convention. The 3 verify signals (`git rev-parse --show-toplevel`, `git branch --show-current`, `gentle-ai sdd-status --json` parse) are all real, reliable commands; on `main` the branch signal fails cleanly → "no worktree" disclosure, human decides.
+- **RED check infra**: `tests/run_red_checks.sh` (746 lines) with T01–T39 coverage map in the header, `t`/`ok`/`ko`/`skip` harness, sandbox helpers (`init_sandbox` isolated HOME, `add_bin`/`add_bin_script` stubs, `start_fake_api`, `run_setup`, `snapshot_tree`), trailing PASS/FAIL/SKIP summary, exit 0 = green. Prompt-text probes are established style (T3x greps the orchestrator for `gentle-ai review status`). New tool RED checks land as T40+.
+- **Orchestrator contract** (`wiring/prompts/sdd/orchestrator.md`, 684 lines, repo-owned — edited directly, not via strip/append) — all four overlay insertion points are real:
+  1. Prior-context injection → `Sub-Agent Context Protocol` / `SDD Phases` table (lines ~595–605) + `Recovery Rule` (~469–477).
+  2. Retro persist → `Organic Support Phase Hooks` (~360–375) + the archive-close sequence (before the `sdd-archive` delegation).
+  3. Worktree verify → `SDD Workflow Contract` rule 5 `Worktree lifecycle` (~495).
+  4. Incident recording → `Organic Support Phase Hooks` (new hook; `bug record/resolve/list` on orchestrator-observed failures).
+
+## Affected Areas
+
+| Path | Why affected |
+|------|--------------|
+| `srv/sdd-tool/` (new) | Go CLI project: scanner (gentle-ai sdd-status), retro lookup/persist (openspec + engram subprocess), worktree list/verify, bug incidents, Bubbletea dashboard, cobra CLI, `--json` surfaces |
+| `setup.sh` (new step 5d-2) | Optional `go build` of `srv/sdd-tool` into `~/.config/sdd-own/...`, check/dry-run/real semantics, fail-open warning only (never blocks, never touches tokens) |
+| `wiring/prompts/sdd/orchestrator.md` | 4 overlay clauses: prior-context injection, retro persist (archive-close), worktree verify, incident recording; all fail-open |
+| `tests/run_red_checks.sh` | RED checks T40+ per RFC acceptance criteria (both-store dedupe + cross-store fallback, worktree verify 3 signals, bug record→resolve→retro, dashboard `--json` vs scanner, fail-open absent/present, 5d-2 build) |
+| `openspec/changes/sdd-tool/` | Retro openspec file written here pre-archive so it travels with the `git mv` into `archive/{date}-sdd-tool/` |
+| `.gitignore` | Additive entry for the built binary (precedent: `.venv/`) |
+| `CHANGELOG.md` / `sdd-changelog` skill | Persist-order reconciliation — see Risks |
+
+## Approaches (open points feeding design; stack already fixed by RFC)
+
+1. **Retro persist timing vs. archive move** — (a) orchestrator runs `sdd-tool retro persist` BEFORE delegating `sdd-archive`; the openspec retro file sits in `changes/{change}/` and travels via the folder move. (b) archive skill overlay writes retro post-move and copies it into the archive folder. (a) is clean: the snapshot/diff readback passes (file present in source snapshot), and the RFC's "file travels to the archive folder" holds verbatim. (b) breaks the additivity assumption (post-move writes make `diff -r` non-empty). Recommend (a). Effort: Low design cost.
+
+2. **Engram retro discoverability** — (a) title the observation with the topic key (repo convention: persistence-contract titles SDD artifacts `sdd/{change}/{artifact}`; verified #493 archive-report resolves by its topic-key title), then `engram search "sdd/{change}/retrospective"` resolves reliably. (b) rely on a hypothetical topic filter — `engram search` has none and topic-only queries miss (council probe: `search "sdd/sdd-council/council"` → no match). Recommend (a). Effort: Low.
+
+3. **setup.sh 5d-2 shape** — (a) new block after 5d mirroring its check/dry-run/real branching with a fail-open warning on missing Go/`go build` failure. (b) fold the build into 5d's existing sync loop (wrong: 5d is `cp -R` file sync, not build semantics). Recommend (a). Effort: Low–Medium.
+
+## Recommendation
+
+The approved RFC is fully implementable in this repo with zero blocking unknowns. All four GAPs + the incident overlay map onto real, live-verified surfaces: Go 1.27 toolchain present; `gentle-ai sdd-status --json` (the single scanner) works; `engram` CLI subprocess covers `search`/`save` with `--topic`/`--type`; the worktree convention exists in shipped code; the orchestrator contract has four clean insertion points; RED-check and setup.sh extension points are concrete. Design should carry three inputs forward: (1) persist-order reconciliation for the changelog (see Risks), (2) engram retro title = topic key, (3) the declared-store-vs-`artifactStore` distinction, and must honor the archive snapshot constraint (retro file pre-archive-launch).
+
+## Risks
+
+- **WARNING — Persist-order tension**: the RFC fixes `verify → changelog → retro persist → archive`, but the current contract runs `sdd-changelog` as a POST-archive organic hook whose input is the archive-report (skill: "if archive-report is absent, return blocked"). Running changelog pre-archive breaks its input contract and contradicts `Organic Support Phase Hooks` #4; running it post-archive contradicts the RFC's fixed order. Design must reconcile explicitly (reorder the hook with an input-contract adjustment, or define retro persist's ordering relative to the changelog layer's persistence without moving the delegation).
+- **WARNING — `artifactStore` conflation**: `gentle-ai sdd-status` reports `artifactStore: "openspec"` for this repo; the tool's declared retro store mode (`both`) is an input, not that field. The scanner and the retro store mode must stay decoupled or the store-first lookup would read the wrong store.
+- **WARNING — Engram topic-only lookup unreliable**: no `--topic` filter on `engram search`; retros must carry the topic key in the title (repo convention) for cross-session `search "sdd/{change}/retrospective"` to resolve. A retrofit title convention keeps AC3's "engram topic retrievable" measurable.
+- **INFO — Archive snapshot constraint**: the openspec retro file MUST exist in `changes/{change}/` before the `sdd-archive` launch; a post-move write makes the mandatory `diff -r` readback non-empty and fails the phase.
+- **INFO — No live worktrees today**: on `main`, branch signal ≠ `sdd/<change>` → `verify` reports "no worktree" cleanly with the two other signals; the human decides. Dirty-state disclosure must reuse the server-owned-artifact filter (`.codegraph/`, `.sdd-agent-lock`).
+- **INFO — Binary hygiene**: built artifact needs a `.gitignore` entry and a deploy location decision (`~/.config/sdd-own/bin/` or `srv/sdd-tool/bin`); `sync-skills.sh --check` (AC1) is unaffected since the sync pipeline ignores `srv/`.
+- **INFO — CLI quirks**: `engram save` has no `capture_prompt` flag (satisfies the RFC by construction); `engram search --help` acts as a query (no per-command help).
+
+## Ready for Proposal
+
+**Yes** — the approved RFC is implementable with no blocking unknowns. Tell the user: all surfaces the tool depends on are live and verified (Go 1.27, `gentle-ai sdd-status --json` v2, `engram search/save` with `--topic`/`--type`, worktree convention in shipped code, orchestrator insertion points real); GAP 1 is greenfield (no legacy retros to migrate); proposal should explicitly resolve the changelog persist-order reconciliation and the engram title convention, and confirm the 5d-2 deploy location.
