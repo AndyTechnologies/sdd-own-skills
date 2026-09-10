@@ -267,7 +267,7 @@ func buildPrecis(entries []retroEntry, verifyDomain bool) *Precis {
 	for _, e := range sorted {
 		body := e.body
 		if verifyDomain {
-			body = extractVerifyDomain(body)
+			body = ExtractVerifyDomain(body)
 		}
 		body = scrub.Scrub(body)
 		lines := strings.Count(body, "\n") + 1
@@ -281,7 +281,10 @@ func buildPrecis(entries []retroEntry, verifyDomain bool) *Precis {
 	return &Precis{Count: len(entries_out), Retros: entries_out}
 }
 
-func extractVerifyDomain(body string) string {
+// ExtractVerifyDomain filters a retro/verify-report body down to its
+// verification domain: the "Verification Gaps" and "Verify-Phase Incidents"
+// sections (headings plus their content), ending at the next unrelated H2.
+func ExtractVerifyDomain(body string) string {
 	var out strings.Builder
 	inSection := false
 	sections := []string{"verification gaps", "verify-phase incidents"}
@@ -290,12 +293,14 @@ func extractVerifyDomain(body string) string {
 		for _, s := range sections {
 			if strings.Contains(lower, s) {
 				inSection = true
-				out.WriteString(line + "\n")
 				break
 			}
 		}
-		if inSection && strings.HasPrefix(line, "## ") && !strings.Contains(strings.ToLower(line), "verification") && !strings.Contains(strings.ToLower(line), "incident") {
+		if inSection && strings.HasPrefix(line, "## ") && !strings.Contains(lower, "verification") && !strings.Contains(lower, "incident") {
 			inSection = false
+		}
+		if inSection {
+			out.WriteString(line + "\n")
 		}
 	}
 	return strings.TrimSpace(out.String())
@@ -350,6 +355,154 @@ func resolveBody(body, bodyFile string) (string, error) {
 	return "", fmt.Errorf("either --body or --body-file is required")
 }
 
+// ResolvePersistBody resolves the retro body to persist. With verifyDomain it
+// extracts ONLY the verification domain (Verification Gaps + Verify-Phase
+// Incidents) from an explicit body/body-file; without an explicit body it
+// derives the body from the change's openspec verify-report. It ALWAYS returns
+// a non-empty body for a real persist (never silently persists nothing).
+func ResolvePersistBody(changeName, body, bodyFile string, verifyDomain bool) (string, error) {
+	if body != "" || bodyFile != "" {
+		b, err := resolveBody(body, bodyFile)
+		if err != nil {
+			return "", err
+		}
+		if !verifyDomain {
+			return b, nil
+		}
+		filtered := ExtractVerifyDomain(b)
+		if strings.TrimSpace(filtered) == "" {
+			return "", fmt.Errorf("--verify-domain found no Verification Gaps / Verify-Phase Incidents in body")
+		}
+		return filtered, nil
+	}
+	if verifyDomain {
+		repoRoot := findRepoRoot()
+		if repoRoot == "" {
+			return "", fmt.Errorf("cannot locate repo root (no openspec/ dir found)")
+		}
+		reportPath := filepath.Join(repoRoot, "openspec", "changes", changeName, "verify-report.md")
+		data, err := os.ReadFile(reportPath)
+		if err != nil {
+			return "", fmt.Errorf("--verify-domain requires --body/--body-file or an existing verify-report at %s: %w", reportPath, err)
+		}
+		derived := deriveVerifyDomainFromReport(string(data))
+		if derived == "" {
+			return "", fmt.Errorf("--verify-domain could not derive Verification Gaps / Verify-Phase Incidents from verify-report %s", reportPath)
+		}
+		return derived, nil
+	}
+	return "", fmt.Errorf("either --body or --body-file is required")
+}
+
+// deriveVerifyDomainFromReport builds the verification-domain body from an
+// openspec verify-report. It first looks for literal "## Verification Gaps" /
+// "## Verify-Phase Incidents" H2 sections; failing that, it maps the standard
+// verify-report "### Issues Found" section: CRITICAL findings become
+// Verify-Phase Incidents, WARNING/SUGGESTION findings become Verification
+// Gaps. Returns "" when nothing verification-domain is found.
+func deriveVerifyDomainFromReport(report string) string {
+	var out strings.Builder
+	if sections := extractH2Sections(report, "Verification Gaps", "Verify-Phase Incidents"); len(sections) > 0 {
+		for _, s := range sections {
+			out.WriteString(s + "\n")
+		}
+		return strings.TrimSpace(out.String())
+	}
+	var gaps, incidents []string
+	inIssues := false
+	block := ""
+	for _, line := range strings.Split(report, "\n") {
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "issues found") {
+			inIssues = true
+			continue
+		}
+		if inIssues && strings.HasPrefix(strings.TrimSpace(line), "### ") && !strings.Contains(lower, "issues") {
+			break // next H3 outside Issues Found
+		}
+		if !inIssues {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "|") || strings.HasPrefix(trimmed, "---") {
+			continue
+		}
+		switch {
+		case strings.Contains(trimmed, "**CRITICAL**") || strings.HasPrefix(trimmed, "CRITICAL"):
+			block = "incidents"
+			incidents = append(incidents, trimmed)
+		case strings.Contains(trimmed, "**WARNING**") || strings.HasPrefix(trimmed, "WARNING") ||
+			strings.Contains(trimmed, "**SUGGESTION**") || strings.HasPrefix(trimmed, "SUGGESTION"):
+			block = "gaps"
+			gaps = append(gaps, trimmed)
+		default:
+			// Continuation lines (numbered items under the marker) belong to
+			// the current block until the next marker or heading.
+			switch block {
+			case "gaps":
+				gaps = append(gaps, trimmed)
+			case "incidents":
+				incidents = append(incidents, trimmed)
+			}
+		}
+	}
+	if len(gaps) > 0 {
+		out.WriteString("## Verification Gaps\n\n")
+		for _, g := range gaps {
+			out.WriteString("- " + g + "\n")
+		}
+		out.WriteString("\n")
+	}
+	if len(incidents) > 0 {
+		out.WriteString("## Verify-Phase Incidents\n\n")
+		for _, i := range incidents {
+			out.WriteString("- " + i + "\n")
+		}
+		out.WriteString("\n")
+	}
+	return strings.TrimSpace(out.String())
+}
+
+// extractH2Sections returns the body slices of the named H2 sections, each
+// starting at its "## <name>" heading (case-insensitive, whole-heading match)
+// and ending at the next H2. Only sections whose heading exactly names one of
+// the requested sections are captured; keyword substrings inside table rows
+// never activate a section. Returns nil when none of the sections are present.
+func extractH2Sections(body string, names ...string) []string {
+	lines := strings.Split(body, "\n")
+	want := make(map[string]bool, len(names))
+	for _, n := range names {
+		want[strings.ToLower(n)] = true
+	}
+	var sections []string
+	var current *strings.Builder
+	flush := func() {
+		if current != nil && strings.TrimSpace(current.String()) != "" {
+			sections = append(sections, strings.TrimSpace(current.String()))
+		}
+		current = nil
+	}
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") {
+			name := strings.TrimSpace(strings.TrimPrefix(trimmed, "## "))
+			if want[strings.ToLower(name)] {
+				flush()
+				current = &strings.Builder{}
+				current.WriteString(line + "\n")
+			} else {
+				flush()
+			}
+			continue
+		}
+		if current != nil {
+			current.WriteString(line + "\n")
+		}
+	}
+	flush()
+	return sections
+}
+
 func findRepoRoot() string {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -390,7 +543,7 @@ func (e *engramStore) Lookup(changeName string, verifyDomain bool) (*Precis, err
 		}
 		body := r.Content
 		if verifyDomain {
-			body = extractVerifyDomain(body)
+			body = ExtractVerifyDomain(body)
 		}
 		entries = append(entries, retroEntry{
 			change: change,

@@ -22,10 +22,10 @@ func newRetroCmd() *cobra.Command {
 
 func newRetroLookupCmd() *cobra.Command {
 	var (
-		jsonOut       bool
-		changeName    string
-		mode          string
-		verifyDomain  bool
+		jsonOut      bool
+		changeName   string
+		mode         string
+		verifyDomain bool
 	)
 	cmd := &cobra.Command{
 		Use:   "lookup",
@@ -64,11 +64,12 @@ func newRetroLookupCmd() *cobra.Command {
 
 func newRetroPersistCmd() *cobra.Command {
 	var (
-		changeName string
-		mode       string
-		phase      string
-		body       string
-		bodyFile   string
+		changeName   string
+		mode         string
+		phase        string
+		body         string
+		bodyFile     string
+		verifyDomain bool
 	)
 	cmd := &cobra.Command{
 		Use:   "persist",
@@ -83,13 +84,19 @@ func newRetroPersistCmd() *cobra.Command {
 			if mode == "" {
 				mode = "both"
 			}
+			resolved, err := retro.ResolvePersistBody(changeName, body, bodyFile, verifyDomain)
+			if err != nil {
+				// D2: write failure → loud FAIL-OPEN marker
+				fmt.Fprintf(os.Stderr, "FAIL-OPEN: retro persist lost write — %v\n", err)
+				os.Exit(1)
+			}
 			s, err := retro.NewStore(mode)
 			if err != nil {
 				// D2: write failure → loud FAIL-OPEN marker
 				fmt.Fprintf(os.Stderr, "FAIL-OPEN: retro persist lost write — store init failed: %v\n", err)
 				os.Exit(1)
 			}
-			if err := s.Persist(changeName, phase, body, bodyFile); err != nil {
+			if err := s.Persist(changeName, phase, resolved, ""); err != nil {
 				fmt.Fprintf(os.Stderr, "FAIL-OPEN: retro persist lost write to %s store: %v\n", mode, err)
 				os.Exit(1)
 			}
@@ -102,5 +109,6 @@ func newRetroPersistCmd() *cobra.Command {
 	cmd.Flags().StringVar(&phase, "phase", "verify", "phase name")
 	cmd.Flags().StringVar(&body, "body", "", "retro body text")
 	cmd.Flags().StringVar(&bodyFile, "body-file", "", "path to retro body file")
+	cmd.Flags().BoolVar(&verifyDomain, "verify-domain", false, "persist verify-domain only: extract verification gaps and verify-phase incidents (from explicit body or the change's verify-report)")
 	return cmd
 }

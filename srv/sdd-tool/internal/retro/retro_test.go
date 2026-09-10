@@ -3,6 +3,7 @@ package retro
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -33,6 +34,174 @@ func TestResolveBodyMissing(t *testing.T) {
 	_, err := resolveBody("", "")
 	if err == nil {
 		t.Fatal("expected error when both body and body-file are empty")
+	}
+}
+
+func TestResolvePersistBodyVerifyDomainFiltersBody(t *testing.T) {
+	body := `## What Worked
+
+- everything
+
+## Verification Gaps
+
+- gap one
+
+## Verify-Phase Incidents
+
+- incident one
+`
+	got, err := ResolvePersistBody("test-change", body, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "## Verification Gaps") || !strings.Contains(got, "- gap one") {
+		t.Fatalf("missing Verification Gaps in filtered body: %q", got)
+	}
+	if !strings.Contains(got, "## Verify-Phase Incidents") || !strings.Contains(got, "- incident one") {
+		t.Fatalf("missing Verify-Phase Incidents in filtered body: %q", got)
+	}
+	if strings.Contains(got, "What Worked") {
+		t.Fatalf("non-verification content leaked through: %q", got)
+	}
+}
+
+func TestResolvePersistBodyVerifyDomainNoSections(t *testing.T) {
+	_, err := ResolvePersistBody("test-change", "## What Worked\n\nnothing special\n", "", true)
+	if err == nil {
+		t.Fatal("expected error when body has no verification-domain sections")
+	}
+}
+
+func TestResolvePersistBodyNonVerifyDomain(t *testing.T) {
+	got, err := ResolvePersistBody("test-change", "plain body", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "plain body" {
+		t.Fatalf("got %q, want %q", got, "plain body")
+	}
+}
+
+func TestResolvePersistBodyVerifyDomainFromFile(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "body.md")
+	os.WriteFile(f, []byte("## Verification Gaps\n\n- from file gap\n"), 0o644)
+	got, err := ResolvePersistBody("test-change", "", f, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "- from file gap") {
+		t.Fatalf("file body not filtered/persisted: %q", got)
+	}
+}
+
+func TestResolvePersistBodyVerifyDomainRequiresSource(t *testing.T) {
+	_, err := ResolvePersistBody("test-change", "", "", true)
+	if err == nil {
+		t.Fatal("expected error when verify-domain has no body and no repo verify-report")
+	}
+}
+
+func TestDeriveVerifyDomainFromReportLiteralSections(t *testing.T) {
+	report := `## Verification Report
+
+## Verification Gaps
+
+- gap from literal
+
+## Verify-Phase Incidents
+
+- incident from literal
+`
+	got := deriveVerifyDomainFromReport(report)
+	if !strings.Contains(got, "- gap from literal") || !strings.Contains(got, "- incident from literal") {
+		t.Fatalf("literal sections not preserved: %q", got)
+	}
+}
+
+func TestDeriveVerifyDomainFromReportIssuesFound(t *testing.T) {
+	report := `## Verification Report
+
+Some preamble.
+
+### Issues Found
+
+**CRITICAL**: None.
+
+1. **WARNING** — dashboard envelope subset is open.
+2. **SUGGESTION** — add over-cap test.
+
+Prior CRITICAL-1 → CLOSED with evidence.
+
+### Verdict
+
+PASS WITH WARNINGS.
+`
+	got := deriveVerifyDomainFromReport(report)
+	if !strings.Contains(got, "## Verification Gaps") || !strings.Contains(got, "WARNING") || !strings.Contains(got, "SUGGESTION") {
+		t.Fatalf("Issues Found warnings/suggestions not mapped to gaps: %q", got)
+	}
+	if !strings.Contains(got, "## Verify-Phase Incidents") || !strings.Contains(got, "CRITICAL") {
+		t.Fatalf("Issues Found criticals not mapped to incidents: %q", got)
+	}
+	if strings.Contains(got, "Verdict") || strings.Contains(got, "preamble") {
+		t.Fatalf("non-issue content leaked: %q", got)
+	}
+}
+
+func TestDeriveVerifyDomainFromReportEmpty(t *testing.T) {
+	got := deriveVerifyDomainFromReport("## Verification Report\n\nnothing here\n")
+	if got != "" {
+		t.Fatalf("expected empty derivation, got %q", got)
+	}
+}
+
+func TestDeriveVerifyDomainFromReportKeywordInTableRow(t *testing.T) {
+	// Keyword substrings inside a table row must NOT activate a section and
+	// must NOT drag the whole document into the derived body.
+	report := `## Verification Report
+
+| Scenario | Result |
+|----------|--------|
+| Retro precis mentions verify-phase incidents inside a row | ⚠️ PARTIAL |
+| Retro precis mentions verification gaps inside a row | ✅ COMPLIANT |
+
+### Issues Found
+
+1. **WARNING** — real gap one.
+2. **SUGGESTION** — real suggestion.
+
+### Verdict
+
+PASS WITH WARNINGS.
+`
+	got := deriveVerifyDomainFromReport(report)
+	if strings.Contains(got, "table row") || strings.Contains(got, "⚠️") {
+		t.Fatalf("table-row keyword leaked into derived body: %q", got)
+	}
+	if !strings.Contains(got, "real gap one") || !strings.Contains(got, "real suggestion") {
+		t.Fatalf("Issues Found mapping missing: %q", got)
+	}
+}
+
+func TestExtractH2SectionsWholeHeadingOnly(t *testing.T) {
+	body := "## Verification Gaps\n\n- gap one\n\n## What Worked\n\n- fine\n\n## Verify-Phase Incidents\n\n- incident one\n"
+	sections := extractH2Sections(body, "Verification Gaps", "Verify-Phase Incidents")
+	if len(sections) != 2 {
+		t.Fatalf("want 2 sections, got %d: %q", len(sections), sections)
+	}
+	if !strings.Contains(sections[0], "- gap one") || strings.Contains(sections[0], "What Worked") {
+		t.Fatalf("first section wrong: %q", sections[0])
+	}
+	if !strings.Contains(sections[1], "- incident one") {
+		t.Fatalf("second section wrong: %q", sections[1])
+	}
+}
+
+func TestExtractH2SectionsNoMatch(t *testing.T) {
+	sections := extractH2Sections("## What Worked\n\n- fine\n", "Verification Gaps")
+	if len(sections) != 0 {
+		t.Fatalf("expected no sections, got %d", len(sections))
 	}
 }
 
@@ -80,7 +249,7 @@ func TestPrecisText(t *testing.T) {
 	if text == "" {
 		t.Fatal("expected non-empty text")
 	}
-	if !contains(text, "Retrospectives (2)") {
+	if !strings.Contains(text, "Retrospectives (2)") {
 		t.Fatalf("expected count header, got: %s", text)
 	}
 }
@@ -185,10 +354,6 @@ func TestScanDirSkipsArchiveSubdirAndDedupes(t *testing.T) {
 	if precis.Retros[0].Change != "my-change" {
 		t.Fatalf("dedupe: change %q, want %q", precis.Retros[0].Change, "my-change")
 	}
-}
-
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsSubstr(s, sub))
 }
 
 func containsSubstr(s, sub string) bool {
