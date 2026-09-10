@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] - 2026-09-08
 
 ### Added
+- New vendored skill `convert-documents-to-markdown` (firecrawl/anydoc, MIT, main): convert Word/PowerPoint/Excel/OpenDocument/RTF/EPUB/CSV/PDF to GitHub-Flavored Markdown via the anydoc CLI (`npx -y @firecrawl/anydoc`, Node 20+, no install), full-installed to the three agent runtimes by the existing sync mechanics with provenance README.
 - New vendored skill `archify` (tt-a1i/archify, MIT, stable v2.16.0): architecture/workflow/sequence/dataflow/lifecycle diagrams as self-contained HTML from typed JSON IR; runtime uses only Node builtins (>=18), full-installed to the three agent runtimes by the existing sync mechanics with provenance README.
 - `sdd-verify` now shape-validates evidence claims; malformed evidence is discarded, the unit marked `not-verifiable`, and verify blocks until apply corrects it — no degraded trust from untrusted claims.
 - Post-verify Review-Driven Development (RDD) hook in the orchestrator: on RDD ON, a selectorless preflight runs and relays consent as a Lossless Blocking Prompt in both interactive and auto modes, never skipping human authorization; declined consent continues the pipeline to archive.
