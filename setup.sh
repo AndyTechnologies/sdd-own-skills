@@ -1190,6 +1190,23 @@ fi
 echo "  5d — sync del servidor MCP local (srv/gh-mcp-server)"
 GH_SERVER_SRC="$SCRIPT_DIR/srv/gh-mcp-server"
 GH_SERVER_DEST="$ENV_DIR/srv/gh-mcp-server"
+# Solo se sincroniza CODIGO: se excluyen artefactos de entorno/cache locales
+# (.venv de desarrollo, __pycache__, .pytest_cache) que no son parte del
+# servidor y que un cp -R ciego copiaria encima del venv de runtime.
+GH_SERVER_SYNC_EXCLUDES=( -not -path '*/__pycache__/*' -not -path '*/.venv/*' -not -path '*/.pytest_cache/*' )
+# Copia archivo por archivo segun el find filtrado; crea los directorios
+# intermedios. No borra nada en destino (semantica add/overwrite del cp -R).
+gh_sync_server_files() {
+  local gh_src_file gh_rel gh_dir
+  while IFS= read -r -d '' gh_src_file; do
+    gh_rel="${gh_src_file#"$GH_SERVER_SRC"/}"
+    gh_dir="$(dirname "$gh_rel")"
+    if [[ "$gh_dir" != "." ]]; then
+      mkdir -p "$GH_SERVER_DEST/$gh_dir" || return 1
+    fi
+    cp "$gh_src_file" "$GH_SERVER_DEST/$gh_rel" || return 1
+  done < <(find "$GH_SERVER_SRC" -type f "${GH_SERVER_SYNC_EXCLUDES[@]}" -print0)
+}
 if [[ ! -d "$GH_SERVER_SRC" ]]; then
   printf '  [ERROR]     fuente del servidor no encontrada: %s\n' "$GH_SERVER_SRC" >&2
   mcp_report_error=$((mcp_report_error + 1))
@@ -1202,10 +1219,15 @@ elif [[ ! -d "$GH_SERVER_DEST" ]]; then
     printf '  [pendiente] copiar servidor MCP a %s\n' "${GH_SERVER_DEST#$HOME/}"
     mcp_report_pend=$((mcp_report_pend + 1))
   else
-    mkdir -p "$(dirname "$GH_SERVER_DEST")" || { printf '  [ERROR]     no se pudo crear %s\n' "$(dirname "$GH_SERVER_DEST")" >&2; mcp_report_error=$((mcp_report_error + 1)); mcp_exit=2; }
-    cp -R "$GH_SERVER_SRC" "$GH_SERVER_DEST" || { printf '  [ERROR]     no se pudo copiar el servidor a %s\n' "$GH_SERVER_DEST" >&2; mcp_report_error=$((mcp_report_error + 1)); mcp_exit=2; }
-    printf '  [creado]    %s (servidor MCP desplegado)\n' "${GH_SERVER_DEST#$HOME/}"
-    mcp_report_updated=$((mcp_report_updated + 1))
+    mkdir -p "$GH_SERVER_DEST" || { printf '  [ERROR]     no se pudo crear %s\n' "$GH_SERVER_DEST" >&2; mcp_report_error=$((mcp_report_error + 1)); mcp_exit=2; }
+    if gh_sync_server_files; then
+      printf '  [creado]    %s (servidor MCP desplegado)\n' "${GH_SERVER_DEST#$HOME/}"
+      mcp_report_updated=$((mcp_report_updated + 1))
+    else
+      printf '  [ERROR]     no se pudo copiar el servidor a %s\n' "$GH_SERVER_DEST" >&2
+      mcp_report_error=$((mcp_report_error + 1))
+      mcp_exit=2
+    fi
   fi
 else
   gh_server_changed=0
@@ -1216,7 +1238,7 @@ else
       gh_server_changed=1
       break
     fi
-  done < <(find "$GH_SERVER_SRC" -type f -print0)
+  done < <(find "$GH_SERVER_SRC" -type f "${GH_SERVER_SYNC_EXCLUDES[@]}" -print0)
   if [[ $gh_server_changed -eq 1 ]]; then
     if [[ "$MCP_MODE" == "check" ]]; then
       printf '  [DESYNC]    %s difiere de la fuente del repo\n' "${GH_SERVER_DEST#$HOME/}"
@@ -1225,9 +1247,14 @@ else
       printf '  [pendiente] actualizar %s (difiere de la fuente)\n' "${GH_SERVER_DEST#$HOME/}"
       mcp_report_pend=$((mcp_report_pend + 1))
     else
-      cp -R "$GH_SERVER_SRC/." "$GH_SERVER_DEST/" || { printf '  [ERROR]     no se pudo actualizar %s\n' "$GH_SERVER_DEST" >&2; mcp_report_error=$((mcp_report_error + 1)); mcp_exit=2; }
-      printf '  [actualizado] %s\n' "${GH_SERVER_DEST#$HOME/}"
-      mcp_report_updated=$((mcp_report_updated + 1))
+      if gh_sync_server_files; then
+        printf '  [actualizado] %s\n' "${GH_SERVER_DEST#$HOME/}"
+        mcp_report_updated=$((mcp_report_updated + 1))
+      else
+        printf '  [ERROR]     no se pudo actualizar %s\n' "$GH_SERVER_DEST" >&2
+        mcp_report_error=$((mcp_report_error + 1))
+        mcp_exit=2
+      fi
     fi
   else
     printf '  [up-to-date] %s\n' "${GH_SERVER_DEST#$HOME/}"
