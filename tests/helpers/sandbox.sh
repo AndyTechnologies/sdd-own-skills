@@ -118,11 +118,15 @@ add_env() {
   SB_ENV+=("$@")
 }
 
-# run_setup <args...> — setup.sh en el sandbox (sin TTY); salida en
-# $SB_TMP/out.txt, exit en $SB_TMP/exit
+# run_setup <args...> — setup.sh en el sandbox SIEMPRE sin TTY (stdin
+# /dev/null), para que el flujo no-interactivo sea determinista aunque el
+# runner corra desde una terminal real (un TTY heredado haria que setup
+# entrara al loop interactivo del token con el prompt invisible en el log).
+# Salida en $SB_TMP/out.txt, exit en $SB_TMP/exit. Los tests que prueban
+# prompts interactivos usan run_setup_pty, no esta funcion.
 run_setup() {
   env "${SB_ENV[@]}" SDD_OWN_GH_API="http://$SB_PORT" PATH="$SB_BIN:$PATH" \
-    bash "$REPO/setup.sh" "$@" > "$SB_TMP/out.txt" 2>&1
+    bash "$REPO/setup.sh" "$@" < /dev/null > "$SB_TMP/out.txt" 2>&1
   echo $? > "$SB_TMP/exit"
 }
 

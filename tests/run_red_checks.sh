@@ -85,10 +85,10 @@ t "T03 flags: flag desconocido y conflicto check+dry-run (exit 1, sin delegar)"
 {
   bad=0
   init_sandbox
-  run_setup --bogus >/dev/null 2>&1
+  run_setup --bogus </dev/null >/dev/null 2>&1
   [[ "$(cat "$SB_TMP/exit")" == "1" ]] || { ko "flag desconocido: exit $(cat "$SB_TMP/exit") != 1"; bad=1; }
   [[ -e "$SB_TMP/sync-seam.txt" ]] && { ko "flag desconocido: seam creado (delego antes de abortar)"; bad=1; }
-  run_setup --check --dry-run >/dev/null 2>&1
+  run_setup --check --dry-run </dev/null >/dev/null 2>&1
   [[ "$(cat "$SB_TMP/exit")" == "1" ]] || { ko "--check --dry-run: exit $(cat "$SB_TMP/exit") != 1"; bad=1; }
   [[ -e "$SB_TMP/sync-seam.txt" ]] && { ko "--check --dry-run: seam creado (no aborto antes de delegar)"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
@@ -98,11 +98,11 @@ t "T04 argv delegado: solo flags entendidos por sync"
 {
   bad=0
   init_sandbox
-  run_setup --check --skip-mcp >/dev/null 2>&1
+  run_setup --check --skip-mcp </dev/null >/dev/null 2>&1
   grep -q -- "--skip-mcp" "$SB_TMP/sync-seam.txt" && { ko "argv: --skip-mcp filtrado pero reenviado"; bad=1; }
   grep -q -- "--check" "$SB_TMP/sync-seam.txt" || { ko "argv: --check no llego al seam"; bad=1; }
   grep -q "^exit=" "$SB_TMP/sync-seam.txt" || { ko "argv: sin linea de exit en el seam"; bad=1; }
-  run_setup --registries /tmp/proy >/dev/null 2>&1
+  run_setup --registries /tmp/proy </dev/null >/dev/null 2>&1
   grep -q -- "--registries" "$SB_TMP/sync-seam.txt" || { ko "argv: --registries no se reenvio"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
