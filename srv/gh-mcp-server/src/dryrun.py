@@ -20,6 +20,11 @@ Safety contract (fail-closed):
   fingerprint is computed over that whole object so echoing it verbatim
   confirms; any drift (or a stripped ``dry_run`` key) is treated as evidence
   of a changed effect and refuses.
+- The phase selector is **``confirmed``**, not ``dry_run``. Phase 1
+  (``dry_run=true``, the schema default) returns the display effect; phase 2
+  executes when ``confirmed=true`` and ``confirmed_data`` exactly matches —
+  without the caller touching ``dry_run`` at all. ``dry_run`` only carries
+  the convenient default for phase 1 and is ignored once ``confirmed=true``.
 - ``confirm_required`` is an ``ok()`` summary MARKER — it never uses ``err()``
   and it names the exact parameter to echo back (``confirmed_data``) so the
   model can act on it (E1).
@@ -65,7 +70,10 @@ ECHO_PROTOCOL = (
     "Echo protocol: phase 1 dry_run=true returns display_data "
     "{dry_run:true, ...effect}; phase 2 confirmed=true requires "
     "confirmed_data=EXACT <display_data object>; a mismatch or omitted "
-    "confirmed_data returns confirm_required (never executes)."
+    "confirmed_data returns confirm_required (never executes). "
+    "The phase selector is confirmed=true — dry_run stays at its schema "
+    "default (true) and is ignored during phase 2, so do NOT set dry_run=false "
+    "to confirm; pass confirmed=true + confirmed_data."
 )
 
 
@@ -249,8 +257,13 @@ def destructive_flow(
     display_data = {"dry_run": True, **effect.data}
     display_fp = fp(display_data)
 
-    # Phase 1: dry-run (default) — return effect, no mutation
-    if dry_run or not confirmed:
+    # Phase selector is `confirmed`, NOT `dry_run`. Phase 1 (dry-run) returns
+    # the display effect when the call is unconfirmed; phase 2 (confirmed=true
+    # + exact confirmed_data) executes. `dry_run` only carries the convenient
+    # default for phase 1 — a caller following the documented contract echoes
+    # confirmed=true + confirmed_data without touching dry_run, and must not
+    # be forced to know it defaults to True.
+    if dry_run and not confirmed:
         return ok(display_data, effect.summary)
 
     # Fail-closed: an effect that is not provably safe NEVER executes
