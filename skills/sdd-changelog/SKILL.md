@@ -30,16 +30,15 @@ This is an **organic post-archive epilogue**: the orchestrator delegates you aft
 From the orchestrator:
 - Change name
 - Artifact store mode (`engram | openspec | hybrid | none`)
-- **verify-report** (pre-archive input — passed BEFORE archive completes; contains the evidence-backed outcome from verification)
-- The archive-report locator (required), or an explicit statement that it must be retrieved
+- The **archive-report** locator (required — POST-archive input; if absent, return `blocked`), or an explicit statement that it must be retrieved
 - Optional: the delivery strategy / release context (e.g. "library release", "internal tool", "no public release")
 
 ## Execution and Persistence Contract
 
 > Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
 
-- **engram**: Read the archived change's artifacts: `sdd/{change-name}/spec`, `sdd/{change-name}/verify-report`, and `sdd/{change-name}/archive-report` (retrieve full content via `mem_get_observation`, never search previews). Save as `sdd/{change-name}/changelog`. Do NOT move or modify any archived artifact.
-- **openspec**: Read `openspec/changes/archive/{YYYY-MM-DD}-{change-name}/specs/` and `verify-report.md` and `archive-report.md`. Follow `skills/_shared/openspec-convention.md`. Write `CHANGELOG.md` at the repository root if one exists; otherwise return the entry inline and do not fabricate a changelog file.
+- **engram**: Read the archived change's artifacts: `sdd/{change-name}/spec` and `sdd/{change-name}/archive-report` (retrieve full content via `mem_get_observation`, never search previews). Save as `sdd/{change-name}/changelog`. Do NOT move or modify any archived artifact.
+- **openspec**: Read `openspec/changes/archive/{YYYY-MM-DD}-{change-name}/specs/` and `archive-report.md`. Follow `skills/_shared/openspec-convention.md`. Write `CHANGELOG.md` at the repository root if one exists; otherwise return the entry inline and do not fabricate a changelog file.
 - **hybrid**: Follow BOTH conventions — persist to Engram AND write `CHANGELOG.md` on the filesystem.
 - **none**: Return the release narrative inline only. Never create or modify any file.
 
@@ -51,10 +50,9 @@ Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 Retrieve the archived change's final artifacts per the persistence mode above. Read ALL of:
 
 1. **spec** — to classify the change's severity (ADDED vs MODIFIED vs REMOVED vs RENAMED requirements).
-2. **verify-report** — to state the evidence-backed outcome (verdict, tests passed, no CRITICAL remaining).
-3. **archive-report** — to confirm the change's final state AT CLOSE (per the archive's Final-State Authority, not stale intermediate snapshots).
+2. **archive-report** — to confirm the change's final state AT CLOSE (per the archive's Final-State Authority, not stale intermediate snapshots).
 
-Never re-run verification and never re-read stale `apply-progress`/`verify-report` claims as current facts. The archive-report is the terminal record; if it is absent, return `blocked` — the changelog cannot be synthesized without the closed state. (The verify-report is a pre-archive input; its absence does not block the changelog — only the archive-report's absence does.)
+Never re-run verification and never re-read stale `apply-progress`/`verify-report` claims as current facts. The archive-report is the terminal record and the mandatory input; if it is absent, return `blocked` — the changelog cannot be synthesized without the closed state.
 
 ## Step 3: Classify Semantic Version (SemVer)
 
@@ -135,7 +133,7 @@ Return to the orchestrator:
 ## Rules
 
 - NEVER modify, move, or delete any archived artifact (spec, verify-report, archive-report)
-- NEVER re-run verification or claim a test outcome the verify-report does not state
+- NEVER re-run verification or claim a test outcome the archive-report does not state
 - NEVER invent behavior not present in the spec
 - If no consumer-facing change, emit the organic no-release opt-out (Step 4) instead of a fabricated entry
 - Classify SemVer from the spec's MODIFIED/REMOVED/ADDED/RENAMED signals, never from commit history or prose

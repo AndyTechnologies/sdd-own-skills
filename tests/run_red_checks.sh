@@ -965,12 +965,21 @@ t "T47b setup.sh 5d-2 warn (no Go → warn, no error)"
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T48 orchestrator + changelog sdd-tool clause grep"
+t "T48 changelog POST-archive (archive-report input; verify-report pre-archive dropped)"
 {
   bad=0
-  grep -q "sdd-tool" "$REPO/wiring/prompts/sdd/orchestrator.md" || { ko "orchestrator.md missing sdd-tool integration clause"; bad=1; }
-  grep -q "verify-report.*pre-archive\|pre-archive.*verify-report" "$REPO/skills/sdd-changelog/SKILL.md" || { ko "sdd-changelog SKILL.md missing verify-report pre-archive clause"; bad=1; }
-  grep -q "absent archive-report.*blocked\|archive-report.*absent.*blocked" "$REPO/skills/sdd-changelog/SKILL.md" || { ko "sdd-changelog SKILL.md missing absent archive-report blocked clause"; bad=1; }
+  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
+  sk="$REPO/skills/sdd-changelog/SKILL.md"
+  grep -q "sdd-tool" "$orch" || { ko "orchestrator.md missing sdd-tool integration clause"; bad=1; }
+  # D4 flip: changelog corre POST-archive consumiendo el archive-report, nunca pre-archive.
+  grep -q "POST-archive" "$orch" || { ko "orchestrator: changelog no es POST-archive"; bad=1; }
+  grep -q "archive-report" "$orch" || { ko "orchestrator: changelog sin archive-report input"; bad=1; }
+  grep -q "does NOT consume the verify-report" "$orch" || { ko "orchestrator: changelog aun consume verify-report"; bad=1; }
+  grep -q "PR ready" "$orch" || { ko "orchestrator: sin PR ready en el cierre"; bad=1; }
+  # SKILL: archive-report obligatorio (ausente → blocked); input verify-report eliminado.
+  grep -q "archive-report" "$sk" || { ko "sdd-changelog: sin archive-report input"; bad=1; }
+  grep -q "absent.*blocked\|blocked.*absent" "$sk" || { ko "sdd-changelog: sin absent archive-report blocked clause"; bad=1; }
+  grep -q "verify-report.*pre-archive\|pre-archive.*verify-report" "$sk" && { ko "sdd-changelog: conserva clausula verify-report pre-archive"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 

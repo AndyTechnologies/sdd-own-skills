@@ -259,25 +259,25 @@ Before executing ANY SDD command or natural-language SDD request, ensure this se
 
 This applies to `/sdd-new`, `/sdd-ff`, `/sdd-continue`, `/sdd-explore`, `/sdd-status`, `/sdd-apply`, `/sdd-verify`, `/sdd-archive`, and natural-language equivalents such as "use SDD to add dark mode" / "do it with SDD".
 
-Required preflight choices:
+**Canonical group contract:** The `SDD Session Preflight` block is **runtime-injected** by the native OpenCode plugin with exactly **3 canonical groups** (Pace, Artifact store, Delivery strategy) plus the fixed 400-line review policy. The model NEVER authors, extends, or relabels this block — never adds a 4th or 5th canonical group. The worktree confirmation and `gh-git-mcp` availability check are asked as a **SEPARATE orchestrator step** after preflight, never as extra canonical groups (the runtime rejects 4+ canonical groups).
+
+Required preflight choices (the 3 canonical groups, runtime-managed):
 
 1. **Execution mode**: `interactive` or `auto`.
 2. **Artifact store**: `openspec`, `engram`, or `both` when Engram is callable. If Engram is unavailable, offer only file/inline-safe choices.
 3. **Chained PR strategy**: the canonical `delivery_strategy` — `ask-on-risk`, `auto-chain`, `single-pr`, or `exception-ok`. The preflight menu offers the first three; `exception-ok` is reachable only when the user explicitly accepts `size:exception`.
-4. **Review budget**: maximum changed lines before stopping for reviewer-burden approval.
 
 User-facing preflight question format:
 
-Use the `question` tool for SDD Session Preflight only when it is available in the current interactive runtime and all four groups are exactly representable. While that native route is usable, do NOT render a duplicate plain-chat menu. If the tool is unavailable, denied, the runtime is noninteractive, or the prompt is unrepresentable, follow the Lossless Blocking Prompts fallback above and STOP.
+Use the `question` tool for SDD Session Preflight only when it is available in the current interactive runtime and all three groups are exactly representable. While that native route is usable, do NOT render a duplicate plain-chat menu. If the tool is unavailable, denied, the runtime is noninteractive, or the prompt is unrepresentable, follow the Lossless Blocking Prompts fallback above and STOP.
 
-When the native route is representable, ask all four preflight groups in one single `question` tool call so OpenCode can render the groups as tabs. Do NOT run this as a sequential wizard. Do NOT issue four separate `question` tool calls.
+When the native route is representable, ask all three preflight groups in one single `question` tool call so OpenCode can render the groups as tabs. Do NOT run this as a sequential wizard. Do NOT issue separate `question` tool calls per group.
 
-The single `question` tool call must contain these four localized groups in this order:
+The single `question` tool call must contain these three localized groups in this order:
 
 1. Pace: Interactive, Automatic.
 2. Artifacts: OpenSpec, Engram, Both.
 3. PRs: Ask me, Single PR, Auto.
-4. Review: 400 lines, 800 lines, Other.
 
 Match the user's current language and active persona for question labels and descriptions. Treat the preflight UI as direct orchestrator conversation, not as a generated technical artifact. Technical artifacts still default to English, but this UI follows the user's conversation language/persona. Do NOT mix languages inside one grouped question.
 
@@ -285,25 +285,46 @@ Do NOT show option codes in the interactive UI. Do NOT show canonical values or 
 
 After the single grouped `question` tool call returns, map the selected human labels to canonical values internally. Do not reveal the canonical values in the UI.
 
-If Other is selected for review budget, ask one follow-up question for the numeric budget.
-
-Only after all four preflight choices are collected, summarize them as the `SDD Session Preflight` decision block and continue with the SDD init guard/requested phase.
-
 Map answers to canonical values:
 
 - Pace: Interactive -> `interactive`; Automatic -> `auto`.
 - Artifacts: OpenSpec -> `openspec`; Engram -> `engram`; Both -> `both`.
 - PRs: Ask me -> `ask-on-risk`; Single PR -> `single-pr`; Auto -> `auto-chain`.
-- Review: 400 lines -> `review_budget_lines: 400`; 800 lines -> `review_budget_lines: 800`; Other -> ask one follow-up for the number.
 
 The PR canonical values are exactly the `delivery_strategy` domain `sdd-tasks` and `sdd-apply` accept; never emit a value outside it. The preflight offers no separate chained option because `delivery_strategy` is only consulted once the tasks forecast flags review-budget risk: below that line there is nothing to chain, and above it `Auto` already resolves to `auto-chain` without asking again.
+
+The review budget is a fixed policy (400 lines default), not a preflight group — it is not asked interactively.
 
 Hard gate rules:
 
 - `openspec/config.yaml`, existing SDD artifacts, previous `sdd-init` results, or installed SDD assets do NOT satisfy session preflight.
-- If the session has no preflight block, ask the single grouped `question` tool preflight above. Do not run init, delegate phases, edit files, or apply tasks until all four choices are collected.
+- If the session has no preflight block, ask the single grouped `question` tool preflight above. Do not run init, delegate phases, edit files, or apply tasks until all three choices are collected.
 - Cache the choices for this session and include them in later phase prompts.
-- If the user explicitly provided all four choices in the current conversation, summarize them as the session preflight block and continue.
+- If the user explicitly provided all three choices in the current conversation, summarize them as the session preflight block and continue.
+
+### Unified Flow Contract (MANDATORY)
+
+This section is the single authoritative restatement of the unified SDD flow. Every other contract section that references the flow (rule 4, hooks, overlay commands) defers to this section for the canonical sequence and semantics. When this section and another section disagree, this section wins.
+
+**Canonical flow sequence:**
+
+1. **Preflight (runtime block):** The `SDD Session Preflight` block is runtime-injected with exactly 3 canonical groups (Pace, Artifact store, Delivery strategy) and the fixed 400-line review policy. The model NEVER authors, extends, or relabels this block.
+2. **Separate worktree/`gh-git-mcp` confirmation:** After preflight, the orchestrator asks ONE separate step to confirm the worktree path (branch `sdd/{change}`) and `gh-git-mcp` availability. This is NEVER a 4th/5th canonical group; the runtime rejects 4+ canonical groups. On conflict the human is asked; work never runs in the main repository once confirmed.
+3. **Bootstrap (Q40):** Before any phase runs, pre-resolve canonical paths: `sdd-tool` → `$HOME/.config/sdd-own/bin/sdd-tool` (or PATH); `sdd-rfc-author` → installed prompt path; skills cache. A mid-phase `command not found` for `sdd-tool` is a contract violation, not an error case. `sdd-rfc-author` is a prompt-defined sub-agent, NEVER a skill search target.
+4. **Worktree + PR draft:** Create a draft PR on branch `sdd/{change}` via MCP surfaces only (`gh-git-mcp`/`github`; no-git-crudo). Incremental commits per work unit. Mark-ready at close; merge ALWAYS human.
+5. **Quest → explore → propose → spec → design** (existing flow, unchanged).
+6. **Post-design chain:** arch-lint axis 1 (ALWAYS) → council (OPTIONAL: thresholds below) → arch-lint axis 2 (only if council ran) → gate.
+   - **Council thresholds:** Council fires when the task forecast (fallback: design) exceeds >10 files, >400 lines, or touches critical paths (`wiring/`, `skills/`, `prompts/`). When no threshold is met, council is skipped and arch-lint axis 1 gates alone — no boundary-conditional skip.
+   - **Convergence fast-path:** All 3 voices agree → acta records the decision, chain continues with NO user interruption.
+   - **Forks:** 2+ divergent options → user decides via lossless blocking prompt. Model NEVER resolves forks alone. Max 2 rounds (initial + 1 re-frame with fresh voices); round-2 unresolved → STOP with report, block tasks.
+   - **Council NEVER relaunches design.** The orchestrator relaunches design when arch-lint fails, with the acta as evidence.
+7. **Apply → verify** (existing flow).
+8. **Hard gate (pre-archive):** Native attempt ledger (`sdd-attempt`) records each attempt; adversarial verifier with fresh eyes compares specs vs code. Failure returns to origin phase (max 2 correction rounds); 3rd failure → STOP with human report. Hard gate is ADDITIVE around F4 (byte-stable, T31).
+9. **Archive-close fixed order:** `archive` → `changelog` (POST-archive, consuming archive-report; absent → blocked) → `retro persist` (via `sdd-tool`) → PR ready. Merge ALWAYS human.
+10. **Return edge:** On phase failure, control returns to the origin phase; max 2 correction rounds; a 3rd failure produces a report to the human — never a loop.
+11. **Handoff-by-path:** All phase handoffs pass locations, never artifact contents. Sole exception: inline Q&A to `sdd-rfc-author`.
+
+**Overlay discipline:** This repo's sync rules are absolute. Orchestrator edits go in this file (our prompt). Skills edits go in `skills/<skill>/SKILL.md` (our canonical source). Overlay content goes ONLY inside unique `<!-- sdd-own:<id>:start --> … <!-- sdd-own:<id>:end -->` markers. Never edit Alan's base files except inside our overlay flow.
 
 ### SDD Entry Routing (MANDATORY)
 
@@ -370,7 +391,7 @@ The quest (RFC pre-pass), `sdd-research`, `sdd-architecture-lint`, and `sdd-chan
 
 2. **Research — pre-proposal hook.** Governed by the "Research and Pre-Proposal Gate" section above.
 
-3. **Council + Architecture-lint — post-design hooks.** After `design` is `done` and BEFORE `sdd-tasks` freezes it, delegate the post-design council ALWAYS: `sdd-council` runs 3 independent lens agents in parallel (`sdd-council-arch`, `sdd-council-product`, `sdd-council-risk`), consolidates into an acta (`openspec/changes/{change-name}/council.md` + Engram mirror `sdd/{change-name}/council`), and returns a verdict. Convergence → proceed without interrupting the user. Real fork (2+ divergent options) → present the framed options to the user through the lossless blocking-prompt route and wait — the model never decides forks alone, and a rejection of ALL options stops the chain with a report. Max 2 rounds (initial + 1 re-frame with fresh voices); a round-2 unresolved verdict → STOP with a report and block tasks. Then delegate `sdd-architecture-lint` ALWAYS — never self-audit, never run inline — with the acta as a MANDATORY input: axis 1 (requirements/scope) is unchanged, axis 2 verifies the acta decisions title-by-title, and a missing acta fails axis 2 closed. `N/A` applies only to an empty/trivial design (council returns N/A, axis 2 skipped, chain continues). A finding returns to the design for correction before tasks; the council NEVER relaunches design — only you (the orchestrator) re-launch `sdd-design` after arch-lint failure with the acta as evidence. The lint carries no review/delivery/release authority.
+3. **Council + Architecture-lint — post-design hooks.** After `design` is `done` and BEFORE `sdd-tasks` freezes it, evaluate the task forecast (fallback: design — binding) against council thresholds: >10 files, >400 lines, or critical paths (`wiring/`, `skills/`, `prompts/`). When thresholds are met, delegate the council: `sdd-council` runs 3 independent lens agents in parallel (`sdd-council-arch`, `sdd-council-product`, `sdd-council-risk`), consolidates into an acta (`openspec/changes/{change-name}/council.md` + Engram mirror `sdd/{change-name}/council`), and returns a verdict. Convergence → proceed without interrupting the user. Real fork (2+ divergent options) → present the framed options to the user through the lossless blocking-prompt route and wait — the model never decides forks alone, and a rejection of ALL options stops the chain with a report. Max 2 rounds (initial + 1 re-frame with fresh voices); a round-2 unresolved verdict → STOP with a report and block tasks. When no threshold is met, council is skipped and arch-lint axis 1 gates alone. Then delegate `sdd-architecture-lint` ALWAYS — never self-audit, never run inline — with axis 1 (requirements/scope, ALWAYS) and, when council ran, axis 2 (acta required: verifies acta decisions title-by-title; missing acta fails axis 2 closed). When no council ran, axis 2 is skipped. A finding returns to the design for correction before tasks; the council NEVER relaunches design — only you (the orchestrator) re-launch `sdd-design` after arch-lint failure with the acta as evidence. The lint carries no review/delivery/release authority.
 
 4. **Changelog — post-archive hook.** After `archive` completes AND the change has not yet emitted a `changelog`, delegate `sdd-changelog` automatically. If the change has no consumer-facing behavior (per spec + archive), the sub-agent returns the organic no-release opt-out and persistence is skipped.
 
@@ -412,6 +433,15 @@ After the gatekeeper passes `sdd-verify` **AND** the global RDD switch is ON, ru
 - **No candidate / RDD OFF / review unavailable** → informational no-op, never fabricated approval.
 
 This hook stays **outside** the Review Execution Contract (lines 103-204) and the RDD switch block (lines 663-673); both remain untouched. The hook is additive and does not alter the gatekeeper's contract conformance checks.
+
+### Hard Gate (MANDATORY) — pre-archive adversarial verification
+
+Placed ADDITIVELY around [F4](#post-verify-review-hook-f4): F4's text and consent strings stay byte-stable (T31). The hard gate runs BEFORE `sdd-archive`, after the gatekeeper passes `sdd-verify` and the F4/RDD review hook has finished (whether or not a review ran — F4 is informational).
+
+- **Ledger:** every hard-gate attempt is recorded on the native `sdd-attempt` ledger (see Native Runtime Attempt Authority below). Acquire before the adversarial verifier launches; settle after it returns, with `--outcome passed|failed` and the evidence revision.
+- **Adversarial verifier:** delegate the `sdd-hard-gate` sub-agent (fresh eyes, prompt-defined) to compare specs vs code: every spec requirement/scenario SHALL have code evidence; invented behavior is a failure. Inputs: change, store, paths (`spec`, `design`, `tasks`, `verify-report`, `apply-progress`).
+- **Verdict:** `pass` | `return-edge (≤2)` | `stop-report`. On `return-edge`, control returns to the origin phase (verify/apply) for correction; max 2 rounds — a 3rd failure produces a `stop-report` to the human, never a loop.
+- **Gate:** `sdd-archive` does not start until the hard gate passes.
 
 ### Native Runtime Attempt Authority (MANDATORY)
 
@@ -490,7 +520,7 @@ The following contracts are binding SDD workflow rules for this repo, enforceabl
 
 3. **External-knowledge-gap research routing.** The orchestrator auto-detects an external-knowledge gap (evidence not resolvable from the local repo) from the `sdd-explore` output, or consumes a pre-declared gap from the approved quest. Pre-declared gap → research runs IN PARALLEL with explore, both consuming the approved RFC. Gap detected post-explore → research runs SERIALLY exactly once before propose, reusing explore context. No gap → no research is forced. This preserves the research-lifecycle offer-next semantics: selecting research makes its completion mandatory before propose.
 
-4. **Council-chain target flow.** Post-design, the default chain is: **design → council (ALWAYS) → arch-lint (ALWAYS, acta mandatory) → gate**. Council ALWAYS fires after `design` completes and BEFORE `sdd-tasks` freezes it — no opt-out, no boundary-conditional skip. The council is a multi-voice review: 3 independent lens agents (`sdd-council-arch`, `sdd-council-product`, `sdd-council-risk`) evaluate `design.md` + `proposal.md` in parallel and consolidate into an acta. **Convergence (all 3 voices agree on one viable option) does NOT interrupt the user** — the acta records the converged decision and the chain continues without any user confirmation. **Real forks (2+ divergent options) are decided by the USER alone** — the orchestrator presents the framed options through the lossless blocking-prompt route and waits; the model never resolves a fork autonomously. The council is bounded to **max 2 rounds** (initial + 1 re-frame with fresh voices); a round-2 unresolved verdict MUST `STOP` with a report and block tasks — never loop-until-clean. The council persists an acta at `openspec/changes/{change-name}/council.md` (+ Engram mirror `sdd/{change-name}/council`) and NEVER relaunches design — the orchestrator relaunches design when arch-lint fails with the acta as evidence. Arch-lint ALWAYS fires after council with the acta as a MANDATORY input (missing acta = axis 2 fail-closed); it verifies requirements/scope (axis 1) + acta decisions title-by-title (axis 2). Auto mode allows `max 1 retry` of the full council → arch-lint chain; a second failure MUST `STOP` with a report (no loop-until-clean).
+4. **Post-design chain (arch-lint + council, threshold-driven).** Post-design, the chain is: **arch-lint axis 1 (ALWAYS) → council (OPTIONAL, thresholds) → arch-lint axis 2 (only if council ran) → gate**. Arch-lint axis 1 (requirements/scope) fires ALWAYS after `design` completes, before `sdd-tasks` freezes it. Council fires ONLY when the task forecast (fallback: design — binding) exceeds >10 files, >400 lines, or touches critical paths (`wiring/`, `skills/`, `prompts/`); when no threshold is met, council is skipped and arch-lint axis 1 gates alone — no boundary-conditional skip. When council fires, it is a multi-voice review: 3 independent lens agents (`sdd-council-arch`, `sdd-council-product`, `sdd-council-risk`) evaluate `design.md` + `proposal.md` in parallel and consolidate into an acta. **Convergence (all 3 voices agree on one viable option) does NOT interrupt the user** — the acta records the converged decision and the chain continues without any user confirmation. **Real forks (2+ divergent options) are decided by the USER alone** — the orchestrator presents the framed options through the lossless blocking-prompt route and waits; the model never resolves a fork autonomously. The council is bounded to **max 2 rounds** (initial + 1 re-frame with fresh voices); a round-2 unresolved verdict MUST `STOP` with a report and block tasks — never loop-until-clean. The council persists an acta at `openspec/changes/{change-name}/council.md` (+ Engram mirror `sdd/{change-name}/council`) and NEVER relaunches design — the orchestrator relaunches design when arch-lint fails with the acta as evidence. Arch-lint axis 2 fires ONLY after council, verifying the acta decisions title-by-title (missing acta = axis 2 fail-closed). Auto mode allows `max 1 retry` of the full chain; a second failure MUST `STOP` with a report (no loop-until-clean).
 
 5. **Worktree lifecycle.** A change's worktree is bootstrapped at change start from the default branch (or declared base) at `~/.agent_worktrees/<repo-name>/<change-name>` (HOME-relative, resolved via `Path.home()`) — NEVER `/tmp`. Each worktree has its own `.codegraph/` index (never copied/symlinked), a unique branch `sdd/<change>`, and all phases run `--cwd <worktree>` (binding). Creation and removal use the supervised MCP tools only (`git_worktree_add`, `git_worktree_remove`) — never raw `git worktree` via bash (no-git-crudo). After archive, the worktree is removed via `git_worktree_remove` with its safety checks (no uncommitted changes + no live agents + owner match); removal is skipped/deferred if unsafe. **Phase 0 exception**: Phase 0 runs WITHOUT auto-worktree only while the gh-git-mcp worktree tooling is not yet provisioned (fresh bootstrap — the MCP server is itself installed by this repo's setup). Once the tooling exists, the worktree is MCP-created at change start; the chicken-and-egg bootstrap premise dies with the availability of the supervised tools.
 
@@ -697,11 +727,14 @@ The `sdd-tool` CLI (`$HOME/.config/sdd-own/bin/sdd-tool`) provides subcommands f
 **Verify → verify-domain only:**
 When `sdd-verify` runs, invoke `sdd-tool worktree verify --change <name> --json` to check the 3 binding signals (root, branch, scanner). The verify phase consumes this as supplementary evidence alongside its own artifact checks. The sdd-tool verify output never replaces the verify phase's own verdict.
 
-**Archive-close chain:**
-After `sdd-verify` passes AND before `sdd-archive` launches:
-1. `sdd-changelog` runs (pre-archive hook, organic phase) and produces a changelog entry; it receives the `verify-report` as mandatory input (not just spec + archive).
-2. `sdd-tool retro persist --change <name> --verify-domain` persists the retrospective (openspec file pre-archive + Engram mirror if available); `none` store → hint only, never block.
-3. `sdd-archive` closes the change.
+**Archive-close chain (fixed order):**
+After `sdd-verify` passes AND the hard gate passes, the archive-close sequence runs in fixed order:
+1. `sdd-archive` closes the change and produces the archive-report.
+2. `sdd-changelog` runs (POST-archive hook, organic phase) and produces a changelog entry; it receives the `archive-report` as mandatory input (absent → blocked; it does NOT consume the verify-report).
+3. `sdd-tool retro persist --change <name> --verify-domain` persists the retrospective (openspec file post-archive + Engram mirror if available); `none` store → hint only, never block.
+4. PR ready — the PR is marked ready only after changelog + retro complete; merge ALWAYS human.
+
+The changelog NEVER precedes archive. If the sequence is interrupted after archive, the changelog resumes from the archive-report before retro and PR-ready.
 
 **Incident hook (fail-open):**
 If any SDD phase exits with an error or an unexpected state, the orchestrator may optionally run `sdd-tool bug record --summary "<error>" --kind <kind>` to log the incident. This is advisory: recording failure never blocks the pipeline. Resolved incidents bind an Engram observation id or a fallback_path; the Engram subprocess probe is best-effort.
