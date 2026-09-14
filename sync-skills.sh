@@ -101,8 +101,8 @@ SDD_OWN_PROMPTS_SDD_DIR="$SDD_OWN_DIR/prompts/sdd"
 SHARED_BOOTSTRAP=(README.md engram-convention.md openspec-convention.md persistence-contract.md \
   research-lifecycle.md sdd-orchestrator-sections.md sdd-status-contract.md skill-resolver.md)
 
-# Prompts propios que desplegamos (Alan no gestiona estos 3 paths).
-OWN_PROMPTS=(orchestrator.md sdd-rfc-author.md sdd-council.md)
+# Prompts propios que desplegamos (Alan no gestiona estos 7 prompts).
+OWN_PROMPTS=(orchestrator.md sdd-rfc-author.md sdd-council.md sdd-architecture-plan.md sdd-hard-verify.md sdd-pre-experience.md sdd-hard-gate.md)
 
 # --- Opciones --------------------------------------------------------------
 
