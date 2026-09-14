@@ -604,28 +604,40 @@ t "T31 F4 hook pins: preflight shape, lossless consent, never skips human, decli
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T32 council always-fire: orchestrator hooks, arch-lint axis 2, overlays rout ALWAYS"
-{
-  bad=0
-  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
-  grep -q 'design → council (ALWAYS) → arch-lint (ALWAYS, acta mandatory) → gate' "$orch" || { ko "orchestrator: sin cadena council ALWAYS en rule 4"; bad=1; }
-  grep -q 'post-design hooks' "$orch" || { ko "orchestrator: sin hooks item 3"; bad=1; }
-  grep -q 'delegate the post-design council ALWAYS' "$orch" || { ko "orchestrator: hooks sin council ALWAYS"; bad=1; }
-  grep -q 'MANDATORY input' "$orch" || { ko "orchestrator: sin acta MANDATORY"; bad=1; }
-  grep -q 'fails axis 2 closed' "$orch" || { ko "orchestrator: sin fail-closed axis 2"; bad=1; }
-  grep -q 'runs ALWAYS AFTER `design`' "$REPO/overlays/commands/sdd-continue.md" || { ko "sdd-continue: sin council ALWAYS"; bad=1; }
-  grep -q 'sdd-council — ALWAYS after design' "$REPO/overlays/commands/sdd-ff.md" || { ko "sdd-ff: sin council ALWAYS"; bad=1; }
-  if [[ $bad -eq 0 ]]; then ok; fi
-}
-
-t "T33 wiring council: 4 agentes, allow-lists, prompt file-based, sin __managed_by"
+t "T32 council ABSENT: allow-list excludes, hooks item 3 no council, overlays zero council"
 {
   bad=0
   w="$REPO/wiring/opencode.sdd.json"
+  # D15 (U1-R): el allow-list del orquestador EXCLUYE sdd-council (el council
+  # nunca puede dispararse desde el flujo canónico); los agentes del replan
+  # estan permitidos en su lugar.
+  jq -e '.agent["gentle-orchestrator"].permission.task["sdd-council"] == null' "$w" >/dev/null 2>&1 || { ko "allow-list permite sdd-council"; bad=1; }
+  for a in sdd-architecture-plan sdd-hard-gate sdd-hard-verify sdd-pre-experience; do
+    jq -e --arg a "$a" '.agent["gentle-orchestrator"].permission.task[$a] == "allow"' "$w" >/dev/null 2>&1 || { ko "allow-list no permite $a"; bad=1; }
+  done
+  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
+  grep -q 'Unified flow chain — canonical diagram' "$orch" || { ko "orchestrator: sin hooks item 3"; bad=1; }
+  grep -q 'Council SHALL NOT appear in any node' "$orch" || { ko "orchestrator: hooks item 3 con council"; bad=1; }
+  grep -q 'Council SHALL NOT run anywhere in the flow' "$orch" || { ko "orchestrator: rule 9 con council"; bad=1; }
+  grep -q 'Council SHALL NOT run in the canonical flow' "$orch" || { ko "orchestrator: post-apply lint chain con council"; bad=1; }
+  # D14 (U1-R): los overlays de soporte no contienen lenguaje council.
+  for ov in sdd-continue sdd-ff; do
+    n="$(grep -ci 'council' "$REPO/overlays/commands/$ov.md")"
+    [[ "$n" == "0" ]] || { ko "overlay $ov con $n menciones council"; bad=1; }
+  done
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T33 wiring replan: 4 agentes nuevos + council machinery stays, allow-list sin council, sin __managed_by"
+{
+  bad=0
+  w="$REPO/wiring/opencode.sdd.json"
+  # D8 (U1-R): el machinery de council sigue definido (lenses incluidos) pero
+  # queda inalcanzable desde el flujo canonico (allow-list del orquestador sin el).
   for a in sdd-council sdd-council-arch sdd-council-product sdd-council-risk; do
     jq -e --arg a "$a" '.agent[$a] != null' "$w" >/dev/null 2>&1 || { ko "agente $a ausente"; bad=1; }
   done
-  jq -e '.agent["gentle-orchestrator"].permission.task["sdd-council"] == "allow"' "$w" >/dev/null 2>&1 || { ko "orchestrator no permite sdd-council"; bad=1; }
+  jq -e '.agent["gentle-orchestrator"].permission.task["sdd-council"] == null' "$w" >/dev/null 2>&1 || { ko "orchestrator permite sdd-council"; bad=1; }
   for l in sdd-council-arch sdd-council-product sdd-council-risk; do
     jq -e --arg l "$l" '.agent["sdd-council"].permission.task[$l] == "allow"' "$w" >/dev/null 2>&1 || { ko "council no permite $l"; bad=1; }
   done
@@ -635,25 +647,36 @@ t "T33 wiring council: 4 agentes, allow-lists, prompt file-based, sin __managed_
     jq -e --arg l "$l" '.agent[$l].mode == "subagent" and .agent[$l].hidden == true and (.agent[$l].permission | length) == 0' "$w" >/dev/null 2>&1 || { ko "lens $l mode/hidden/permission mal"; bad=1; }
     jq -e --arg l "$l" '.agent[$l].prompt | contains("## Lens:")' "$w" >/dev/null 2>&1 || { ko "lens $l no referencia su seccion"; bad=1; }
   done
-  jq -e '[.agent["sdd-council"], .agent["sdd-council-arch"], .agent["sdd-council-product"], .agent["sdd-council-risk"]] | map(has("__managed_by")) | all(. == false)' "$w" >/dev/null 2>&1 || { ko "agentes nuevos con __managed_by"; bad=1; }
+  # Los 4 agentes del replan: subagents hidden, permission {}, prompt file-based.
+  for a in sdd-architecture-plan sdd-hard-gate sdd-hard-verify sdd-pre-experience; do
+    jq -e --arg a "$a" '.agent[$a].mode == "subagent" and .agent[$a].hidden == true and (.agent[$a].permission | length) == 0' "$w" >/dev/null 2>&1 || { ko "agente $a mode/hidden/permission mal"; bad=1; }
+    jq -e --arg a "$a" --arg p "{file:./prompts/sdd/$a.md}" '.agent[$a].prompt == $p' "$w" >/dev/null 2>&1 || { ko "agente $a sin prompt file-based"; bad=1; }
+  done
+  jq -e '[.agent["sdd-council"], .agent["sdd-council-arch"], .agent["sdd-council-product"], .agent["sdd-council-risk"], .agent["sdd-architecture-plan"], .agent["sdd-hard-gate"], .agent["sdd-hard-verify"], .agent["sdd-pre-experience"]] | map(has("__managed_by")) | all(. == false)' "$w" >/dev/null 2>&1 || { ko "agentes con __managed_by"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T34 OWN_PROMPTS + files: sdd-council.md instalable, skill full delegate_only"
+t "T34 OWN_PROMPTS + files: 7 prompts instalables, deploy loop, council skill delegate_only"
 {
   bad=0
-  grep -q 'OWN_PROMPTS=(orchestrator.md sdd-rfc-author.md sdd-council.md)' "$REPO/sync-skills.sh" || { ko "OWN_PROMPTS sin sdd-council.md"; bad=1; }
-  [[ -f "$REPO/wiring/prompts/sdd/sdd-council.md" ]] || { ko "wiring/prompts/sdd/sdd-council.md ausente"; bad=1; }
-  [[ -f "$REPO/skills/sdd-council/SKILL.md" ]] || { ko "skills/sdd-council/SKILL.md ausente"; bad=1; }
+  grep -q 'OWN_PROMPTS=(orchestrator.md sdd-rfc-author.md sdd-council.md sdd-architecture-plan.md sdd-hard-verify.md sdd-pre-experience.md sdd-hard-gate.md)' "$REPO/sync-skills.sh" || { ko "OWN_PROMPTS sin los 7 prompts"; bad=1; }
+  for f in orchestrator.md sdd-rfc-author.md sdd-council.md sdd-architecture-plan.md sdd-hard-verify.md sdd-pre-experience.md sdd-hard-gate.md; do
+    [[ -f "$REPO/wiring/prompts/sdd/$f" ]] || { ko "wiring/prompts/sdd/$f ausente"; bad=1; }
+  done
+  grep -qF 'for pf in "${OWN_PROMPTS[@]}"' "$REPO/sync-skills.sh" || { ko "sync-skills.sh sin deploy loop de OWN_PROMPTS"; bad=1; }
   grep -q 'delegate_only: true' "$REPO/skills/sdd-council/SKILL.md" || { ko "council skill sin delegate_only"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T35 acta fail-closed: axis 2 MANDATORY, title-by-title, 3 lenses, N/A solo trivial"
+t "T35 acta fail-closed POST-apply: arch-plan.md MANDATORY, title-by-title, N/A solo trivial"
 {
   bad=0
   al="$REPO/skills/sdd-architecture-lint/SKILL.md"
-  grep -q 'Axis 2' "$al" || { ko "arch-lint sin Axis 2"; bad=1; }
+  # D9 (U1-R): axis 2 corre POST-apply contra el acta arch-plan.md; acta
+  # ausente → fail-closed; el lint nunca corre pre-apply.
+  grep -q 'post-apply' "$al" || { ko "arch-lint sin post-apply"; bad=1; }
+  grep -q 'POST-apply' "$al" || { ko "arch-lint sin POST-apply (axis 2)"; bad=1; }
+  grep -q 'arch-plan.md' "$al" || { ko "arch-lint sin acta arch-plan.md"; bad=1; }
   grep -q 'MANDATORY input' "$al" || { ko "arch-lint sin acta MANDATORY"; bad=1; }
   grep -q 'FAILS CLOSED' "$al" || { ko "arch-lint sin fail-closed"; bad=1; }
   grep -q 'title-by-title' "$al" || { ko "arch-lint sin title-by-title"; bad=1; }
@@ -667,17 +690,20 @@ t "T36 convergence/fork: fast-path sin interrupcion, forks al user, 2 rounds STO
 {
   bad=0
   orch="$REPO/wiring/prompts/sdd/orchestrator.md"
-  grep -q 'does NOT interrupt the user' "$orch" || { ko "orchestrator: sin convergence fast-path"; bad=1; }
-  grep -q 'never decides forks alone' "$orch" || { ko "orchestrator: sin fork-al-user"; bad=1; }
-  grep -q 'Max 2 rounds' "$orch" || { ko "orchestrator: sin budget 2 rounds"; bad=1; }
+  grep -q 'WITHOUT interrupting the user' "$orch" || { ko "orchestrator: sin convergence fast-path"; bad=1; }
+  grep -q 'second consecutive gate failure or a genuine scope/product decision' "$orch" || { ko "orchestrator: sin fork-al-user"; bad=1; }
+  grep -q 'max 2 rounds' "$orch" || { ko "orchestrator: sin budget 2 rounds"; bad=1; }
+  grep -q 'a 3rd failure' "$orch" || { ko "orchestrator: sin 3rd-failure STOP"; bad=1; }
   sk="$REPO/skills/sdd-council/SKILL.md"
   grep -q 'does NOT interrupt the user' "$sk" || { ko "council: sin fast-path"; bad=1; }
   grep -q 'NEVER decides forks alone' "$sk" || { ko "council: sin fork-al-user"; bad=1; }
   grep -q 'Max 2 rounds' "$sk" || { ko "council: sin budget 2 rounds"; bad=1; }
   grep -q '### Decision:' "$sk" || { ko "council: sin acta decisions"; bad=1; }
-  grep -q 'never decides forks alone' "$REPO/overlays/commands/sdd-continue.md" || { ko "sdd-continue: sin fork-al-user"; bad=1; }
-  grep -q 'max 2 rounds' "$REPO/overlays/commands/sdd-continue.md" || { ko "sdd-continue: sin 2-round budget"; bad=1; }
-  grep -q 'never decides forks alone' "$REPO/overlays/commands/sdd-ff.md" || { ko "sdd-ff: sin fork-al-user"; bad=1; }
+  # D14: los overlays ya no llevan lenguaje council; pinnean el flujo unificado.
+  grep -q 'arch-lint (POST-apply, ALWAYS)' "$REPO/overlays/commands/sdd-continue.md" || { ko "sdd-continue: sin lint post-apply"; bad=1; }
+  grep -q '\[hard-verify OPT-IN\]' "$REPO/overlays/commands/sdd-continue.md" || { ko "sdd-continue: sin hard-verify opt-in"; bad=1; }
+  grep -q 'hard budget 20' "$REPO/overlays/commands/sdd-ff.md" || { ko "sdd-ff: sin Architecture Quest budget"; bad=1; }
+  grep -q 'merge human-only' "$REPO/overlays/commands/sdd-ff.md" || { ko "sdd-ff: sin merge human-only"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
@@ -979,6 +1005,107 @@ t "T48 changelog PRE-archive cumulative (append; no archive-report dependency)"
   # D10: sin dependencia de archive-report — el changelog corre ANTES de archive,
   # el archive-report aun no existe; ausente → nada de clausula required/blocked.
   grep -q "archive-report" "$sk" && { ko "sdd-changelog: conserva dependencia de archive-report"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T49 bootstrap Q40: sdd-tool pre-resuelto, command-not-found = contract violation, rfc-author nunca skill target"
+{
+  bad=0
+  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
+  grep -q 'Bootstrap (Q40)' "$orch" || { ko "Q40: sin bootstrap block"; bad=1; }
+  grep -q 'sdd-own/bin/sdd-tool' "$orch" || { ko "Q40: sin ruta canonica sdd-tool"; bad=1; }
+  grep -q 'command not found' "$orch" || { ko "Q40: sin clausula command-not-found"; bad=1; }
+  grep -q 'NEVER a skill search target' "$orch" || { ko "Q40: sdd-rfc-author no pinneado como prompt-defined"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T50 2 quests/2 gates: Product 50 → gate 1 → Architecture 20 → gate 2, reopens solo rama afectada"
+{
+  bad=0
+  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
+  grep -q 'Product Quest (hard budget 50)' "$orch" || { ko "orchestrator: sin Product Quest 50"; bad=1; }
+  grep -q 'Architecture Quest (hard budget 20)' "$orch" || { ko "orchestrator: sin Architecture Quest 20"; bad=1; }
+  grep -q '\[RFC gate 1' "$orch" || { ko "orchestrator: sin gate 1"; bad=1; }
+  grep -q '\[RFC gate 2' "$orch" || { ko "orchestrator: sin gate 2"; bad=1; }
+  grep -q 'reopens ONLY' "$orch" || { ko "orchestrator: sin reopens-only-rama"; bad=1; }
+  qs="$REPO/skills/sdd-quest/SKILL.md"
+  grep -q 'two branches and two explicit RFC gates' "$qs" || { ko "quest: sin dos branches/gates"; bad=1; }
+  grep -q 'hard budget 50' "$qs" || { ko "quest: sin budget 50"; bad=1; }
+  grep -q 'hard budget 20' "$qs" || { ko "quest: sin budget 20"; bad=1; }
+  grep -q '## Approval:' "$qs" || { ko "quest: sin header Approval"; bad=1; }
+  grep -q 'reopens ONLY the affected branch' "$qs" || { ko "quest: sin reopen solo rama"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T51 PR draft + merge human + gh-git-mcp preflight (repo/commit/push/PR)"
+{
+  bad=0
+  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
+  grep -q 'Create a draft PR on branch' "$orch" || { ko "orchestrator: sin draft PR sdd/{change}"; bad=1; }
+  grep -q 'MCP surfaces only' "$orch" || { ko "orchestrator: sin MCP-only (no-git-crudo)"; bad=1; }
+  grep -q 'merge ALWAYS human' "$orch" || { ko "orchestrator: sin merge human-only"; bad=1; }
+  grep -qF 'gh-git-mcp` availability' "$orch" || { ko "orchestrator: sin gh-git-mcp preflight"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T52 hard gate + sdd-attempt ledger + F4 byte-stable"
+{
+  bad=0
+  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
+  grep -q 'Hard gate (pre-close, ALWAYS)' "$orch" || { ko "orchestrator: sin hard gate ALWAYS"; bad=1; }
+  grep -q 'sdd-attempt' "$orch" || { ko "orchestrator: sin ledger sdd-attempt"; bad=1; }
+  grep -q 'ADDITIVE around F4' "$orch" || { ko "orchestrator: hard gate no aditivo a F4"; bad=1; }
+  hg="$REPO/wiring/prompts/sdd/sdd-hard-gate.md"
+  grep -q 'sdd-attempt acquire' "$hg" || { ko "hard-gate: sin acquire"; bad=1; }
+  grep -q 'sdd-attempt settle' "$hg" || { ko "hard-gate: sin settle"; bad=1; }
+  grep -q 'return-edge (≤2)' "$hg" || { ko "hard-gate: sin return-edge"; bad=1; }
+  grep -q 'Fail-closed' "$hg" || { ko "hard-gate: sin fail-closed"; bad=1; }
+  grep -q 'F4 byte-stable (T31)' "$hg" || { ko "hard-gate: sin F4 byte-stable"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T53 preflight 3 grupos canonicos + confirm separado + worktree ~/.agent_worktrees (repo selection)"
+{
+  bad=0
+  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
+  grep -q '3 canonical groups' "$orch" || { ko "orchestrator: sin 3 grupos canonicos"; bad=1; }
+  grep -q 'NEVER a 4th/5th canonical group' "$orch" || { ko "orchestrator: sin clausula 4+ grupos"; bad=1; }
+  grep -q 'SEPARATE orchestrator step' "$orch" || { ko "orchestrator: sin confirm separado"; bad=1; }
+  grep -q 'agent_worktrees' "$orch" || { ko "orchestrator: sin path worktree canonico"; bad=1; }
+  grep -q 'NEVER `/tmp`' "$orch" || { ko "orchestrator: worktree sin pin NEVER /tmp"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T54 arch-plan acta + user gate: post-spec pre-design, resolvable, fail-closed"
+{
+  bad=0
+  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
+  grep -q 'Architecture Plan → user gate → design' "$orch" || { ko "orchestrator: sin arch-plan gate"; bad=1; }
+  grep -q 'arch-plan.md' "$orch" || { ko "orchestrator: sin acta arch-plan.md"; bad=1; }
+  ap="$REPO/wiring/prompts/sdd/sdd-architecture-plan.md"
+  grep -q 'binding architecture plan acta' "$ap" || { ko "arch-plan: sin acta binding"; bad=1; }
+  grep -q 'titled decisions' "$ap" || { ko "arch-plan: sin titled decisions"; bad=1; }
+  grep -q 'resolvable against the inputs' "$ap" || { ko "arch-plan: sin resolvable"; bad=1; }
+  grep -q 'fail-closed' "$ap" || { ko "arch-plan: sin fail-closed"; bad=1; }
+  grep -q 'Design MUST NOT start until the user approves your plan' "$ap" || { ko "arch-plan: sin user gate"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T55 hard-verify ≠ hard gate: opt-in post-verify NO-default; hard gate ALWAYS pre-close"
+{
+  bad=0
+  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
+  grep -q 'Hard Verify (opt-in)' "$orch" || { ko "orchestrator: sin hard-verify opt-in"; bad=1; }
+  grep -q 'NO (the default)' "$orch" || { ko "orchestrator: sin NO-default"; bad=1; }
+  grep -q 'adversarial break testing' "$orch" || { ko "orchestrator: sin break testing"; bad=1; }
+  grep -q 'Hard gate (pre-close, ALWAYS)' "$orch" || { ko "orchestrator: sin hard gate ALWAYS"; bad=1; }
+  hv="$REPO/wiring/prompts/sdd/sdd-hard-verify.md"
+  grep -q 'OPT-IN' "$hv" || { ko "hard-verify: sin opt-in"; bad=1; }
+  grep -q 'Deliberate and isolated breaks only' "$hv" || { ko "hard-verify: sin breaks aislados"; bad=1; }
+  grep -q 'testing error, never soundness' "$hv" || { ko "hard-verify: sin testing-error-nunca-soundness"; bad=1; }
+  grep -q 'declined' "$hv" || { ko "hard-verify: sin declined"; bad=1; }
+  hg="$REPO/wiring/prompts/sdd/sdd-hard-gate.md"
+  grep -q 'adversarial' "$hg" || { ko "hard-gate: sin adversarial"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
