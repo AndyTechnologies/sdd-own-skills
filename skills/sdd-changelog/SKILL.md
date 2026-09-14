@@ -1,6 +1,6 @@
 ---
 name: sdd-changelog
-description: "Generate the release narrative for a completed SDD change. Produce a CHANGELOG entry and a semantic-version classification (major/minor/patch) from the archived change's final artifacts. Trigger: orchestrator launches changelog automatically after archive, without altering nextRecommended."
+description: "Generate the release narrative for a completed SDD change. Produce a CHANGELOG entry and a semantic-version classification (major/minor/patch) from the change's pre-archive final artifacts. Trigger: orchestrator launches changelog automatically before archive (PRE-archive, cumulative append), without altering nextRecommended."
 disable-model-invocation: true
 user-invocable: false
 license: MIT
@@ -21,24 +21,24 @@ Confirm your role before acting. You are the dedicated `sdd-changelog` sub-agent
 
 ## Purpose
 
-You are a sub-agent responsible for RELEASE NARRATIVE. After a change is archived, you turn its final artifacts into a `CHANGELOG` entry and a semantic-version (SemVer) classification. You describe *what shipped and why it matters* — you do not re-verify, re-review, or alter any implementation artifact.
+You are a sub-agent responsible for RELEASE NARRATIVE. After a change is verified (and the hard gate passed), you turn its final artifacts into a `CHANGELOG` entry and a semantic-version (SemVer) classification. You describe *what shipped and why it matters* — you do not re-verify, re-review, or alter any implementation artifact.
 
-This is an **organic post-archive epilogue**: the orchestrator delegates you after `archive` completes, exactly as `sdd-quest` runs before `explore` while `nextRecommended` stays unchanged. You never join the pipeline's `nextRecommended` token set.
+This is an **organic pre-archive epilogue**: the orchestrator delegates you in the close sequence `changelog → pre-experience → archive → PR ready`, exactly as `sdd-quest` runs before `explore` while `nextRecommended` stays unchanged. You never join the pipeline's `nextRecommended` token set.
 
 ## What You Receive
 
 From the orchestrator:
 - Change name
 - Artifact store mode (`engram | openspec | hybrid | none`)
-- The **archive-report** locator (required — POST-archive input; if absent, return `blocked`), or an explicit statement that it must be retrieved
+- The change's **pre-archive** artifact locators — the change still lives in its live change folder (`openspec/changes/{change-name}/` in openspec mode, `sdd/{change-name}/` observations in engram mode): spec deltas and the verify-report. The changelog runs BEFORE archive: the archive move has not happened, the change still lives in its live folder, and the changelog never depends on any post-archive artifact.
 - Optional: the delivery strategy / release context (e.g. "library release", "internal tool", "no public release")
 
 ## Execution and Persistence Contract
 
 > Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
 
-- **engram**: Read the archived change's artifacts: `sdd/{change-name}/spec` and `sdd/{change-name}/archive-report` (retrieve full content via `mem_get_observation`, never search previews). Save as `sdd/{change-name}/changelog`. Do NOT move or modify any archived artifact.
-- **openspec**: Read `openspec/changes/archive/{YYYY-MM-DD}-{change-name}/specs/` and `archive-report.md`. Follow `skills/_shared/openspec-convention.md`. Write `CHANGELOG.md` at the repository root if one exists; otherwise return the entry inline and do not fabricate a changelog file.
+- **engram**: Read the change's pre-archive artifacts: `sdd/{change-name}/spec` and `sdd/{change-name}/verify-report` (retrieve full content via `mem_get_observation`, never search previews). Save as `sdd/{change-name}/changelog`. Do NOT move or modify any artifact.
+- **openspec**: Read `openspec/changes/{change-name}/specs/` and `verify-report.md` from the live change folder — the folder has NOT been moved to `openspec/changes/archive/` yet. Follow `skills/_shared/openspec-convention.md`. Write `CHANGELOG.md` at the repository root if one exists; otherwise return the entry inline and do not fabricate a changelog file.
 - **hybrid**: Follow BOTH conventions — persist to Engram AND write `CHANGELOG.md` on the filesystem.
 - **none**: Return the release narrative inline only. Never create or modify any file.
 
@@ -47,12 +47,13 @@ Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
 ## Step 2: Retrieve Final-State Artifacts
 
-Retrieve the archived change's final artifacts per the persistence mode above. Read ALL of:
+Retrieve the change's PRE-archive final artifacts per the persistence mode above. Read ALL of:
 
 1. **spec** — to classify the change's severity (ADDED vs MODIFIED vs REMOVED vs RENAMED requirements).
-2. **archive-report** — to confirm the change's final state AT CLOSE (per the archive's Final-State Authority, not stale intermediate snapshots).
+2. **verify-report** — to state the evidence-backed outcome (verdict, tests passed, no CRITICAL remaining) as the final state at the pre-archive close.
+3. **current changelog** — the existing `CHANGELOG.md` (or the stored changelog narrative) so the new entry APPENDS cumulatively.
 
-Never re-run verification and never re-read stale `apply-progress`/`verify-report` claims as current facts. The archive-report is the terminal record and the mandatory input; if it is absent, return `blocked` — the changelog cannot be synthesized without the closed state.
+Never re-run verification and never re-read stale `apply-progress` claims as current facts. The verify-report is the evidence source as of the pre-archive close. The changelog runs BEFORE archive: the archive move has NOT happened and nothing outside the live change folder is read — no post-archive input is ever consulted.
 
 ## Step 3: Classify Semantic Version (SemVer)
 
@@ -61,17 +62,17 @@ Classify the release severity from the **spec's MODIFIED/REMOVED/ADDED/RENAMED r
 | Spec signal | SemVer bump |
 |---|---|
 | Any `REMOVED` requirement (breaking behavior/API removed) | **major** |
-| Any `MODIFIED` requirement that changes existing behavior/contract | **minor** (or **major** if the archive-report or spec marks it as a breaking behavior change) |
+| Any `MODIFIED` requirement that changes existing behavior/contract | **minor** (or **major** if the verify-report or spec marks it as a breaking behavior change) |
 | Only `ADDED` requirements (new behavior, no existing behavior changed) | **minor** |
 | Only `RENAMED` requirements (pure rename, same behavior) | **patch** |
-| Bug-fix / no external behavior change, per spec + archive | **patch** |
+| Bug-fix / no external behavior change, per spec + verify-report | **patch** |
 | Nothing that affects consumers | **none — no release** (see Step 4 opt-out) |
 
 State the bump and its basis ("classed minor because MODIFIED requirement REQ-02 changes the existing contract").
 
 ## Step 4: Organic Opt-Out (no release)
 
-If the spec and archive-report show **no consumer-facing change** (an internal refactor, a dependency-only bump, a private fix with no visible behavior change), do NOT fabricate a changelog entry:
+If the spec and verify-report show **no consumer-facing change** (an internal refactor, a dependency-only bump, a private fix with no visible behavior change), do NOT fabricate a changelog entry:
 
 - Return a status of `success` with `next_recommended: none` and an explicit note: *"no consumer-facing change — changelog entry omitted."*
 - Do not invent a release note. Zero entries for a non-release is the correct organic output, mirroring how `sdd-quest` is skipped when its artifact is already `approved`.
@@ -93,12 +94,12 @@ Category mapping:
 - **Changed**: `MODIFIED` requirements (behavior/contract change)
 - **Fixed**: bug-fix changes (spec marks the change as a fix), patch class
 - **Removed**: `REMOVED` requirements
-- **Security**: explicitly flagged security fix in the spec/archive
+- **Security**: explicitly flagged security fix in the spec/verify-report
 
 Rules:
 - Derive every line from a concrete requirement in the spec. Never invent behavior that the spec does not state.
 - Keep it concise — a CHANGELOG entry is a short human summary, not the design.
-- If `CHANGELOG.md` already has an `[Unreleased]` section, append under it; otherwise create the `[Unreleased]` section at the top.
+- **Cumulative append (D10):** the changelog is CUMULATIVE. The new entry is ADDED by append; an unused entry from a previous change is **never overwritten** — never rewrite or delete entries not consumed by the last release, and never replace the existing `[Unreleased]` narrative. If `CHANGELOG.md` already has an `[Unreleased]` section, append under it; otherwise create the `[Unreleased]` section at the top.
 - When persisting, write `CHANGELOG.md` only for `openspec`/`hybrid` modes and only when a repository `CHANGELOG.md` already exists or the user has a changelog convention. Otherwise return inline.
 
 ## Step 6: Persist Artifact
@@ -132,10 +133,11 @@ Return to the orchestrator:
 
 ## Rules
 
-- NEVER modify, move, or delete any archived artifact (spec, verify-report, archive-report)
-- NEVER re-run verification or claim a test outcome the archive-report does not state
+- NEVER modify, move, or delete any change artifact (spec, verify-report, design, tasks)
+- NEVER re-run verification or claim a test outcome the verify-report does not state
 - NEVER invent behavior not present in the spec
 - If no consumer-facing change, emit the organic no-release opt-out (Step 4) instead of a fabricated entry
 - Classify SemVer from the spec's MODIFIED/REMOVED/ADDED/RENAMED signals, never from commit history or prose
+- Append, never overwrite: unused entries from previous changes stay untouched (cumulative)
 - This is a read-only narrative epilogue; it carries no review, delivery, or release authority — ordinary repository policy decides whether and how to publish
 - Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.
