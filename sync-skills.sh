@@ -23,7 +23,7 @@
 # Estructura del repo:
 #
 #   skills/<skill>/            skills EXCLUSIVAS nuestras (canonical source en repo)
-#   skills/_shared/            codegraph.md (exclusiva) + 8 bootstrap IDÉNTICOS a los de Alan
+#   skills/_shared/            codegraph.md + architecture-principles.md (exclusivas) + 8 bootstrap IDÉNTICOS a los de Alan
 #   overlays/skills/<skill>/   bloques sdd-own sobre el SKILL.md que gentle-ai instala
 #   overlays/shared/<f>.md     bloques sdd-own sobre _shared/<f>
 #   overlays/commands/<f>.md   bloques sdd-own sobre ~/.config/opencode/commands/<f>
@@ -34,7 +34,7 @@
 #
 #   ~/.config/sdd-own/             origen de TODO lo nuestro (carpeta ya existente)
 #     skills/<skill>/              copias físicas ORIGINALES de skills exclusivas
-#     skills/_shared/              copias físicas ORIGINALES del bootstrap + codegraph.md (solo-si-falta)
+#     skills/_shared/              copias físicas ORIGINALES del bootstrap + codegraph.md + architecture-principles.md (solo-si-falta)
 #     prompts/sdd/                 copias físicas ORIGINALES de prompts propios
 #     srv/gh-mcp-server/           servidor MCP local (desplegado por setup.sh)
 #     github-mcp.env, env.sh, ...  (ya existían; no se tocan)
@@ -45,7 +45,7 @@
 #
 #   _shared (EXCEPCIÓN): este directorio es compartido — la base de Alan (p.ej.
 #   sdd-phase-common.md) vive en ~/.agents/skills/_shared/ como directorio REAL,
-#   instalada por gentle-ai sync. Nuestros 9 archivos se copian ahí SOLO SI FALTA.
+#   instalada por gentle-ai sync. Nuestros 10 archivos se copian ahí SOLO SI FALTA.
 #   ~/.agents/skills/_shared/ NUNCA es symlink. ~/.config/opencode/skills/_shared
 #   y ~/.claude/skills/_shared/ son SYMLINKS al directorio real compartido (no a
 #   sdd-own), para que los agentes vean la base de Alan + los nuestros.
@@ -102,7 +102,7 @@ SHARED_BOOTSTRAP=(README.md engram-convention.md openspec-convention.md persiste
   research-lifecycle.md sdd-orchestrator-sections.md sdd-status-contract.md skill-resolver.md)
 
 # Prompts propios que desplegamos (Alan no gestiona estos 3 paths).
-OWN_PROMPTS=(orchestrator.md sdd-rfc-author.md sdd-council.md)
+OWN_PROMPTS=(orchestrator.md sdd-rfc-author.md sdd-council.md sdd-architecture-plan.md sdd-hard-gate.md sdd-hard-verify.md sdd-pre-experience.md)
 
 # --- Opciones --------------------------------------------------------------
 
@@ -538,14 +538,14 @@ fi
 if [[ $DRY_RUN -eq 1 ]]; then
   printf "   [pendiente] asegurar %s (bootstrap)\n" "$SDD_OWN_SKILLS_DIR/_shared"
 elif [[ $CHECK_MODE -eq 1 ]]; then
-  for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md; do
+  for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md architecture-principles.md; do
     if [[ ! -e "$SDD_OWN_SKILLS_DIR/_shared/$f" ]]; then
       printf "   [FALTA]     ~/.config/sdd-own/skills/_shared/%s (bootstrap pendiente)\n" "$f"
       total_updated=$((total_updated + 1))
     fi
   done
 else
-  for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md; do
+  for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md architecture-principles.md; do
     if [[ ! -e "$SDD_OWN_SKILLS_DIR/_shared/$f" ]]; then
       if cp "$SHARED_SRC_DIR/$f" "$SDD_OWN_SKILLS_DIR/_shared/$f"; then
         printf "   [instalado] ~/.config/sdd-own/skills/_shared/%s (solo si falta)\n" "$f"
@@ -594,23 +594,23 @@ else
   printf "   [up-to-date] %s (directorio real compartido)\n" "$AGENTS_SKILLS_DIR/_shared"
 fi
 
-# --- 3) Copiar nuestros 9 archivos al directorio compartido (solo-si-falta) ---
+# --- 3) Copiar nuestros 10 archivos al directorio compartido (solo-si-falta) ---
 # Mismo patrón que el loop canónico de sdd-own; target = dir real compartido.
 if [[ $DRY_RUN -eq 1 ]]; then
-  for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md; do
+  for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md architecture-principles.md; do
     if [[ ! -e "$AGENTS_SKILLS_DIR/_shared/$f" ]]; then
       printf "   [pendiente] %s/_shared/%s (bootstrap compartido)\n" "${AGENTS_SKILLS_DIR#$HOME/}" "$f"
     fi
   done
 elif [[ $CHECK_MODE -eq 1 ]]; then
-  for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md; do
+  for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md architecture-principles.md; do
     if [[ ! -e "$AGENTS_SKILLS_DIR/_shared/$f" ]]; then
       printf "   [FALTA]     %s/_shared/%s (bootstrap compartido pendiente)\n" "${AGENTS_SKILLS_DIR#$HOME/}" "$f"
       total_updated=$((total_updated + 1))
     fi
   done
 else
-  for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md; do
+  for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md architecture-principles.md; do
     if [[ ! -e "$AGENTS_SKILLS_DIR/_shared/$f" ]]; then
       if cp "$SHARED_SRC_DIR/$f" "$AGENTS_SKILLS_DIR/_shared/$f"; then
         printf "   [instalado] %s/_shared/%s (solo si falta, directorio compartido)\n" "${AGENTS_SKILLS_DIR#$HOME/}" "$f"

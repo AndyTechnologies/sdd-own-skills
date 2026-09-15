@@ -17,13 +17,23 @@
 #   T23 permisos C2         T24 selector no-interactivo T25 selector pty (toggle)
 #   T26 worktree contrato   T27 E1 doc-contract        T28 contract pins overlays
 #   T29 synthetic SWU probe T30 sync + id hygiene       T31 F4 hook pins
-#   T32 council always-fire T33 wiring council/lenses  T34 OWN_PROMPTS + file
+#   T32 council delisted    T33 wiring council/lenses  T34 OWN_PROMPTS + file
 #   T35 acta fail-closed    T36 convergence/fork/2r     T37 fragment SDD-only
 #   T38 subagent_depth 2    T39 merge ambos motores
 #   T40 one-parse           T41 fallback+dedupe         T42 title retrievability
 #   T42b worktree list      T43 signals+dirty            T44 record→resolve
 #   T45 --json≡scanner      T46 read fail-open           T47 write FAIL-OPEN
 #   T47b 5d-2 warn          T48 changelog clause
+#   T49 catalog schema/corpus    T50 catalog↔lint cross-check
+#   T51 catalog single path T52 shared-loop join
+#   T53 quest arch rework
+#   T54 plan checklist (anchor + 21 rows + 3 states + evidence mandatory)
+#   T55 axis-3 fixtures: clean pass + dirty per-family (L2, severidad del catalogo)
+#   T56 axis-3 fixtures: multi -> set completo de blockers (L3)
+#   T57 axis-3 fixtures: AMBIGUOUS -> warning, nunca blocker (L4)
+#   T58 axis-3 fixtures: n-a-justified suprime (L5) + contradiction dual signal (L6/C7)
+#   T59 axis-3 fixtures: missing-checklist + translated-anchor fail-closed (C1/C2)
+#   T60 wiring (B5): sdd-architecture-plan agent key + allow-list
 #
 # Exit: 0 = todo verde (skips permitidos), 1 = fallos.
 # =============================================================================
@@ -33,6 +43,11 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HELPERS="$REPO/tests/helpers"
 # shellcheck disable=SC1091
 source "$HELPERS/sandbox.sh"
+
+# Real home capturado ANTES de que los tests muten HOME (T44+ exporta HOME a un
+# sandbox): los legs runtime de T52/T30/T39 contra el host deben usar el HOME
+# real del despliegue target, no un sandbox heredado.
+REAL_HOME="${HOME:-}"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "error: jq requerido para los RED checks" >&2
@@ -604,15 +619,15 @@ t "T31 F4 hook pins: preflight shape, lossless consent, never skips human, decli
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T32 council always-fire: orchestrator hooks, arch-lint axis 2, overlays rout ALWAYS"
+t "T32 council delisted + lint ALWAYS: orchestrator flow, acta fail-closed, overlays rout ALWAYS"
 {
   bad=0
   orch="$REPO/wiring/prompts/sdd/orchestrator.md"
-  grep -q 'design → council (ALWAYS) → arch-lint (ALWAYS, acta mandatory) → gate' "$orch" || { ko "orchestrator: sin cadena council ALWAYS en rule 4"; bad=1; }
-  grep -q 'post-design hooks' "$orch" || { ko "orchestrator: sin hooks item 3"; bad=1; }
-  grep -q 'delegate the post-design council ALWAYS' "$orch" || { ko "orchestrator: hooks sin council ALWAYS"; bad=1; }
-  grep -q 'MANDATORY input' "$orch" || { ko "orchestrator: sin acta MANDATORY"; bad=1; }
-  grep -q 'fails axis 2 closed' "$orch" || { ko "orchestrator: sin fail-closed axis 2"; bad=1; }
+  grep -q 'Council SHALL NOT run anywhere in the flow' "$orch" || { ko "orchestrator: council no excluido del flujo"; bad=1; }
+  grep -q 'arch-lint (POST-apply, ALWAYS)' "$orch" || { ko "orchestrator: sin arch-lint POST-apply ALWAYS"; bad=1; }
+  grep -q 'acta mandatory and fail-closed when missing' "$orch" || { ko "orchestrator: sin acta MANDATORY fail-closed"; bad=1; }
+  grep -q 'never self-audit, never inline' "$orch" || { ko "orchestrator: sin never self-audit"; bad=1; }
+  grep -q 'relaunches design with the findings' "$orch" || { ko "orchestrator: sin relanzar design con findings"; bad=1; }
   grep -q 'runs ALWAYS AFTER `design`' "$REPO/overlays/commands/sdd-continue.md" || { ko "sdd-continue: sin council ALWAYS"; bad=1; }
   grep -q 'sdd-council — ALWAYS after design' "$REPO/overlays/commands/sdd-ff.md" || { ko "sdd-ff: sin council ALWAYS"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
@@ -642,24 +657,30 @@ t "T33 wiring council: 4 agentes, allow-lists, prompt file-based, sin __managed_
 t "T34 OWN_PROMPTS + files: sdd-council.md instalable, skill full delegate_only"
 {
   bad=0
-  grep -q 'OWN_PROMPTS=(orchestrator.md sdd-rfc-author.md sdd-council.md)' "$REPO/sync-skills.sh" || { ko "OWN_PROMPTS sin sdd-council.md"; bad=1; }
+  grep -q 'OWN_PROMPTS=(orchestrator.md sdd-rfc-author.md sdd-council.md sdd-architecture-plan.md sdd-hard-gate.md sdd-hard-verify.md sdd-pre-experience.md)' "$REPO/sync-skills.sh" || { ko "OWN_PROMPTS sin sdd-council.md"; bad=1; }
   [[ -f "$REPO/wiring/prompts/sdd/sdd-council.md" ]] || { ko "wiring/prompts/sdd/sdd-council.md ausente"; bad=1; }
   [[ -f "$REPO/skills/sdd-council/SKILL.md" ]] || { ko "skills/sdd-council/SKILL.md ausente"; bad=1; }
   grep -q 'delegate_only: true' "$REPO/skills/sdd-council/SKILL.md" || { ko "council skill sin delegate_only"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T35 acta fail-closed: axis 2 MANDATORY, title-by-title, 3 lenses, N/A solo trivial"
+t "T35 acta fail-closed: axis 2 MANDATORY, title-by-title, 3 lenses, N/A solo trivial + axis 3 strings"
 {
   bad=0
   al="$REPO/skills/sdd-architecture-lint/SKILL.md"
+  # axis 2 checks (existing)
   grep -q 'Axis 2' "$al" || { ko "arch-lint sin Axis 2"; bad=1; }
   grep -q 'MANDATORY input' "$al" || { ko "arch-lint sin acta MANDATORY"; bad=1; }
   grep -q 'FAILS CLOSED' "$al" || { ko "arch-lint sin fail-closed"; bad=1; }
   grep -q 'title-by-title' "$al" || { ko "arch-lint sin title-by-title"; bad=1; }
   grep -q 'empty or trivial design' "$al" || { ko "arch-lint sin N/A-trivial"; bad=1; }
+  # council 3 lenses (existing)
   n="$(grep -c '^## Lens:' "$REPO/skills/sdd-council/SKILL.md")"
   [[ "$n" == "3" ]] || { ko "council con $n secciones lens (esperado 3)"; bad=1; }
+  # axis 3 strings (U4 — must be present after axis-3 rework)
+  grep -q 'Axis 3' "$al" || { ko "arch-lint sin Axis 3 section"; bad=1; }
+  grep -qF 'axis_3 pass' "$al" || { ko "arch-lint sin axis_3 verdict form"; bad=1; }
+  grep -qF 'axis_3 fail' "$al" || { ko "arch-lint sin axis_3 fail verdict"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
@@ -667,9 +688,9 @@ t "T36 convergence/fork: fast-path sin interrupcion, forks al user, 2 rounds STO
 {
   bad=0
   orch="$REPO/wiring/prompts/sdd/orchestrator.md"
-  grep -q 'does NOT interrupt the user' "$orch" || { ko "orchestrator: sin convergence fast-path"; bad=1; }
-  grep -q 'never decides forks alone' "$orch" || { ko "orchestrator: sin fork-al-user"; bad=1; }
-  grep -q 'Max 2 rounds' "$orch" || { ko "orchestrator: sin budget 2 rounds"; bad=1; }
+  grep -q 'WITHOUT interrupting the user' "$orch" || { ko "orchestrator: sin convergence fast-path"; bad=1; }
+  grep -q 'a genuine scope/product decision' "$orch" || { ko "orchestrator: sin fork-al-user"; bad=1; }
+  grep -q 'max 2 rounds' "$orch" || { ko "orchestrator: sin budget 2 rounds"; bad=1; }
   sk="$REPO/skills/sdd-council/SKILL.md"
   grep -q 'does NOT interrupt the user' "$sk" || { ko "council: sin fast-path"; bad=1; }
   grep -q 'NEVER decides forks alone' "$sk" || { ko "council: sin fork-al-user"; bad=1; }
@@ -971,6 +992,351 @@ t "T48 orchestrator + changelog sdd-tool clause grep"
   grep -q "sdd-tool" "$REPO/wiring/prompts/sdd/orchestrator.md" || { ko "orchestrator.md missing sdd-tool integration clause"; bad=1; }
   grep -q "verify-report.*pre-archive\|pre-archive.*verify-report" "$REPO/skills/sdd-changelog/SKILL.md" || { ko "sdd-changelog SKILL.md missing verify-report pre-archive clause"; bad=1; }
   grep -q "absent archive-report.*blocked\|archive-report.*absent.*blocked" "$REPO/skills/sdd-changelog/SKILL.md" || { ko "sdd-changelog SKILL.md missing absent archive-report blocked clause"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+# ---------------- Grupo 9: plan checklist contract (U5, T54) ----------------
+
+t "T54 plan checklist: anchor ## Principios no verificables (byte-exact Spanish), 21 rows, 3 states, evidence mandatory, translated rejected"
+{
+  bad=0
+  pf="$REPO/wiring/prompts/sdd/sdd-architecture-plan.md"
+  [[ -f "$pf" ]] || { ko "plan prompt ausente"; bad=1; }
+  # C1/C2: the literal Spanish anchor MUST be present (byte-exact)
+  grep -qF '## Principios no verificables' "$pf" || { ko "anchor '## Principios no verificables' ausente (C1/C2 fail-closed)"; bad=1; }
+  # The English translation MUST NOT satisfy the gate (C1: translated rejected)
+  grep -qF '## Non-verifiable principles' "$pf" && { ko "English translation '## Non-verifiable principles' rejected (C1)"; bad=1; }
+  grep -qF '## Unverifiable Principles' "$pf" && { ko "English translation '## Unverifiable Principles' rejected (C1)"; bad=1; }
+  # 21 rows: P01..P10 + A01..A11 referenced as table data rows in the checklist contract
+  # PIN DEFECTO CORREGIDO en RED (mismo protocolo que U2/T52): el patron original
+  # grep -Fc '| P0' contaba SOLO P01..P09 (9 lineas) porque P10 empieza '| P1' —
+  # el umbral >=10 era insatisfacible con una tabla natural de 21 filas. El
+  # patron corregido `^\| P[0-9]{2} ` cuenta las 10 filas P reales; el pin sigue
+  # cayendo RED identico a 0 filas pre-implementacion.
+  nprin="$(grep -cE '^\| P[0-9]{2} ' "$pf")"
+  [[ "$nprin" -ge 10 ]] || { ko "P-rows in checklist = $nprin (esperado >=10)"; bad=1; }
+  nanti="$(grep -cE '^\| A[0-9]{2} ' "$pf")"
+  [[ "$nanti" -ge 11 ]] || { ko "A-rows in checklist = $nanti (esperado >=11)"; bad=1; }
+  # 3 states: applicable, direction-evidence, n-a-justified
+  grep -qF 'applicable' "$pf" || { ko "state 'applicable' ausente en checklist"; bad=1; }
+  grep -qF 'direction-evidence' "$pf" || { ko "state 'direction-evidence' ausente en checklist"; bad=1; }
+  grep -qF 'n-a-justified' "$pf" || { ko "state 'n-a-justified' ausente en checklist"; bad=1; }
+  # evidence/justification MANDATORY per row — the contract must declare it explicitly
+  # PIN DEFECTO CORREGIDO en RED: (1) los legs usaban grep -Fi (fixed strings) con
+  # alternancias \| literales — jamas matcheaban la intencion regex; (2) el patron
+  # 'evidence[^.]*(mandatory|REQUIRED)' hacia false-green contra la linea existente
+  # "explore/research evidence (required)" (required = input paths, no evidence del
+  # checklist). Corregido a -E con la frase del contrato ('direction evidence')
+  # que no existe pre-implementacion; RED identico (el ko se mantiene hasta que el
+  # checklist contrato aterriza).
+  grep -qiE 'direction evidence[^.]*(mandatory|REQUIRED)' "$pf" || { ko "sin declaration de direction evidence mandatory"; bad=1; }
+  grep -qiE 'justification[^.]*(mandatory|REQUIRED)' "$pf" || { ko "sin declaration de justification mandatory (C5)"; bad=1; }
+  # never omitted — the contract must say the section is never omitted (C6)
+  grep -qiE 'never omitted' "$pf" || { ko "sin 'never omitted' clause (C6)"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+# ---------------- Grupo 8: catalog de principios de arquitectura (P5, U2) -----
+
+t "T50 catalog↔lint cross-check (S4): every catalog ID in lint, every lint ID in catalog, both directions"
+{
+  bad=0
+  catf="$REPO/skills/_shared/architecture-principles.md"
+  lintf="$REPO/skills/sdd-architecture-lint/SKILL.md"
+  [[ -f "$catf" ]] || { ko "catalog ausente"; bad=1; }
+  [[ -f "$lintf" ]] || { ko "lint SKILL ausente"; bad=1; }
+  if [[ $bad -eq 0 ]]; then
+    # Direction 1: every catalog ID must appear in the lint (lint implements all catalog checks)
+    for id in P01 P02 P03 P04 P05 P06 P07 P08 P09 P10 A01 A02 A03 A04 A05 A06 A07 A08 A09 A10 A11; do
+      grep -qF "$id" "$lintf" || { ko "lint missing catalog ID $id (catalog→lint direction)"; bad=1; }
+    done
+    # Direction 2: every lint axis-3 check ID must exist in the catalog (lint→catalog direction)
+    # Extract IDs referenced as axis-3 checks in the lint (grep the P/A pattern in axis-3 context)
+    lint_ids="$(grep -oE '(P|A)[0-9]{2}' "$lintf" | sort -u)"
+    cat_ids="$(grep -oE '(P|A)[0-9]{2}' "$catf" | sort -u)"
+    # Every lint ID must be in the catalog
+    for lid in $lint_ids; do
+      echo "$cat_ids" | grep -qxF "$lid" || { ko "lint references ID $lid not in catalog (lint→catalog direction)"; bad=1; }
+    done
+  fi
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T49 catalog schema/corpus: P01..P10 labeled, A01..A11 rows, severities blocker"
+{
+  bad=0
+  catf="$REPO/skills/_shared/architecture-principles.md"
+  [[ -f "$catf" ]] || { ko "catalog ausente: skills/_shared/architecture-principles.md"; bad=1; }
+  grep -q '^## Principles' "$catf" || { ko "catalog sin seccion ## Principles"; bad=1; }
+  grep -q '^## Anti-patterns' "$catf" || { ko "catalog sin seccion ## Anti-patterns"; bad=1; }
+  np="$(grep -c '^### P[0-9][0-9] — ' "$catf")"
+  [[ "$np" == "10" ]] || { ko "principios = $np (esperado 10)"; bad=1; }
+  for fld in '^- Definition:' '^- Concrete evidence:' '^- Default severity:'; do
+    n="$(grep -c "$fld" "$catf")"
+    [[ "$n" == "10" ]] || { ko "campo '$fld' = $n (esperado 10)"; bad=1; }
+  done
+  grep -q '^| ID | Name | Definition | Concrete evidence | Default severity |$' "$catf" || { ko "tabla anti-patterns sin columnas exactas (schema D2)"; bad=1; }
+  na="$(grep -cE '^\| A[0-9]{2} \|' "$catf")"
+  [[ "$na" == "11" ]] || { ko "filas anti-patterns = $na (esperado 11)"; bad=1; }
+  nb="$(grep -c '^- Default severity: blocker$' "$catf")"
+  [[ "$nb" == "10" ]] || { ko "severidades P = $nb (esperado 10 blocker)"; bad=1; }
+  nt="$(grep -cE '^\| A[0-9]{2} \|.*\| blocker \|$' "$catf")"
+  [[ "$nt" == "11" ]] || { ko "severidades A = $nt (esperado 11 blocker)"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T51 catalog single path: canonical file, no shebang, no per-skill copies"
+{
+  bad=0
+  catf="$REPO/skills/_shared/architecture-principles.md"
+  [[ -f "$catf" ]] || { ko "catalog ausente: skills/_shared/architecture-principles.md"; bad=1; }
+  head -1 "$catf" 2>/dev/null | grep -q '^#!' && { ko "catalog con shebang (data module, nunca ejecutable — threat matrix T51)"; bad=1; }
+  heads="$(grep -rl '^## Principles' "$REPO/skills" "$REPO/wiring" 2>/dev/null | wc -l)"
+  [[ "$heads" == "1" ]] || { ko "corpus duplicado: $heads archivos con ## Principles (esperado 1: single source S3/S4)"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T52 shared-loop join: catalog junto a codegraph.md en todos los loops, copy-only-if-missing, --check lo reconoce"
+{
+  bad=0
+  ss="$REPO/sync-skills.sh"
+  # PIN DEFECTO CORREGIDO (documentado en apply-progress U2): el patron base
+  # original terminaba en "; do", con lo que solo contaba loops SIN catalogar
+  # (base=0 tras un join correcto) y hacia la invariante insatisfacible
+  # (paridad: k == 5-k -> k=2.5 en 5 sitios). El ko "debe igualar codegraph.md"
+  # muestra la intencion: base = loops que llevan codegraph.md (con o sin
+  # catalog); cat == base <=> catalog en TODOS. RED identico (0/5).
+  loops_base="$(grep -Fc 'for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md' "$ss")"
+  loops_cat="$(grep -Fc 'for f in "${SHARED_BOOTSTRAP[@]}" codegraph.md architecture-principles.md; do' "$ss")"
+  [[ "$loops_base" -ge 2 ]] || { ko "loops base shared = $loops_base (esperado >=2, acta D1)"; bad=1; }
+  [[ "$loops_cat" == "$loops_base" ]] || { ko "catalog no unido a TODOS los loops shared ($loops_cat/$loops_base; debe igualar codegraph.md)"; bad=1; }
+  guard="$(grep -c 'ya existe (no se toca)' "$ss")"
+  [[ "$guard" -ge 2 ]] || { ko "guard copy-only-if-missing ausente ($guard sitios, S2)"; bad=1; }
+  grep -Fq 'cp "$SHARED_SRC_DIR/$f"' "$ss" || { ko "instalacion no copia desde SHARED_SRC_DIR (fuente unica)"; bad=1; }
+  # Runtime leg against the host: --check MUST recognize the catalog in either
+  # valid state — pending (a [FALTA] row naming the file) or installed (an
+  # [up-to-date] directory row for _shared, or the deployed catalog present and
+  # byte-identical to the canonical source). A genuinely missing catalog fails
+  # every signal and keeps the original ko. The full "zero desyncs" invariant
+  # is T30/T39 and is evaluated in U6.
+  # PIN DEFECTO CORREGIDO (apply-progress U7): the first leg grepped the literal
+  # filename, which only appears in [FALTA] (pending) rows; once the sync
+  # installs the catalog, --check prints directory-level [up-to-date] rows and
+  # never names the file — false negative on the very state it must verify.
+  # The REAL_HOME pin correction from U2 stays below, unchanged.
+  # PIN DEFECTO CORREGIDO (documentado en apply-progress U2): el leg debe usar
+  # el HOME REAL de despliegue (REAL_HOME, capturado arriba para este proposito
+  # exacto) — T44 exporta HOME a un sandbox y nunca lo restaura, con lo que el
+  # leg sin override corria --check contra el sandbox vacio (rc=2, "overlay sin
+  # base", Errores<>0) y fallaba por el harness, no por el codigo. RED
+  # identico: pre-implementacion el leg sigue ko por "check no reconoce el
+  # catalog"; el error estructural fake desaparece.
+  ( cd "$REPO" && env HOME="$REAL_HOME" timeout 120 ./sync-skills.sh --check --skip-gentleai-sync ) > "$SB_TMP/t52-check.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 124 ]] && { ko "leg check colgado >120s"; bad=1; }
+  grep -q '\[ERROR\]\s*:\s*0\|Errores\s*:\s*0' "$SB_TMP/t52-check.txt" || { ko "check con errores estructurales (regresion S1)"; bad=1; }
+  # PIN DEFECTO CORREGIDO (apply-progress U7): the original leg grepped the
+  # literal filename, which only appears in [FALTA] (pending) rows. Once the
+  # catalog is installed, --check prints directory-level [up-to-date] rows for
+  # _shared and never names the file — false negative on the installed state
+  # that this leg exists to verify. The catalog is now accepted in EITHER
+  # state, and a genuinely missing catalog still fails closed:
+  #   1) PENDING   — a [FALTA] row names the file in --check output
+  #   2) INSTALLED — --check reports the _shared loop [up-to-date] AND the
+  #                  deployed catalog exists
+  #   3) INSTALLED — the deployed catalog is byte-identical to the canonical
+  #                  source (cmp -s; md5-equivalent)
+  t52_ok=0
+  grep -q 'architecture-principles\.md' "$SB_TMP/t52-check.txt" && t52_ok=1
+  if grep -q '\[up-to-date\].*_shared' "$SB_TMP/t52-check.txt" \
+     && [[ -f "$REAL_HOME/.config/sdd-own/skills/_shared/architecture-principles.md" ]]; then
+    t52_ok=1
+  fi
+  if [[ -f "$REAL_HOME/.config/sdd-own/skills/_shared/architecture-principles.md" ]] \
+     && cmp -s "$REPO/skills/_shared/architecture-principles.md" \
+              "$REAL_HOME/.config/sdd-own/skills/_shared/architecture-principles.md"; then
+    t52_ok=1
+  fi
+  [[ $t52_ok -eq 0 ]] && { ko "check no reconoce el catalog en el loop shared"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T53 quest rework: 8 base Qs + stack, branch table (trigger/IDs/questions/early-stop/precedence), budget 20, gaps decision|knowledge|blocking, catalog by path"
+{
+  bad=0
+  qf="$REPO/skills/sdd-quest/SKILL.md"
+  [[ -f "$qf" ]] || { ko "quest ausente: skills/sdd-quest/SKILL.md"; bad=1; }
+  # 8 base context questions, asked first, never principle-by-principle (A1; acta Q3/Q4; design D6)
+  grep -q '^\*\*8 base context questions\*\*' "$qf" || { ko "sin marcador '8 base context questions' (A1)"; bad=1; }
+  # solo las base questions usan 'N. **label** — ' (em-dash); las hard constraints
+  # usan 'N. **label.** ' y no deben contarse (patron refinado en RED: 7 de fondo)
+  nb="$(grep -cE '^[1-8]\. \*\*[^*]+\*\* — ' "$qf")"
+  [[ "$nb" == "8" ]] || { ko "base Qs numeradas = $nb (esperado 8)"; bad=1; }
+  for dim in 'Scope/surface' 'Boundary structure' 'Stack driver' 'Distribution' 'Data & persistence' 'State & concurrency' 'Integration/framework' 'Non-functional envelope'; do
+    grep -qF "$dim" "$qf" || { ko "dimension base '$dim' ausente (design D6)"; bad=1; }
+  done
+  # stack trigger semantics (A4/A5/A10): yes -> technology branch; no -> skip; confirmed-no-branch -> driver + early-stop
+  grep -q '^\*\*Stack trigger\*\*' "$qf" || { ko "sin marcador 'Stack trigger' (A4/A5)"; bad=1; }
+  grep -q 'enable the technology branch' "$qf" || { ko "stack yes no habilita la technology branch (A4)"; bad=1; }
+  grep -q 'preserving the default language-agnostic stance' "$qf" || { ko "stack no no preserva el default language-agnostic (A5)"; bad=1; }
+  grep -q 'zero questions' "$qf" || { ko "confirmed-no-branch sin early-stop a cero preguntas (A10)"; bad=1; }
+  # declarative branch table, walked as the ONLY question-selection source (A2/A9)
+  grep -q 'ONLY question-selection source' "$qf" || { ko "sin 'ONLY question-selection source' (tabla unica, A2)"; bad=1; }
+  grep -q '^| Trigger | Catalog IDs (loaded by path) | Branch questions | Early-stop | Precedence |$' "$qf" || { ko "tabla sin columnas trigger/IDs/questions/early-stop/precedence (task 3.1)"; bad=1; }
+  grep -q '^| Base Q4 = yes (distribution / microservices context) |' "$qf" || { ko "fila microservices ausente (trigger A3)"; bad=1; }
+  grep -q '^| Base Q3 = yes (stack/technology driver) |' "$qf" || { ko "fila technology branch ausente (A4)"; bad=1; }
+  grep -q '^| Any other context (default, language-agnostic) |' "$qf" || { ko "fila default ausente"; bad=1; }
+  grep -q 'declared precedence' "$qf" || { ko "sin precedencia declarada (A9)"; bad=1; }
+  # budget 20 FIXED + early-stop + consolidation report (A6/A7)
+  grep -q '^\*\*Hard budget: 20\*\*' "$qf" || { ko "sin 'Hard budget: 20' (budget fijo)"; bad=1; }
+  grep -q 'never raised' "$qf" || { ko "budget sin 'never raised' (A7)"; bad=1; }
+  grep -q 'Early-stop triggers when every triggered branch resolves within budget' "$qf" || { ko "sin early-stop dentro del budget (A6)"; bad=1; }
+  grep -q 'consolidation report with classified gaps' "$qf" || { ko "sin consolidation report con gaps (A7)"; bad=1; }
+  # gap classification: exactly one of decision | knowledge | blocking (A8)
+  grep -q '^\- \*\*decision gap\*\*' "$qf" || { ko "sin decision gap (A8)"; bad=1; }
+  grep -q '^\- \*\*knowledge gap\*\*' "$qf" || { ko "sin knowledge gap (A8)"; bad=1; }
+  grep -q '^\- \*\*blocking gap\*\*' "$qf" || { ko "sin blocking gap (A8)"; bad=1; }
+  grep -q 'No gap MAY disappear silently' "$qf" || { ko "sin 'No gap MAY disappear silently' (A8)"; bad=1; }
+  # catalog by path, no inline copy (S3; catalogo alimenta branching, nunca la entrevista)
+  grep -q 'catalog feeds branching' "$qf" || { ko "sin 'catalog feeds branching' (RFC branching contract)"; bad=1; }
+  grep -q 'never principle-by-principle' "$qf" || { ko "sin 'never principle-by-principle' (A1)"; bad=1; }
+  grep -Fq 'skills/_shared/architecture-principles.md' "$qf" || { ko "quest no referencia el catalog por path (S3)"; bad=1; }
+  ninline="$(grep -cE '^- (Definition|Concrete evidence|Default severity):' "$qf")"
+  [[ "$ninline" == "0" ]] || { ko "quest con $ninline lineas del schema del catalog inline (copia duplicada, S3)"; bad=1; }
+  # Product Quest untouched: budget 50 y estructura actual presentes (spec A1/A2 regression)
+  grep -q 'Product Quest = \*\*50\*\*' "$qf" || { ko "budget product 50 alterado (Product Quest untouched)"; bad=1; }
+  grep -q '\*\*Product branch\*\* covers' "$qf" || { ko "estructura product branch alterada (Product Quest untouched)"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+# ---------------- Grupo 10: axis-3 fixtures (U6, T55-T59) + wiring (T60) ------
+# Fixtures en tests/fixtures/arch-principles/ (contrato acta: clean, 1 dirty por
+# familia, multi, missing-checklist, translated-anchor, expected.json). El proxy
+# deterministico de axis-3 lee los markers de implementation.md (VIOLATION ->
+# blocker a severidad del catalogo; AMBIGUOUS -> warning; CONTRADICTION -> dual
+# signal) y compara contra expected.json (D9: machine-readable RED, L2/L3/L4/L5).
+
+FIX="$REPO/tests/fixtures/arch-principles"
+CATALOG="$REPO/skills/_shared/architecture-principles.md"
+
+t "T55 axis-3 fixtures: clean pass (0 markers -> axis_3 pass) y dirty per-family (VIOLATION del ID exacto -> blocker, severidad del catalogo, L2)"
+{
+  bad=0
+  [[ -f "$FIX/expected.json" ]] || { ko "expected.json ausente"; bad=1; }
+  jq -e '.schema == "sdd/arch-principles-fixtures/v1"' "$FIX/expected.json" >/dev/null 2>&1 || { ko "expected.json sin schema pin"; bad=1; }
+  # clean: cero markers -> cero blockers -> axis_3 pass; expected coincide
+  clean_impl="$FIX/clean/implementation.md"
+  [[ -f "$clean_impl" ]] || { ko "clean/implementation.md ausente"; bad=1; }
+  nm="$(grep -cE '^(VIOLATION|AMBIGUOUS|CONTRADICTION)\(' "$clean_impl")"
+  [[ "$nm" == "0" ]] || { ko "clean con $nm markers (esperado 0)"; bad=1; }
+  [[ -f "$FIX/clean/acta.md" ]] || { ko "clean/acta.md ausente"; bad=1; }
+  grep -qF '## Principios no verificables' "$FIX/clean/acta.md" || { ko "clean acta sin anchor literal (C6)"; bad=1; }
+  jq -e '.fixtures.clean.axis_3 == "pass" and (.fixtures.clean.blockers | length) == 0' "$FIX/expected.json" >/dev/null 2>&1 || { ko "expected clean != axis_3 pass, 0 blockers"; bad=1; }
+  # dirty per familia: cada dirty/<ID>/ tiene EXACTAMENTE 1 VIOLATION(<ID>) y
+  # expected lo marca axis_3 fail con blockers == [ID]; severidad leida del catalogo
+  for id in P01 P02 P03 P04 P05 P06 P07 P08 P09 P10 A01 A02 A03 A04 A05 A06 A07 A08 A09 A10 A11; do
+    d="$FIX/dirty/$id"
+    [[ -f "$d/implementation.md" ]] || { ko "dirty/$id/implementation.md ausente"; bad=1; }
+    nv="$(grep -cE "^VIOLATION\($id\):" "$d/implementation.md")"
+    [[ "$nv" == "1" ]] || { ko "dirty/$id con $nv VIOLATION($id) (esperado 1)"; bad=1; }
+    nt="$(grep -cE '^(VIOLATION|AMBIGUOUS|CONTRADICTION)\(' "$d/implementation.md")"
+    [[ "$nt" == "1" ]] || { ko "dirty/$id con $nt markers totales (esperado 1: solo su familia, L2)"; bad=1; }
+    jq -e --arg id "$id" '.fixtures["dirty/" + $id].axis_3 == "fail" and (.fixtures["dirty/" + $id].blockers == [$id])' "$FIX/expected.json" >/dev/null 2>&1 || { ko "expected dirty/$id != fail + blockers [$id]"; bad=1; }
+    # severidad del ID leida del catalogo (D2: siempre blocker hoy)
+    if [[ "$id" == P* ]]; then
+      grep -A3 "^### $id " "$CATALOG" | grep -q 'Default severity: blocker' || { ko "catalog severidad $id != blocker"; bad=1; }
+    else
+      grep -E "^\| $id \|" "$CATALOG" | grep -q '| blocker |$' || { ko "catalog severidad $id != blocker"; bad=1; }
+    fi
+  done
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T56 axis-3 fixtures: multi -> set completo de blockers (L3, todos los findings, no solo el primero)"
+{
+  bad=0
+  d="$FIX/multi"
+  [[ -f "$d/implementation.md" ]] || { ko "multi/implementation.md ausente"; bad=1; }
+  markers="$(grep -oE '^VIOLATION\((P|A)[0-9]{2}\)' "$d/implementation.md" | sed -E 's/^VIOLATION\(//; s/\)$//' | sort)"
+  exp="$(jq -r '.fixtures.multi.blockers | sort | join("\n")' "$FIX/expected.json" 2>/dev/null)"
+  [[ -n "$markers" ]] || { ko "multi sin markers VIOLATION"; bad=1; }
+  [[ -n "$exp" ]] || { ko "expected multi sin blockers"; bad=1; }
+  [[ "$markers" == "$exp" ]] || { ko "multi: markers != expected ($(echo "$markers" | tr '\n' ' ') vs $(echo "$exp" | tr '\n' ' '))"; bad=1; }
+  n="$(grep -c . <<< "$markers")"
+  [[ "$n" -ge 3 ]] || { ko "multi con solo $n violaciones (necesita >=3 para probar set completo)"; bad=1; }
+  jq -e '.fixtures.multi.axis_3 == "fail"' "$FIX/expected.json" >/dev/null 2>&1 || { ko "expected multi != axis_3 fail"; bad=1; }
+  # acta multi: los IDs violados estan applicable en el checklist (no suprimidos)
+  for id in $markers; do
+    grep -E "^\| $id \| applicable \|" "$d/acta.md" >/dev/null || { ko "multi acta: $id no applicable"; bad=1; }
+  done
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T57 axis-3 fixtures: AMBIGUOUS -> warning, nunca blocker; axis_3 pass con solo warnings (L4)"
+{
+  bad=0
+  d="$FIX/warning"
+  [[ -f "$d/implementation.md" ]] || { ko "warning/implementation.md ausente"; bad=1; }
+  na="$(grep -cE '^AMBIGUOUS\(' "$d/implementation.md")"
+  [[ "$na" -ge 1 ]] || { ko "warning sin markers AMBIGUOUS"; bad=1; }
+  nb="$(grep -cE '^(VIOLATION|CONTRADICTION)\(' "$d/implementation.md")"
+  [[ "$nb" == "0" ]] || { ko "warning con $nb markers de blocker (esperado 0: solo sospechas no confirmadas)"; bad=1; }
+  for mid in $(grep -oE '^AMBIGUOUS\((P|A)[0-9]{2}\)' "$d/implementation.md" | sed -E 's/^AMBIGUOUS\(//; s/\)$//'); do
+    jq -e --arg id "$mid" '.fixtures.warning.warnings | index($id) != null' "$FIX/expected.json" >/dev/null 2>&1 || { ko "warning: $mid no en expected.warnings"; bad=1; }
+    jq -e --arg id "$mid" '.fixtures.warning.blockers | index($id) == null' "$FIX/expected.json" >/dev/null 2>&1 || { ko "warning: $mid en expected.blockers (warning nunca es blocker, L4)"; bad=1; }
+  done
+  jq -e '.fixtures.warning.axis_3 == "pass" and (.fixtures.warning.blockers | length) == 0' "$FIX/expected.json" >/dev/null 2>&1 || { ko "expected warning != axis_3 pass (warnings no fallan axis 3)"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T58 axis-3 fixtures: n-a-justified suprime con justificacion visible (L5); contradiction -> dual signal mismo ID (L6/C7)"
+{
+  bad=0
+  # N/A suppress: na-justified/ declara P08 n-a-justified -> VIOLATION(P08)
+  # suprimida (sin blocker) y la justificacion es visible en el acta
+  d="$FIX/na-justified"
+  [[ -f "$d/acta.md" ]] || { ko "na-justified/acta.md ausente"; bad=1; }
+  grep -E '^\| P08 \| n-a-justified \|' "$d/acta.md" | grep -qiE 'out of scope|because|no aplica' || { ko "na-justified: P08 sin justificacion visible (L5)"; bad=1; }
+  grep -q '^VIOLATION(P08):' "$d/implementation.md" || { ko "na-justified: falta VIOLATION(P08) para probar la supresion"; bad=1; }
+  nb="$(grep -cE '^(VIOLATION|CONTRADICTION)\(' "$d/implementation.md")"
+  [[ "$nb" == "1" ]] || { ko "na-justified con $nb violaciones (esperado 1, la suprimible)"; bad=1; }
+  jq -e '.fixtures["na-justified"].axis_3 == "pass" and (.fixtures["na-justified"].blockers | length) == 0 and (.fixtures["na-justified"].suppressed == ["P08"])' "$FIX/expected.json" >/dev/null 2>&1 || { ko "expected na-justified != pass, 0 blockers, suppressed [P08]"; bad=1; }
+  # dual: dual/ declara P02 applicable + CONTRADICTION(P02) -> axis 2 unmet
+  # mandate (C7) Y axis 3 blocker en el MISMO ID (L6)
+  dd="$FIX/dual"
+  [[ -f "$dd/acta.md" ]] || { ko "dual/acta.md ausente"; bad=1; }
+  grep -E '^\| P02 \| applicable \|' "$dd/acta.md" >/dev/null || { ko "dual: P02 no applicable en acta"; bad=1; }
+  grep -q '^CONTRADICTION(P02):' "$dd/implementation.md" || { ko "dual: falta CONTRADICTION(P02)"; bad=1; }
+  jq -e '.fixtures.dual.axis_3 == "fail" and (.fixtures.dual.blockers == ["P02"]) and (.fixtures.dual.axis_2_unmet == ["P02"])' "$FIX/expected.json" >/dev/null 2>&1 || { ko "expected dual != fail + dual signal P02 mismo ID (L6/C7)"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T59 axis-3 fixtures: missing-checklist y translated-anchor fail-closed (C1/C2 - solo el anchor literal espanol satisface presencia)"
+{
+  bad=0
+  # missing-checklist: acta SIN '## Principios no verificables' -> axis 2 fail-closed (C2)
+  d="$FIX/missing-checklist"
+  [[ -f "$d/acta.md" ]] || { ko "missing-checklist/acta.md ausente"; bad=1; }
+  grep -qF '## Principios no verificables' "$d/acta.md" && { ko "missing-checklist: anchor presente (debe faltar, C2)"; bad=1; }
+  jq -e '.fixtures["missing-checklist"].axis_2 == "fail-closed"' "$FIX/expected.json" >/dev/null 2>&1 || { ko "expected missing-checklist != axis_2 fail-closed"; bad=1; }
+  # translated-anchor: SOLO titulo en ingles -> NO satisface la presencia (C1)
+  d2="$FIX/translated-anchor"
+  [[ -f "$d2/acta.md" ]] || { ko "translated-anchor/acta.md ausente"; bad=1; }
+  grep -qF '## Principios no verificables' "$d2/acta.md" && { ko "translated-anchor: anchor espanol presente (esperado solo ingles)"; bad=1; }
+  grep -qE '^## (Non-verifiable|Unverifiable) [Pp]rinciples' "$d2/acta.md" || { ko "translated-anchor: falta titulo traducido"; bad=1; }
+  jq -e '.fixtures["translated-anchor"].axis_2 == "fail-closed"' "$FIX/expected.json" >/dev/null 2>&1 || { ko "expected translated-anchor != axis_2 fail-closed"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T60 wiring (B5): sdd-architecture-plan agent key (subagent, hidden, file-based) + orchestrator allow-list"
+{
+  bad=0
+  w="$REPO/wiring/opencode.sdd.json"
+  jq -e '.agent["sdd-architecture-plan"] != null' "$w" >/dev/null 2>&1 || { ko "agente sdd-architecture-plan ausente"; bad=1; }
+  jq -e '.agent["sdd-architecture-plan"].mode == "subagent" and .agent["sdd-architecture-plan"].hidden == true and (.agent["sdd-architecture-plan"].permission | length) == 0' "$w" >/dev/null 2>&1 || { ko "sdd-architecture-plan mode/hidden/permission mal"; bad=1; }
+  jq -e '.agent["sdd-architecture-plan"].prompt == "{file:./prompts/sdd/sdd-architecture-plan.md}"' "$w" >/dev/null 2>&1 || { ko "sdd-architecture-plan sin prompt file-based (B4)"; bad=1; }
+  jq -e '.agent["gentle-orchestrator"].permission.task["sdd-architecture-plan"] == "allow"' "$w" >/dev/null 2>&1 || { ko "orchestrator no permite sdd-architecture-plan (allow-list B5)"; bad=1; }
+  [[ -f "$REPO/wiring/prompts/sdd/sdd-architecture-plan.md" ]] || { ko "wiring/prompts/sdd/sdd-architecture-plan.md ausente (B3)"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 

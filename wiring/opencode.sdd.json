@@ -33,6 +33,7 @@
           "sdd-verify": "allow",
           "sdd-rfc-author": "allow",
           "sdd-architecture-lint": "allow",
+          "sdd-architecture-plan": "allow",
           "sdd-changelog": "allow",
           "sdd-council": "allow"
         }
@@ -46,6 +47,14 @@
       "mode": "subagent",
       "permission": {},
       "prompt": "You are the dedicated `sdd-architecture-lint` SDD sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Read your canonical skill at ~/.agents/skills/sdd-architecture-lint/SKILL.md and follow it exactly.\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
+      "variant": ""
+    },
+    "sdd-architecture-plan": {
+      "description": "Run the Architecture Plan phase: consume arch-rfc + explore/research + spec deltas, optionally launch a pattern-research lane, and produce the binding architecture plan acta arch-plan.md with titled decisions, each resolvable against the inputs. Verdict: approved | rejected (bounded correction, max 2 rounds).",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "{file:./prompts/sdd/sdd-architecture-plan.md}",
       "variant": ""
     },
     "sdd-changelog": {
