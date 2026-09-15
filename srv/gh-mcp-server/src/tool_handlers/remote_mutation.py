@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from src.dryrun import DryRunResult, ECHO_PROTOCOL, classify_mergeability, classify_merged, safe_to_rerun, destructive_flow
+from src.dryrun import DryRunResult, ECHO_PROTOCOL, checks_ok_from_rollup, classify_mergeability, classify_merged, safe_to_rerun, destructive_flow
 from src.envelope import Envelope, err, ok
 
 if TYPE_CHECKING:
@@ -70,7 +70,7 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
             checks_ok = True
             if checks_r.returncode == 0:
                 checks = json.loads(checks_r.stdout).get("statusCheckRollup", [])
-                checks_ok = all(c.get("conclusion") == "success" for c in checks) if checks else True
+                checks_ok = checks_ok_from_rollup(checks)
 
             # Check base up-to-date (simplified: if mergeStateStatus indicates behind)
             base_up_to_date = merge_state_status not in ("BEHIND", None)
