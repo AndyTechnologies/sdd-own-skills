@@ -1282,7 +1282,7 @@ if command -v go >/dev/null 2>&1; then
       mcp_report_pend=$((mcp_report_pend + 1))
     else
       mkdir -p "$(dirname "$SDD_TOOL_BIN")"
-      if go build -o "$SDD_TOOL_BIN" "$SDD_TOOL_SRC/cmd/sdd-tool/" 2>&1 && [[ -x "$SDD_TOOL_BIN" ]]; then
+      if go build -C "$SDD_TOOL_SRC" -o "$SDD_TOOL_BIN" ./cmd/sdd-tool/ 2>&1 && [[ -x "$SDD_TOOL_BIN" ]]; then
         chmod 755 "$SDD_TOOL_BIN"
         printf '  [compiled]   %s\n' "${SDD_TOOL_BIN#$HOME/}"
         mcp_report_updated=$((mcp_report_updated + 1))
