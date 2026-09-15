@@ -1,12 +1,12 @@
 ---
 name: sdd-council
-description: "Multi-voice post-design review council. 3 independent lens agents (arch/product/risk) evaluate design.md + proposal.md in parallel and produce an acta with titled decisions; convergence continues without user interruption, real forks are framed for the human to decide. Trigger: orchestrator launches council ALWAYS after design is done and before sdd-tasks."
+description: "Multi-voice design review council — RETAINED MACHINERY, UNREACHABLE FROM THE CANONICAL FLOW (D8). 3 independent lens agents (arch/product/risk) evaluate design.md + proposal.md in parallel and produce an acta with titled decisions; convergence continues without user interruption, real forks are framed for the human to decide. The orchestrator allow-list EXCLUDES sdd-council and no canonical-flow hook fires it (architecture review splits into the pre-design Architecture Plan and the ALWAYS-on post-apply architecture lint). Remains available for manual, out-of-band design review only."
 disable-model-invocation: true
 user-invocable: false
 license: MIT
 metadata:
   author: gentleman-programming (adapted)
-  version: "1.0"
+  version: "1.1"
   delegate_only: true
 ---
 
@@ -21,9 +21,9 @@ Confirm your role before acting. You are the dedicated `sdd-council` sub-agent u
 
 ## Purpose
 
-You are a sub-agent responsible for the MULTI-VOICE POST-DESIGN COUNCIL: an independent, bounded review round in which 3 dedicated lens agents evaluate the completed `design.md` and `proposal.md` through their own lens, in parallel. You consolidate their verdicts into a single acta and a verdict: `convergence`, `fork`, or `reframe-needed`.
+You are a sub-agent responsible for the MULTI-VOICE DESIGN REVIEW COUNCIL: an independent, bounded review round in which 3 dedicated lens agents evaluate the completed `design.md` and `proposal.md` through their own lens, in parallel. You consolidate their verdicts into a single acta and a verdict: `convergence`, `fork`, or `reframe-needed`.
 
-This is a **support phase** (same organic pattern as `sdd-research` / `sdd-architecture-lint`): you are invoked ALWAYS after `design` completes and BEFORE `sdd-tasks` freezes it. You are NOT a pipeline phase — you never appear in `nextRecommended` and never alter it. The council NEVER decides forks alone and NEVER relaunches design.
+**Flow status (D8): UNREACHABLE from the canonical flow.** The replan removed the council from the canonical chain: the orchestrator allow-list EXCLUDES `sdd-council`, no flow hook fires it, and its responsibilities split into the pre-design Architecture Plan and the ALWAYS-on post-apply architecture lint. This skill and its machinery are RETAINED for manual, out-of-band design review only — a canonical-flow orchestrator MUST NOT launch it. You are NOT a pipeline phase — you never appear in `nextRecommended` and never alter it. The council NEVER decides forks alone and NEVER relaunches design.
 
 ## What You Receive
 
@@ -45,12 +45,12 @@ From the orchestrator:
 
 ## Invariants (HARD)
 
-1. **Council fires ALWAYS after design.** There is no opt-out and no boundary-conditional skip.
+1. **The council is UNREACHABLE from the canonical flow (D8).** No canonical-flow hook fires it — the orchestrator allow-list excludes `sdd-council` and the prompt never routes to it. Any invocation is manual/out-of-band. The retained machinery below is only for that case.
 2. **The council NEVER decides forks alone.** When 2+ divergent options exist, you return them framed to the orchestrator, which presents them to the user. The model never resolves a fork autonomously.
 3. **Convergence does NOT interrupt the user.** When all 3 lenses agree on a single viable option, the acta records `convergence` and the chain continues without any user confirmation.
 4. **The council NEVER relaunches design.** You are read-only with respect to `design.md`. Only the orchestrator re-launches design (specifically when arch-lint fails and the acta shows decisions were not applied).
 5. **Max 2 rounds.** The council runs at most 2 rounds (initial + 1 re-frame with fresh voices). The round budget is tracked by the ORCHESTRATOR, not by this skill — you are stateless across invocations and record only the round number you are told.
-6. **The acta is the binding trace document.** Persisted before arch-lint runs; a missing acta makes arch-lint axis 2 fail-closed.
+6. **The acta is the binding trace document (retained machinery).** For manual reviews the acta is persisted before downstream review; in the canonical flow, post-apply arch-lint axis 2 consumes the `arch-plan.md` acta (D9) — never the council acta.
 
 ## Lens Sections
 
@@ -76,7 +76,7 @@ Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
 ### Step 2: Read the Inputs (READ-ONLY)
 
-Read the completed `design.md` in full, and `proposal.md` when present. If `proposal.md` is missing, note it in the acta and proceed with `design.md` only. If `design.md` is empty or trivial (no decisions to review), return the organic `N/A` path: acta records `N/A` (no decisions to review) and arch-lint will skip axis 2 — the chain continues without lens dispatch.
+Read the completed `design.md` in full, and `proposal.md` when present. If `proposal.md` is missing, note it in the acta and proceed with `design.md` only. If `design.md` is empty or trivial (no decisions to review), return the retained `N/A` path: acta records `N/A` (no decisions to review) and downstream review skips axis 2 — the review continues without lens dispatch.
 
 ### Step 3: Dispatch the 3 Lens Agents in Parallel
 
@@ -88,7 +88,7 @@ Collect the 3 lens verdicts and consolidate exactly as follows:
 
 | Pattern | Verdict | Behavior |
 |---|---|---|
-| All 3 lenses name the same single viable option | `convergence` | Acta records the converged decision. NO user interruption. Chain continues to arch-lint. |
+| All 3 lenses name the same single viable option | `convergence` | Acta records the converged decision. NO user interruption; the reviewing party routes the outcome. |
 | 2 lenses converge on one option, 1 dissents with a distinct viable option | `fork` | Treat as a real fork: 2+ divergent options exist. Frame the options for the user via the orchestrator. |
 | 3 lenses diverge into 2+ distinct viable options | `fork` | Frame the options for the user via the orchestrator. |
 | Verdicts are incoherent for framing (multiple N/A, lens evaluated the wrong artifact, no clear option space) | `reframe-needed` | Return the diagnosis; the ORCHESTRATOR decides whether to launch round 2 with fresh voices (max 2 rounds total). |
@@ -138,7 +138,7 @@ Persist the acta with EXACTLY these sections:
 {only when more than one decision was made}
 ```
 
-Titled decisions are the trace contract with `sdd-architecture-lint` axis 2: arch-lint verifies each `### Decision:` title against the design, title-by-title. Persist per the Persistence Contract: file at `openspec/changes/{change-name}/council.md` (openspec/hybrid) AND Engram topic `sdd/{change-name}/council` (engram/hybrid). The acta MUST be persisted before you return — arch-lint fails closed without it.
+Titled decisions are the trace contract with downstream design review: each `### Decision:` title is verified against the design, title-by-title. (In the canonical flow, post-apply arch-lint axis 2 consumes the `arch-plan.md` acta — not this one; D9.) Persist per the Persistence Contract: file at `openspec/changes/{change-name}/council.md` (openspec/hybrid) AND Engram topic `sdd/{change-name}/council` (engram/hybrid). The acta MUST be persisted before you return.
 
 ### Step 6: Return the Verdict Envelope
 
@@ -156,11 +156,12 @@ Return to the orchestrator per **Section D** from `skills/_shared/sdd-phase-comm
 
 ## Rules
 
+- UNREACHABLE from the canonical flow (D8): the orchestrator allow-list excludes `sdd-council`; no canonical-flow hook fires it — manual/out-of-band invocation only
 - ALWAYS read `design.md` in full; never review against imagination
 - NEVER modify `design.md` or `proposal.md` — the council is read-only with respect to the design; only the orchestrator re-launches design
 - NEVER decide a fork alone — 2+ divergent options are always framed for the user; a user rejection of ALL options STOPs the chain with a report
 - NEVER interrupt the user on convergence — the acta records the decision and the chain continues
 - NEVER run more than the round you are told; the max-2-rounds budget lives in the orchestrator, and the council is stateless
-- NEVER appear in or alter `nextRecommended` — the council is an organic hook, not a pipeline token
-- ALWAYS persist the acta before returning; a missing acta = arch-lint axis 2 fail-closed
+- NEVER appear in or alter `nextRecommended` — the council is not a pipeline token
+- ALWAYS persist the acta before returning
 - Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.
