@@ -23,7 +23,7 @@
 #   T40 one-parse           T41 fallback+dedupe         T42 title retrievability
 #   T42b worktree list      T43 signals+dirty            T44 record→resolve
 #   T45 --json≡scanner      T46 read fail-open           T47 write FAIL-OPEN
-#   T47b 5d-2 warn          T48 changelog clause
+#   T47b 5d-2 warn          T48 changelog PRE-archive cumulative
 #
 # Exit: 0 = todo verde (skips permitidos), 1 = fallos.
 # =============================================================================
@@ -965,12 +965,20 @@ t "T47b setup.sh 5d-2 warn (no Go → warn, no error)"
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T48 orchestrator + changelog sdd-tool clause grep"
+t "T48 changelog PRE-archive cumulative (append; no archive-report dependency)"
 {
   bad=0
-  grep -q "sdd-tool" "$REPO/wiring/prompts/sdd/orchestrator.md" || { ko "orchestrator.md missing sdd-tool integration clause"; bad=1; }
-  grep -q "verify-report.*pre-archive\|pre-archive.*verify-report" "$REPO/skills/sdd-changelog/SKILL.md" || { ko "sdd-changelog SKILL.md missing verify-report pre-archive clause"; bad=1; }
-  grep -q "absent archive-report.*blocked\|archive-report.*absent.*blocked" "$REPO/skills/sdd-changelog/SKILL.md" || { ko "sdd-changelog SKILL.md missing absent archive-report blocked clause"; bad=1; }
+  sk="$REPO/skills/sdd-changelog/SKILL.md"
+  # D10 flip (replan): changelog corre PRE-archive, acumulativo por append, en el
+  # cierre changelog → pre-experience → archive → PR ready. El orchestrator-side
+  # close-chain se pinnea cuando U2 reescribe el orquestador (tasks 2.2).
+  grep -q "PRE-archive" "$sk" || { ko "sdd-changelog: changelog no es PRE-archive"; bad=1; }
+  grep -q "cumulative" "$sk" || { ko "sdd-changelog: sin semantica cumulative"; bad=1; }
+  grep -q "append" "$sk" || { ko "sdd-changelog: sin mecanica de append"; bad=1; }
+  grep -q "never overwrit" "$sk" || { ko "sdd-changelog: sin clausula never-overwrite (entradas no usadas)"; bad=1; }
+  # D10: sin dependencia de archive-report — el changelog corre ANTES de archive,
+  # el archive-report aun no existe; ausente → nada de clausula required/blocked.
+  grep -q "archive-report" "$sk" && { ko "sdd-changelog: conserva dependencia de archive-report"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
