@@ -64,7 +64,7 @@ class SubprocessRunner:
     """Facade over ``subprocess.run`` — the ONLY place subprocess is called.
 
     Env hygiene applied to every call:
-    - ``GH_PROMPT_DISABLED=1`` + ``--nocolor`` (gh never prompts over stdio)
+    - ``GH_PROMPT_DISABLED=1`` + ``NO_COLOR=1`` (gh never prompts over stdio, no ANSI)
     - ``GIT_TERMINAL_PROMPT=0`` (git never prompts for credentials)
     - Inherited env otherwise — the server never sets ``GH_TOKEN`` / ``GITHUB_TOKEN``
     - Hard timeout (default 30 s; callers may override).
@@ -73,6 +73,7 @@ class SubprocessRunner:
     _PROMPT_DISABLE_ENV: dict[str, str] = {
         "GH_PROMPT_DISABLED": "1",
         "GIT_TERMINAL_PROMPT": "0",
+        "NO_COLOR": "1",
     }
 
     def run(
@@ -87,15 +88,9 @@ class SubprocessRunner:
 
         merged_env = {**os.environ, **self._PROMPT_DISABLE_ENV}
 
-        # Ensure gh never outputs ANSI escapes
-        final_argv = list(argv)
-        if final_argv and final_argv[0] == "gh":
-            if "--nocolor" not in final_argv:
-                final_argv.insert(1, "--nocolor")
-
         try:
             result = subprocess.run(
-                final_argv,
+                argv,
                 cwd=cwd,
                 text=text,
                 capture_output=True,

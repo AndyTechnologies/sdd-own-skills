@@ -25,7 +25,7 @@ before any API call.
 
 - **Two-phase destructive ops**: merge PR, delete branch, re-run workflow, and local branch delete require dry-run → confirm with echo-back evidence.
 - **Echo-back evidence**: the confirm call carries the dry-run's `data` dict verbatim; the server re-derives the effect, computes a SHA-256 fingerprint, and only executes on match.
-- **Auth fail-closed**: every remote tool gates on `gh auth status --exit-code`; not authed → `auth_required`, nothing mutates.
+- **Auth fail-closed**: every remote tool gates on `gh auth status --json hosts` (the `--exit-code` flag was removed in gh >= 2.98; the `active` field is the authoritative signal); not authed → `auth_required`, nothing mutates.
 - **Token-free**: the server process never sees, reads, or sets `GH_TOKEN`/`GITHUB_TOKEN`. Auth is delegated entirely to `gh`.
 - **Explicit repo**: every tool takes an explicit `owner/repo` or `path` — never infers from cwd.
 
