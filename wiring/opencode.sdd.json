@@ -35,7 +35,9 @@
           "sdd-architecture-lint": "allow",
           "sdd-architecture-plan": "allow",
           "sdd-changelog": "allow",
-          "sdd-council": "allow"
+          "sdd-hard-gate": "allow",
+          "sdd-hard-verify": "allow",
+          "sdd-pre-experience": "allow"
         }
       },
       "prompt": "{file:./prompts/sdd/orchestrator.md}",
@@ -110,6 +112,38 @@
       "mode": "subagent",
       "permission": {},
       "prompt": "{file:./prompts/sdd/sdd-rfc-author.md}",
+      "variant": ""
+    },
+    "sdd-architecture-plan": {
+      "description": "Run the Architecture Plan phase: consume arch-rfc + explore/research + spec deltas, optionally launch a pattern-research lane, and produce the binding architecture plan acta arch-plan.md with titled decisions, each resolvable against the inputs. Verdict: approved | rejected (bounded correction, max 2 rounds).",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "{file:./prompts/sdd/sdd-architecture-plan.md}",
+      "variant": ""
+    },
+    "sdd-hard-gate": {
+      "description": "Pre-close adversarial verification: compare specs vs code with fresh eyes, record each attempt on the native sdd-attempt ledger (acquire/settle), and return the verdict pass | return-edge (≤2) | stop-report.",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "{file:./prompts/sdd/sdd-hard-gate.md}",
+      "variant": ""
+    },
+    "sdd-hard-verify": {
+      "description": "Opt-in adversarial verification pass after sdd-verify: deliberately break sensitive code surfaces to prove the test suite catches regressions. Suite fails on break → revert and proceed; suite passes despite break → testing error, relay to Tasks with a gaps acta (max 2 rounds).",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "{file:./prompts/sdd/sdd-hard-verify.md}",
+      "variant": ""
+    },
+    "sdd-pre-experience": {
+      "description": "Close retrospective between changelog and archive: persist the SDD session's failures per the artifact-store mode, and propose to the user any lesson that can be encapsulated as a new skill (never auto-creating it). Fail-open — never blocks archive.",
+      "hidden": true,
+      "mode": "subagent",
+      "permission": {},
+      "prompt": "{file:./prompts/sdd/sdd-pre-experience.md}",
       "variant": ""
     }
   },
