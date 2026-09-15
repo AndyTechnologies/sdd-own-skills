@@ -87,6 +87,39 @@ Before asking anything, enumerate the open decision branches **from the problem 
 - **Product branch** covers, when applicable: problem/users/outcome, goals and non-goals, domain terminology and business rules, inputs/outputs/events/external contracts, invariants and validation, failure cases and edge cases, security/privacy/performance/operational, alternatives and trade-offs, quality gates/acceptance criteria, unresolved questions.
 - **Architecture branch** covers, when applicable: structural constraints and non-goals, boundaries and external dependencies, architecture decisions with alternatives and trade-offs, quality attributes (performance/security/operational), invariants, failure cases, and unresolved architecture questions.
 
+**Architecture Quest mechanics (context-driven — table-driven branching, budget 20):** the architecture interview is context-driven. It opens with the 8 base context questions below (never principle-by-principle), then walks the declarative branch table — the ONLY question-selection source: no implicit prose branches, no scripted state machine. Each branch loads the applicable principles/anti-patterns from the shared catalog by path (`skills/_shared/architecture-principles.md`); the catalog feeds branching, never the interview. Applicability validation happens in the plan with justified N/A, never in this interview.
+
+**8 base context questions** (ask in order):
+
+1. **Scope/surface** — what changes, and at which boundary surface?
+2. **Boundary structure** — which existing component/team boundaries does the change cross?
+3. **Stack driver** — is stack/technology a driver of this change? (the stack trigger, one of the 8)
+4. **Distribution** — does the change span processes, nodes, or services?
+5. **Data & persistence** — does the change touch data stores or persistence contracts?
+6. **State & concurrency** — does the change introduce or reshape shared state or concurrency?
+7. **Integration/framework** — does the change integrate external systems or framework conventions?
+8. **Non-functional envelope** — which quality attributes (performance/security/operational) bind the change?
+
+**Stack trigger** (base question 3): `yes` → enable the technology branch (table row `T1`); `no` → skip it, preserving the default language-agnostic stance. Stack confirmed (`yes`) but no technology branch applies to the context → record the driver (stack/technology) and early-stop that branch with zero questions.
+
+**Declarative branch table** — walked by the orchestrator as the ONLY question-selection source. Each row declares: its trigger (the context that activates it), the catalog IDs it loads by path, its branch questions, its early-stop condition, and its precedence for ambiguous triggers:
+
+| Trigger | Catalog IDs (loaded by path) | Branch questions | Early-stop | Precedence |
+|---|---|---|---|---|
+| Base Q4 = yes (distribution / microservices context) | `skills/_shared/architecture-principles.md`: A01, A02, A03, A06, A08, A11 | Service boundaries and ownership; deploy/scale coupling; shared-state integration; synchronous call chains | All microservice questions answered → stop branch | 1 |
+| Base Q3 = yes (stack/technology driver) | `skills/_shared/architecture-principles.md`: A04 | Confirmed stack constraints; framework coupling; abstraction cost | Stack constraints recorded → stop branch | 2 |
+| Any other context (default, language-agnostic) | `skills/_shared/architecture-principles.md`: all entries | None — loaded only for the plan's N/A validation | Branch resolves immediately → stop | 3 |
+
+Ambiguous triggers (a context matching two branches): apply the declared precedence; a genuine conflict classifies as a decision gap.
+
+**Hard budget: 20**, FIXED — never raised. Early-stop triggers when every triggered branch resolves within budget. Budget exhaustion produces a consolidation report with classified gaps — never a silent extension:
+
+- **decision gap** → a targeted question outside the questionnaire
+- **knowledge gap** → a research lane
+- **blocking gap** → Unresolved Questions in the RFC
+
+No gap MAY disappear silently. **Product Quest untouched**: budget 50 and current structure unchanged.
+
 ### Step 4: Run the Interview — one question at a time
 
 Ask exactly ONE question, wait for the answer, follow it down its branch until resolved, then ask the next. Guard: finding facts is your job, never the user's. Because you run before exploration, the primary source of facts is the **user's stated intent and domain knowledge**. During the interview you do not read the codebase yourself; if a question truly requires a fact from the environment (a repo, a tool, an API), delegate a single bounded lookup to a sub-agent and do not block the interview on it — record it as a fact for the RFC once resolved. Do not turn the interview into an exploration pass.

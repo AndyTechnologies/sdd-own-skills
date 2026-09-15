@@ -1,0 +1,72 @@
+{
+  "schema": "sdd/arch-principles-fixtures/v1",
+  "description": "Machine-readable expected outcomes for axis-3 fixture RED checks (acta D9). Parsed by T55-T59.",
+  "fixtures": {
+    "clean": {
+      "axis_3": "pass",
+      "blockers": [],
+      "warnings": []
+    },
+    "dirty/P01": { "axis_3": "fail", "blockers": ["P01"], "warnings": [] },
+    "dirty/P02": { "axis_3": "fail", "blockers": ["P02"], "warnings": [] },
+    "dirty/P03": { "axis_3": "fail", "blockers": ["P03"], "warnings": [] },
+    "dirty/P04": { "axis_3": "fail", "blockers": ["P04"], "warnings": [] },
+    "dirty/P05": { "axis_3": "fail", "blockers": ["P05"], "warnings": [] },
+    "dirty/P06": { "axis_3": "fail", "blockers": ["P06"], "warnings": [] },
+    "dirty/P07": { "axis_3": "fail", "blockers": ["P07"], "warnings": [] },
+    "dirty/P08": { "axis_3": "fail", "blockers": ["P08"], "warnings": [] },
+    "dirty/P09": { "axis_3": "fail", "blockers": ["P09"], "warnings": [] },
+    "dirty/P10": { "axis_3": "fail", "blockers": ["P10"], "warnings": [] },
+    "dirty/A01": { "axis_3": "fail", "blockers": ["A01"], "warnings": [] },
+    "dirty/A02": { "axis_3": "fail", "blockers": ["A02"], "warnings": [] },
+    "dirty/A03": { "axis_3": "fail", "blockers": ["A03"], "warnings": [] },
+    "dirty/A04": { "axis_3": "fail", "blockers": ["A04"], "warnings": [] },
+    "dirty/A05": { "axis_3": "fail", "blockers": ["A05"], "warnings": [] },
+    "dirty/A06": { "axis_3": "fail", "blockers": ["A06"], "warnings": [] },
+    "dirty/A07": { "axis_3": "fail", "blockers": ["A07"], "warnings": [] },
+    "dirty/A08": { "axis_3": "fail", "blockers": ["A08"], "warnings": [] },
+    "dirty/A09": { "axis_3": "fail", "blockers": ["A09"], "warnings": [] },
+    "dirty/A10": { "axis_3": "fail", "blockers": ["A10"], "warnings": [] },
+    "dirty/A11": { "axis_3": "fail", "blockers": ["A11"], "warnings": [] },
+    "multi": {
+      "axis_3": "fail",
+      "blockers": ["P03", "P07", "A02", "A10"],
+      "warnings": [],
+      "note": "full blocker set (L3): all 4 violations detected, not only the first"
+    },
+    "warning": {
+      "axis_3": "pass",
+      "blockers": [],
+      "warnings": ["P05"],
+      "note": "ambiguous evidence renders warning, never blocker (L4); warnings never fail axis_3"
+    },
+    "na-justified": {
+      "axis_3": "pass",
+      "blockers": [],
+      "warnings": [],
+      "suppressed": ["P08"],
+      "note": "P08 declared n-a-justified in acta -> check suppressed, justification visible (L5)"
+    },
+    "dual": {
+      "axis_3": "fail",
+      "blockers": ["P02"],
+      "warnings": [],
+      "axis_2_unmet": ["P02"],
+      "note": "P02 applicable + CONTRADICTION(P02) in implementation -> axis 2 unmet mandate + axis 3 blocker on same ID (L6/C7)"
+    },
+    "missing-checklist": {
+      "axis_2": "fail-closed",
+      "axis_3": "fail",
+      "blockers": [],
+      "warnings": [],
+      "note": "acta missing '## Principios no verificables' anchor -> axis 2 fail-closed (C2)"
+    },
+    "translated-anchor": {
+      "axis_2": "fail-closed",
+      "axis_3": "fail",
+      "blockers": [],
+      "warnings": [],
+      "note": "acta has English-only title -> must NOT satisfy presence gate (C1)"
+    }
+  }
+}
