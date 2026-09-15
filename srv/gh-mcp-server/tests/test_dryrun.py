@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 import pytest
 
-from src.dryrun import DryRunResult, destructive_flow
+from src.dryrun import DryRunResult, checks_ok_from_rollup, destructive_flow
 from src.envelope import Envelope
 from src.executor import ProcResult
 
@@ -215,3 +215,43 @@ def test_fingerprint_ignores_key_order() -> None:
 
     assert env["ok"] is True
     assert executed == 1
+
+
+# ---------------------------------------------------------------------------
+# checks_ok_from_rollup — GraphQL conclusion enum is UPPERCASE
+# ---------------------------------------------------------------------------
+
+
+def test_checks_ok_accepts_graphql_uppercase_conclusion() -> None:
+    """THE regression: GraphQL returns ``conclusion: "SUCCESS"`` (uppercase)
+    and the merge gate must not block a green CheckRun over a case mismatch."""
+    rollup = [{"conclusion": "SUCCESS"}, {"conclusion": "SUCCESS"}]
+
+    assert checks_ok_from_rollup(rollup) is True
+
+
+def test_checks_ok_is_case_insensitive() -> None:
+    """Legacy/lowercase conclusions are accepted too."""
+    rollup = [{"conclusion": "success"}, {"conclusion": "SUCCESS"}]
+
+    assert checks_ok_from_rollup(rollup) is True
+
+
+def test_checks_ok_rejects_failed_or_neutral_conclusions() -> None:
+    """Any non-SUCCESS conclusion must block the merge (fail closed)."""
+    for bad in ("FAILURE", "NEUTRAL", "CANCELLED", "SKIPPED", "TIMED_OUT", "ACTION_REQUIRED"):
+        assert checks_ok_from_rollup([{"conclusion": "SUCCESS"}, {"conclusion": bad}]) is False
+
+
+def test_checks_ok_empty_rollup_is_vacuously_ok() -> None:
+    """No check rollup reported → nothing to wait for."""
+    assert checks_ok_from_rollup([]) is True
+    assert checks_ok_from_rollup(None) is True
+
+
+def test_checks_ok_missing_conclusion_fails_closed() -> None:
+    """A StatusContext entry carries ``state``, not ``conclusion`` — not
+    provably green, so it blocks (conservative)."""
+    rollup = [{"state": "SUCCESS", "context": "ci/test"}]
+
+    assert checks_ok_from_rollup(rollup) is False

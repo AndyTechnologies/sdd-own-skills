@@ -146,6 +146,21 @@ def classify_mergeability(
     )
 
 
+def checks_ok_from_rollup(rollup: list[dict[str, Any]] | None) -> bool:
+    """All check entries in a GraphQL ``statusCheckRollup`` are passing.
+
+    GitHub's GraphQL returns the ``conclusion`` enum in UPPERCASE (``SUCCESS``,
+    ``FAILURE``, ``NEUTRAL``, ``CANCELLED``, …) while the legacy REST ``state``
+    is lowercase — compare case-insensitively so a green CheckRun never blocks
+    a merge. An empty rollup is vacuously OK (no checks reported). Entries
+    without a ``conclusion`` (e.g. a StatusContext) fail closed — not provably
+    green.
+    """
+    if not rollup:
+        return True
+    return all(str(c.get("conclusion", "")).upper() == "SUCCESS" for c in rollup)
+
+
 def classify_merged(*, compare_status: str | None) -> DryRunResult:
     """Compute dry-run data for ``gh_delete_branch``."""
     data: dict[str, Any] = {"compare_status": compare_status}
