@@ -15,17 +15,21 @@
 #   T07 no-mutacion dry-run T14 colision invalid        T21 regresion + README (F7)
 #                                                       T22 env snippets POSIX+fish
 #   T23 permisos C2         T24 selector no-interactivo T25 selector pty (toggle)
-#   T26 worktree contrato   T27 E1 doc-contract        T28 contract pins overlays
-#   T29 synthetic SWU probe T30 sync + id hygiene       T31 F4 hook pins
-#   T32 council delisted    T33 wiring council/lenses  T34 OWN_PROMPTS + file
-#   T35 acta fail-closed    T36 convergence/fork/2r     T37 fragment SDD-only
+#   T26 worktree contrato   T27 E1 doc-contract         T28 contract pins + routing-only
+#   T29 SWU probe + poda    T30 sync + id hygiene       T31 Paso 3b idempotente (config real)
+#   T32 poda council/gates  T33 fragment wiring v3      T34 OWN_PROMPTS exacto (2)
+#   T35 acta fail-closed    T36 quest gates (2 ramas)   T37 fragment SDD-only
 #   T38 subagent_depth 2    T39 merge ambos motores
 #   T40 one-parse           T41 fallback+dedupe         T42 title retrievability
 #   T42b worktree list      T43 signals+dirty            T44 record→resolve
 #   T45 --json≡scanner      T46 read fail-open           T47 write FAIL-OPEN
-#   T47b 5d-2 warn          T48 changelog clause
-#   T49 catalog schema/corpus    T50 catalog↔lint cross-check
-#   T51 catalog single path T52 shared-loop join
+#   T47b 5d-2 warn          T48 poda prompts/skills (2 prompts exactos)
+#   T49 rfc-author prompt-defined  T50 quest split 50/20 + 2 gates
+#   T51 routing lean (sin PR/MCP)  T52 machinery podado ausente
+#   T53 Paso 3b en sync (orden+flags)  T54 arch-plan acta + user gate
+#   T55 arch-quest ODD triggers      T55 poda hard-gate era
+#   T49 catalog schema/corpus   T50 catalog↔lint cross-check
+#   T51 catalog single path     T52 shared-loop join
 #   T53 quest arch rework
 #   T54 plan checklist (anchor + 21 rows + 3 states + evidence mandatory)
 #   T55 axis-3 fixtures: clean pass + dirty per-family (L2, severidad del catalogo)
@@ -73,6 +77,45 @@ trap cleanup EXIT INT TERM
 
 echo "== RED checks de setup.sh (repo: $REPO)"
 echo
+
+# ---------------- Warm build de sdd-tool (antes de los sandboxes) ----------------
+# El paso 5d-2 de setup.sh compila srv/sdd-tool (`go build`) en CADA modo real.
+# Construirlo aca, con el entorno del HOST, calienta GOMODCACHE/GOCACHE: los
+# sandboxes reusan ese cache (init_sandbox en helpers/sandbox.sh los inyecta
+# con GOPROXY=off) y el 5d-2 baja de ~90s (descarga de modulos en un HOME
+# vacio, sin red) a ~1-2s. Sin esto, los tests pty (T09/T12-T14/T22/T25)
+# mueren con exit 201 (timeout) y T15 rompe su idempotencia con caches
+# parciales dentro del HOME del sandbox.
+SDD_TOOL_BIN="$REPO/srv/sdd-tool"
+_sdd_tool_built=-1
+if [[ -f "$SDD_TOOL_BIN/cmd/sdd-tool/main.go" ]]; then
+  # Resolve go binary — try PATH first, then common locations
+  _go_bin="$(command -v go 2>/dev/null || true)"
+  if [[ -z "$_go_bin" ]]; then
+    for _p in /usr/sbin/go /usr/local/go/bin/go "$HOME/go/bin/go"; do
+      [[ -x "$_p" ]] && _go_bin="$_p" && break
+    done
+  fi
+  if [[ -n "$_go_bin" ]]; then
+    _sdd_build_tmp="$(mktemp -d)"
+    # Build from the MODULE root (go.mod live en srv/sdd-tool/; el root del
+    # repo no tiene go.mod, asi que construir "$SDD_TOOL_BIN/cmd/sdd-tool/"
+    # desde REPO falla silenciosamente). Un fallo de build aca debe ser LOUD,
+    # nunca un skip silencioso de T40-T47.
+    if ( cd "$SDD_TOOL_BIN" && "$_go_bin" build -o "$_sdd_build_tmp/sdd-tool" ./cmd/sdd-tool/ ) 2>"$_sdd_build_tmp/build-err.txt"; then
+      _sdd_tool_built=1
+    else
+      echo "  [ERROR] sdd-tool build fallo (module root: $SDD_TOOL_BIN):" >&2
+      sed 's/^/    /' "$_sdd_build_tmp/build-err.txt" >&2
+      rm -rf "$_sdd_build_tmp"
+      _sdd_build_tmp=""
+    fi
+  else
+    echo "  [ERROR] go no encontrado en PATH ni ubicaciones comunes; no se puede construir sdd-tool" >&2
+  fi
+else
+  echo "  [ERROR] faltan fuentes de sdd-tool ($SDD_TOOL_BIN/cmd/sdd-tool/main.go); bloque T40-T48 roto" >&2
+fi
 
 # ---------------- Grupo 1: sintaxis y contrato declarativo -------------------
 
@@ -540,31 +583,23 @@ t "T27 E1 doc-contract: 10 descripciones dos-fases citan ECHO_PROTOCOL; confirm_
 
 # ---------------- Grupo 7: SDD workflow hardening pins ------------------------
 
-t "T28 contract pins: fail-closed, untrusted DATA, 4 tokens, delimited evidence, not-verifiable, blocked(edit_authority_missing)"
+t "T28 contract pins + routing-only: fail-closed, untrusted DATA, 4 tokens, delimited evidence (phase-common)"
 {
   bad=0
-  # Orchestrator rule 2 pins
-  grep -q 'fail-closed' "$REPO/wiring/prompts/sdd/orchestrator.md" || { ko "orchestrator: sin fail-closed"; bad=1; }
-  grep -q 'untrusted' "$REPO/wiring/prompts/sdd/orchestrator.md" || { ko "orchestrator: sin untrusted"; bad=1; }
-  grep -q 'start/finish/verification/rollback' "$REPO/wiring/prompts/sdd/orchestrator.md" || { ko "orchestrator: sin 4 tokens"; bad=1; }
-  # shared-untrusted-data block pins
+  # shared-untrusted-data block pins (sobreviven en sdd-phase-common.md)
   grep -q 'fail-closed' "$REPO/overlays/shared/sdd-phase-common.md" || { ko "phase-common: sin fail-closed"; bad=1; }
   grep -q 'untrusted DATA' "$REPO/overlays/shared/sdd-phase-common.md" || { ko "phase-common: sin untrusted DATA"; bad=1; }
   grep -q 'start/finish/verification/rollback' "$REPO/overlays/shared/sdd-phase-common.md" || { ko "phase-common: sin 4 tokens"; bad=1; }
   grep -q 'delimited' "$REPO/overlays/shared/sdd-phase-common.md" || { ko "phase-common: sin delimited"; bad=1; }
-  # Overlay sdd-tasks: SWU shape
-  grep -q 'fail-closed' "$REPO/overlays/skills/sdd-tasks/SKILL.md" || { ko "sdd-tasks: sin fail-closed"; bad=1; }
-  grep -q 'start/finish/verification/rollback' "$REPO/overlays/skills/sdd-tasks/SKILL.md" || { ko "sdd-tasks: sin 4 tokens"; bad=1; }
-  # Overlay sdd-apply: SWU validate + edit authority
-  grep -q 'fail-closed' "$REPO/overlays/skills/sdd-apply/SKILL.md" || { ko "sdd-apply: sin fail-closed"; bad=1; }
-  grep -q 'blocked(edit_authority_missing)' "$REPO/overlays/skills/sdd-apply/SKILL.md" || { ko "sdd-apply: sin blocked(edit_authority_missing)"; bad=1; }
-  # Overlay sdd-verify: evidence shape + edit authority
-  grep -q 'not-verifiable' "$REPO/overlays/skills/sdd-verify/SKILL.md" || { ko "sdd-verify: sin not-verifiable"; bad=1; }
-  grep -q 'delimited' "$REPO/overlays/skills/sdd-verify/SKILL.md" || { ko "sdd-verify: sin delimited"; bad=1; }
+  # v3: no hay overlays de skills; la extension es routing-only
+  n_over="$(find "$REPO/overlays" -mindepth 2 -type f | wc -l)"
+  [[ "$n_over" == "1" ]] || { ko "overlays con $n_over archivos (esperado 1: phase-common)"; bad=1; }
+  grep -q 'Unified quest flow' "$REPO/wiring/sdd-own-routing.md" || { ko "routing: sin flujo unificado"; bad=1; }
+  grep -q 'binding mandate' "$REPO/wiring/sdd-own-routing.md" || { ko "routing: sin binding mandate"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T29 synthetic SWU probe: 4 tokens present in tasks; apply has fail-closed chain"
+t "T29 SWU probe: 4 tokens en tasks archivado + routing solo extiende agent-routing"
 {
   bad=0
   # Extract a synthetic SWU block and assert all 4 tokens.
@@ -575,10 +610,9 @@ t "T29 synthetic SWU probe: 4 tokens present in tasks; apply has fail-closed cha
   for tok in start finish verification rollback; do
     echo "$swu_block" | grep -q "^${tok}:" || { ko "SWU probe: token $tok ausente en tasks.md"; bad=1; }
   done
-  # Apply overlay has the fail-closed rejection chain
-  grep -q 'fail-closed' "$REPO/overlays/skills/sdd-apply/SKILL.md" || { ko "apply: fail-closed ausente"; bad=1; }
-  grep -q 'NEVER executed' "$REPO/overlays/skills/sdd-apply/SKILL.md" || { ko "apply: NEVER executed ausente"; bad=1; }
-  grep -q 'blocked' "$REPO/overlays/skills/sdd-apply/SKILL.md" || { ko "apply: blocked ausente"; bad=1; }
+  # v3: la aplicacion del contrato SWU se orquesta sin overlays; routing-only.
+  grep -q 'routing only' "$REPO/wiring/sdd-own-routing.md" || { ko "routing: sin clausula routing-only"; bad=1; }
+  grep -q '100% native gentle-ai' "$REPO/wiring/sdd-own-routing.md" || { ko "routing: sin clausula 100% native"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
@@ -597,89 +631,123 @@ t "T30 sync idempotency + id hygiene: zero desyncs post-sync, 0 errors"
   [[ "$rc" -eq 0 ]] || { ko "check en estado post-sync exit $rc != 0"; bad=1; }
   # Duplicate id check across all overlay files: a unique id MUST live in
   # exactly one file (its :start/:end marker pair). Count ids that span files.
-  dup_count="$(for f in "$REPO"/overlays/skills/*/SKILL.md; do
-    grep -o 'sdd-own:sdd-[a-z-]*' "$f" 2>/dev/null | sort -u
+  # v3: unico overlay superviviente es shared/sdd-phase-common.md (7 ids shared-*).
+  dup_count="$(for f in "$REPO"/overlays/shared/*.md; do
+    grep -o 'sdd-own:[a-z][a-z-]*' "$f" 2>/dev/null | sort -u
   done | sort | uniq -d | wc -l)"
   [[ "$dup_count" == "0" ]] || { ko "ids duplicados en overlays: $dup_count"; bad=1; }
+  n_ids="$(grep -o 'sdd-own:[a-z][a-z-]*' "$REPO/overlays/shared/sdd-phase-common.md" | sort -u | wc -l)"
+  [[ "$n_ids" == "7" ]] || { ko "phase-common: $n_ids ids unicos (esperado 7)"; bad=1; }
+  # Un solo par de marcadores sdd-own:agent-routing define el splice en sync-skills.sh
+  n_markers="$(grep -c 'sdd-own:agent-routing' "$REPO/sync-skills.sh")"
+  [[ "$n_markers" == "2" ]] || { ko "sync-skills.sh: marcadores sdd-own:agent-routing = $n_markers (esperado 2)"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T31 F4 hook pins: preflight shape, lossless consent, never skips human, decline continues"
+t "T31 Paso 3b machinery: sync_routing_extension consume wiring file + splice idempotente"
 {
   bad=0
-  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
-  grep -q 'gentle-ai review status' "$orch" || { ko "F4: sin preflight command"; bad=1; }
-  grep -q 'review-integration/v2' "$orch" || { ko "F4: sin contract version"; bad=1; }
-  grep -q 'next-transition' "$orch" || { ko "F4: sin --next-transition"; bad=1; }
-  grep -q 'consent/v3' "$orch" || { ko "F4: sin consent/v3"; bad=1; }
-  grep -q 'never skips human authorization' "$orch" || { ko "F4: sin never skips human authorization"; bad=1; }
-  grep -q 'candidate-scoped' "$orch" || { ko "F4: sin candidate-scoped decline"; bad=1; }
-  grep -q 'continues to archive' "$orch" || { ko "F4: sin continues to archive"; bad=1; }
-  grep -q 'informational no-op' "$orch" || { ko "F4: sin informational no-op"; bad=1; }
+  ss="$REPO/sync-skills.sh"
+  # La funcion Paso 3b existe y consume el contrato de routing
+  grep -q 'sync_routing_extension()' "$ss" || { ko "Paso 3b: sin funcion sync_routing_extension"; bad=1; }
+  grep -q 'sdd-own-routing.md' "$ss" || { ko "Paso 3b: sin wiring/sdd-own-routing.md"; bad=1; }
+  # Marcadores python del splice con el contrato exacto (start/end sdd-own dentro
+  # de la seccion agent-routing; PLAIN y ESC para detectar el formato almacenado)
+  grep -qF 'PLAIN_START = "<!-- gentle-ai:agent-routing -->"' "$ss" || { ko "Paso 3b: sin PLAIN_START"; bad=1; }
+  grep -qF 'PLAIN_END   = "<!-- /gentle-ai:agent-routing -->"' "$ss" || { ko "Paso 3b: sin PLAIN_END"; bad=1; }
+  grep -qF 'SDD_START   = "<!-- sdd-own:agent-routing:start -->"' "$ss" || { ko "Paso 3b: sin SDD_START"; bad=1; }
+  grep -qF 'SDD_END     = "<!-- sdd-own:agent-routing:end -->"' "$ss" || { ko "Paso 3b: sin SDD_END"; bad=1; }
+  grep -q 'python3 - "\$target" "\$file" "\$CHECK_MODE" "\$DRY_RUN"' "$ss" || { ko "Paso 3b: sin splice python con CHECK/DRY"; bad=1; }
+  # Live idempotencia: el config real del orquestador porta EXACTAMENTE un par
+  # sdd-own:agent-routing dentro de su seccion gentile-ai:agent-routing (el resto
+  # del prompt es 100% Alan; la secuencia completa la valida T31b).
+  ocf="${OPENCODE_CONFIG:-$REAL_HOME/.config/opencode/opencode.jsonc}"
+  [[ -f "$ocf" ]] || ocf="${OPENCODE_CONFIG:-$REAL_HOME/.config/opencode/opencode.json}"
+  pout="$(jq -r '.agent["gentle-orchestrator"].prompt // empty' "$ocf" 2>/dev/null)"
+  [[ -n "$pout" ]] || { ko "T31: prompt del orquestador no legible en $ocf"; bad=1; }
+  res="$(printf '%s' "$pout" | python3 -c '
+import sys
+p = sys.stdin.read()
+i = p.find("<!-- gentle-ai:agent-routing -->")
+j = p.find("<!-- /gentle-ai:agent-routing -->", i)
+if i < 0 or j < 0:
+    sys.exit(2)
+sec = p[i:j]
+print(sec.count("sdd-own:agent-routing"))
+')"
+  rc=$?
+  if [[ $rc -ne 0 ]]; then
+    ko "T31: seccion agent-routing ausente en config real (exit $rc)"
+    bad=1
+  elif [[ "$res" != "2" ]]; then
+    ko "T31: pares sdd-own en seccion agent-routing = $res (esperado 2: 1 par)"; bad=1
+  fi
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T32 council ABSENT: allow-list excludes, hooks item 3 no council, overlays zero council"
+t "T32 poda council/gates: allow-list sin council ni hard gates; skills/overlays podadas"
 {
   bad=0
   w="$REPO/wiring/opencode.sdd.json"
-  # D15 (U1-R): el allow-list del orquestador EXCLUYE sdd-council (el council
-  # nunca puede dispararse desde el flujo canónico); los agentes del replan
-  # estan permitidos en su lugar.
-  jq -e '.agent["gentle-orchestrator"].permission.task["sdd-council"] == null' "$w" >/dev/null 2>&1 || { ko "allow-list permite sdd-council"; bad=1; }
-  for a in sdd-architecture-plan sdd-hard-gate sdd-hard-verify sdd-pre-experience; do
+  # D15 (v3 U1): el allow-list del orquestador EXCLUYE council y toda la machinery
+  # podada (hard gates, pre-experience); los 3 agentes propios SI estan.
+  for a in sdd-council sdd-hard-gate sdd-hard-verify sdd-pre-experience; do
+    jq -e --arg a "$a" '.agent["gentle-orchestrator"].permission.task[$a] == null' "$w" >/dev/null 2>&1 || { ko "allow-list permite $a"; bad=1; }
+  done
+  for a in sdd-architecture-plan sdd-architecture-lint sdd-rfc-author; do
     jq -e --arg a "$a" '.agent["gentle-orchestrator"].permission.task[$a] == "allow"' "$w" >/dev/null 2>&1 || { ko "allow-list no permite $a"; bad=1; }
   done
-  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
-  grep -q 'Unified flow chain — canonical diagram' "$orch" || { ko "orchestrator: sin hooks item 3"; bad=1; }
-  grep -q 'Council SHALL NOT appear in any node' "$orch" || { ko "orchestrator: hooks item 3 con council"; bad=1; }
-  grep -q 'Council SHALL NOT run anywhere in the flow' "$orch" || { ko "orchestrator: rule 9 con council"; bad=1; }
-  grep -q 'Council SHALL NOT run in the canonical flow' "$orch" || { ko "orchestrator: post-apply lint chain con council"; bad=1; }
-  # D14 (U1-R): los overlays de soporte no contienen lenguaje council.
-  for ov in sdd-continue sdd-ff; do
-    n="$(grep -ci 'council' "$REPO/overlays/commands/$ov.md")"
-    [[ "$n" == "0" ]] || { ko "overlay $ov con $n menciones council"; bad=1; }
+  # Directories podados: skills/overlays de la era v2 ya no existen
+  for s in sdd-quest sdd-council sdd-changelog; do
+    [[ -e "$REPO/skills/$s" ]] && { ko "skills/$s no podada"; bad=1; }
   done
+  # overlays/skills y overlays/commands pueden quedar como dirs vacios (git
+  # conserva el arbol); lo que no puede sobrevivir es NINGUN archivo adentro.
+  n_sk="$(find "$REPO/overlays/skills" -type f 2>/dev/null | wc -l)"
+  [[ "$n_sk" == "0" ]] || { ko "overlays/skills con $n_sk archivos (poda U1)"; bad=1; }
+  n_cm="$(find "$REPO/overlays/commands" -type f 2>/dev/null | wc -l)"
+  [[ "$n_cm" == "0" ]] || { ko "overlays/commands con $n_cm archivos (poda U1)"; bad=1; }
+  # El routing extension no menciona council ni machinery podada
+  n="$(grep -ciE 'council|hard.gate|pre.experience' "$REPO/wiring/sdd-own-routing.md")"
+  [[ "$n" == "0" ]] || { ko "routing con $n menciones de machinery podada"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T33 wiring replan: 4 agentes nuevos + council machinery stays, allow-list sin council, sin __managed_by"
+t "T33 fragment wiring v3: orquestador solo permission; subagent_depth 2; sin __managed_by"
 {
   bad=0
   w="$REPO/wiring/opencode.sdd.json"
-  # D8 (U1-R): el machinery de council sigue definido (lenses incluidos) pero
-  # queda inalcanzable desde el flujo canonico (allow-list del orquestador sin el).
-  for a in sdd-council sdd-council-arch sdd-council-product sdd-council-risk; do
-    jq -e --arg a "$a" '.agent[$a] != null' "$w" >/dev/null 2>&1 || { ko "agente $a ausente"; bad=1; }
+  # D8 (v3 U1): el fragment NO porta prompt del orquestador — la fuente canónica
+  # del contrato es el prompt inline de Alan en el config real; el fragment
+  # SOLO agrega la llave permission del orquestador.
+  jq -e '(.agent["gentle-orchestrator"] | keys) == ["permission"]' "$w" >/dev/null 2>&1 || { ko "orchestrator fragment con mas que permission"; bad=1; }
+  jq -e '.agent["gentle-orchestrator"].permission.question == "allow"' "$w" >/dev/null 2>&1 || { ko "orchestrator question != allow"; bad=1; }
+  # subagent_depth top-level (R1) habilita el encadenamiento profundo
+  jq -e '.subagent_depth == 2' "$w" >/dev/null 2>&1 || { ko "subagent_depth != 2"; bad=1; }
+  # Los 3 agentes propios: hidden subagents, sin __managed_by, permission vacio (deny por default)
+  for a in sdd-architecture-plan sdd-architecture-lint sdd-rfc-author; do
+    jq -e --arg a "$a" '.agent[$a].mode == "subagent" and .agent[$a].hidden == true' "$w" >/dev/null 2>&1 || { ko "$a no es subagent hidden"; bad=1; }
+    jq -e --arg a "$a" '(.agent[$a].permission | length) == 0' "$w" >/dev/null 2>&1 || { ko "$a con permission no vacio"; bad=1; }
+    jq -e --arg a "$a" '.agent[$a] | has("__managed_by") | not' "$w" >/dev/null 2>&1 || { ko "$a con __managed_by"; bad=1; }
   done
-  jq -e '.agent["gentle-orchestrator"].permission.task["sdd-council"] == null' "$w" >/dev/null 2>&1 || { ko "orchestrator permite sdd-council"; bad=1; }
-  for l in sdd-council-arch sdd-council-product sdd-council-risk; do
-    jq -e --arg l "$l" '.agent["sdd-council"].permission.task[$l] == "allow"' "$w" >/dev/null 2>&1 || { ko "council no permite $l"; bad=1; }
-  done
-  jq -e '.agent["sdd-council"].mode == "subagent" and .agent["sdd-council"].hidden == true and (.agent["sdd-council"].permission.task["*"] == "deny")' "$w" >/dev/null 2>&1 || { ko "council mode/hidden/deny-* mal"; bad=1; }
-  jq -e '.agent["sdd-council"].prompt == "{file:./prompts/sdd/sdd-council.md}"' "$w" >/dev/null 2>&1 || { ko "council sin prompt file-based"; bad=1; }
-  for l in sdd-council-arch sdd-council-product sdd-council-risk; do
-    jq -e --arg l "$l" '.agent[$l].mode == "subagent" and .agent[$l].hidden == true and (.agent[$l].permission | length) == 0' "$w" >/dev/null 2>&1 || { ko "lens $l mode/hidden/permission mal"; bad=1; }
-    jq -e --arg l "$l" '.agent[$l].prompt | contains("## Lens:")' "$w" >/dev/null 2>&1 || { ko "lens $l no referencia su seccion"; bad=1; }
-  done
-  # Los 4 agentes del replan: subagents hidden, permission {}, prompt file-based.
-  for a in sdd-architecture-plan sdd-hard-gate sdd-hard-verify sdd-pre-experience; do
-    jq -e --arg a "$a" '.agent[$a].mode == "subagent" and .agent[$a].hidden == true and (.agent[$a].permission | length) == 0' "$w" >/dev/null 2>&1 || { ko "agente $a mode/hidden/permission mal"; bad=1; }
-    jq -e --arg a "$a" --arg p "{file:./prompts/sdd/$a.md}" '.agent[$a].prompt == $p' "$w" >/dev/null 2>&1 || { ko "agente $a sin prompt file-based"; bad=1; }
-  done
-  jq -e '[.agent["sdd-council"], .agent["sdd-council-arch"], .agent["sdd-council-product"], .agent["sdd-council-risk"], .agent["sdd-architecture-plan"], .agent["sdd-hard-gate"], .agent["sdd-hard-verify"], .agent["sdd-pre-experience"]] | map(has("__managed_by")) | all(. == false)' "$w" >/dev/null 2>&1 || { ko "agentes con __managed_by"; bad=1; }
+  # arch-plan y rfc-author: prompts file-based apuntando a wiring/prompts/sdd
+  jq -e '.agent["sdd-architecture-plan"].prompt == "{file:./prompts/sdd/sdd-architecture-plan.md}"' "$w" >/dev/null 2>&1 || { ko "arch-plan sin prompt file-based"; bad=1; }
+  jq -e '.agent["sdd-rfc-author"].prompt == "{file:./prompts/sdd/sdd-rfc-author.md}"' "$w" >/dev/null 2>&1 || { ko "rfc-author sin prompt file-based"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T34 OWN_PROMPTS + files: 7 prompts instalables, deploy loop, council skill delegate_only"
+t "T34 OWN_PROMPTS exacto: 2 prompts instalables (rfc-author + arch-plan), deploy loop, delegate_only"
 {
   bad=0
-  grep -q 'OWN_PROMPTS=(orchestrator.md sdd-rfc-author.md sdd-council.md sdd-architecture-plan.md sdd-hard-verify.md sdd-pre-experience.md sdd-hard-gate.md)' "$REPO/sync-skills.sh" || { ko "OWN_PROMPTS sin los 7 prompts"; bad=1; }
-  for f in orchestrator.md sdd-rfc-author.md sdd-council.md sdd-architecture-plan.md sdd-hard-verify.md sdd-pre-experience.md sdd-hard-gate.md; do
+  grep -q 'OWN_PROMPTS=(sdd-rfc-author.md sdd-architecture-plan.md)' "$REPO/sync-skills.sh" || { ko "OWN_PROMPTS no es (rfc-author, arch-plan)"; bad=1; }
+  for f in sdd-rfc-author.md sdd-architecture-plan.md; do
     [[ -f "$REPO/wiring/prompts/sdd/$f" ]] || { ko "wiring/prompts/sdd/$f ausente"; bad=1; }
   done
   grep -qF 'for pf in "${OWN_PROMPTS[@]}"' "$REPO/sync-skills.sh" || { ko "sync-skills.sh sin deploy loop de OWN_PROMPTS"; bad=1; }
-  grep -q 'delegate_only: true' "$REPO/skills/sdd-council/SKILL.md" || { ko "council skill sin delegate_only"; bad=1; }
+  # Los prompts file-based de los 2 agentes propios definen el rol sub-agent:
+  # el orquestador los llama como sub-agentes, no como skills full-install.
+  grep -q 'You are the `sdd-rfc-author` sub-agent' "$REPO/wiring/prompts/sdd/sdd-rfc-author.md" || { ko "rfc-author sin rol sub-agent"; bad=1; }
+  grep -q 'You are the dedicated `sdd-architecture-plan` SDD sub-agent' "$REPO/wiring/prompts/sdd/sdd-architecture-plan.md" || { ko "arch-plan sin rol sub-agent"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
@@ -687,7 +755,7 @@ t "T35 acta fail-closed POST-apply: arch-plan.md MANDATORY, title-by-title, N/A 
 {
   bad=0
   al="$REPO/skills/sdd-architecture-lint/SKILL.md"
-  # D9 (U1-R): axis 2 corre POST-apply contra el acta arch-plan.md; acta
+  # D9 (v3 U1): axis 2 corre POST-apply contra el acta arch-plan.md; acta
   # ausente → fail-closed; el lint nunca corre pre-apply.
   grep -q 'post-apply' "$al" || { ko "arch-lint sin post-apply"; bad=1; }
   grep -q 'POST-apply' "$al" || { ko "arch-lint sin POST-apply (axis 2)"; bad=1; }
@@ -696,34 +764,34 @@ t "T35 acta fail-closed POST-apply: arch-plan.md MANDATORY, title-by-title, N/A 
   grep -q 'FAILS CLOSED' "$al" || { ko "arch-lint sin fail-closed"; bad=1; }
   grep -q 'title-by-title' "$al" || { ko "arch-lint sin title-by-title"; bad=1; }
   grep -q 'empty or trivial design' "$al" || { ko "arch-lint sin N/A-trivial"; bad=1; }
-  # council 3 lenses (existing)
-  n="$(grep -c '^## Lens:' "$REPO/skills/sdd-council/SKILL.md")"
-  [[ "$n" == "3" ]] || { ko "council con $n secciones lens (esperado 3)"; bad=1; }
-  # axis 3 strings (U4 — must be present after axis-3 rework)
+  # delegate_only: el lint corre como sub-agente del orquestador (ALWAYS hook)
+  grep -q '^  delegate_only: true' "$al" || { ko "arch-lint sin delegate_only"; bad=1; }
+  # axis 3 strings (presentes tras el axis-3 rework)
   grep -q 'Axis 3' "$al" || { ko "arch-lint sin Axis 3 section"; bad=1; }
   grep -qF 'axis_3 pass' "$al" || { ko "arch-lint sin axis_3 verdict form"; bad=1; }
   grep -qF 'axis_3 fail' "$al" || { ko "arch-lint sin axis_3 fail verdict"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T36 convergence/fork: fast-path sin interrupcion, forks al user, 2 rounds STOP"
+t "T36 quest gates (2 ramas): product-quest y arch-quest skills existen con delegate_only + permisos"
 {
   bad=0
-  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
-  grep -q 'WITHOUT interrupting the user' "$orch" || { ko "orchestrator: sin convergence fast-path"; bad=1; }
-  grep -q 'second consecutive gate failure or a genuine scope/product decision' "$orch" || { ko "orchestrator: sin fork-al-user"; bad=1; }
-  grep -q 'max 2 rounds' "$orch" || { ko "orchestrator: sin budget 2 rounds"; bad=1; }
-  grep -q 'a 3rd failure' "$orch" || { ko "orchestrator: sin 3rd-failure STOP"; bad=1; }
-  sk="$REPO/skills/sdd-council/SKILL.md"
-  grep -q 'does NOT interrupt the user' "$sk" || { ko "council: sin fast-path"; bad=1; }
-  grep -q 'NEVER decides forks alone' "$sk" || { ko "council: sin fork-al-user"; bad=1; }
-  grep -q 'Max 2 rounds' "$sk" || { ko "council: sin budget 2 rounds"; bad=1; }
-  grep -q '### Decision:' "$sk" || { ko "council: sin acta decisions"; bad=1; }
-  # D14: los overlays ya no llevan lenguaje council; pinnean el flujo unificado.
-  grep -q 'arch-lint (POST-apply, ALWAYS)' "$REPO/overlays/commands/sdd-continue.md" || { ko "sdd-continue: sin lint post-apply"; bad=1; }
-  grep -q '\[hard-verify OPT-IN\]' "$REPO/overlays/commands/sdd-continue.md" || { ko "sdd-continue: sin hard-verify opt-in"; bad=1; }
-  grep -q 'hard budget 20' "$REPO/overlays/commands/sdd-ff.md" || { ko "sdd-ff: sin Architecture Quest budget"; bad=1; }
-  grep -q 'merge human-only' "$REPO/overlays/commands/sdd-ff.md" || { ko "sdd-ff: sin merge human-only"; bad=1; }
+  # Las 2 skills de quest viven como full-install con delegate_only: el
+  # orquestador las dispara como sub-agentes (nunca autoconsulta).
+  for sq in sdd-product-quest sdd-architecture-quest; do
+    [[ -f "$REPO/skills/$sq/SKILL.md" ]] || { ko "skills/$sq/SKILL.md ausente"; bad=1; }
+    grep -q '^  delegate_only: true' "$REPO/skills/$sq/SKILL.md" || { ko "$sq sin delegate_only"; bad=1; }
+  done
+  # Product Quest: hard budget 50 y un RFC gate explicito
+  grep -q 'Product Quest = **50**' "$REPO/skills/sdd-product-quest/SKILL.md" || { ko "product-quest: sin budget 50"; bad=1; }
+  grep -q 'One explicit RFC gate' "$REPO/skills/sdd-product-quest/SKILL.md" || { ko "product-quest: sin RFC gate"; bad=1; }
+  # Architecture Quest: hard budget 20 y su propio RFC gate
+  grep -q 'Architecture Quest = **20**' "$REPO/skills/sdd-architecture-quest/SKILL.md" || { ko "arch-quest: sin budget 20"; bad=1; }
+  grep -q 'One explicit RFC gate' "$REPO/skills/sdd-architecture-quest/SKILL.md" || { ko "arch-quest: sin RFC gate"; bad=1; }
+  # Ambos gates SIEMPRE con intervencion humana (nunca auto-approve)
+  n1="$(grep -c 'never auto-approve\|NEVER auto-approve' "$REPO/skills/sdd-product-quest/SKILL.md")"
+  n2="$(grep -c 'never auto-approve\|NEVER auto-approve' "$REPO/skills/sdd-architecture-quest/SKILL.md")"
+  [[ $((n1 + n2)) -ge 2 ]] || { ko "quests sin clausulas never auto-approve (n=$((n1 + n2)))"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
@@ -769,8 +837,9 @@ t "T39 merge extendido en ambos motores: --check zero desyncs con jq y con pytho
   done < <(printf '%s' "$PATH" | tr ':' '\n')
   shim="$SB_TMP/nojq"
   mkdir -p "$shim"
-  for b in bash sh cat cp ln mkdir sed sort uniq diff dirname perl python3 python mktemp chmod touch wc tr date readlink realpath basename grep head tail awk sha256sum env timeout nice; do
-    p="$(command -v "$b" 2>/dev/null)" && ln -sf "$p" "$shim/$b"
+  for b in bash sh cat cp ln mkdir sed sort uniq diff dirname perl python3 python mktemp chmod touch wc tr date readlink realpath basename grep head tail awk sha256sum env timeout nice find rm; do
+    p="$(PATH="/usr/bin:/bin" command -v "$b" 2>/dev/null)" || p="$(command -v "$b" 2>/dev/null)"
+    [[ -n "$p" ]] && ln -sf "$p" "$shim/$b"
   done
   clean_path=""
   while IFS= read -r e; do
@@ -792,37 +861,9 @@ t "T39 merge extendido en ambos motores: --check zero desyncs con jq y con pytho
 }
 
 # ---------------- Grupo sdd-tool: T40–T48 ----------------------------------------
-
-SDD_TOOL_BIN="$REPO/srv/sdd-tool"
-_sdd_tool_built=-1
-if [[ -f "$SDD_TOOL_BIN/cmd/sdd-tool/main.go" ]]; then
-  # Resolve go binary — try PATH first, then common locations
-  _go_bin="$(command -v go 2>/dev/null || true)"
-  if [[ -z "$_go_bin" ]]; then
-    for _p in /usr/sbin/go /usr/local/go/bin/go "$HOME/go/bin/go"; do
-      [[ -x "$_p" ]] && _go_bin="$_p" && break
-    done
-  fi
-  if [[ -n "$_go_bin" ]]; then
-    _sdd_build_tmp="$(mktemp -d)"
-    # Build from the MODULE root (go.mod live en srv/sdd-tool/; el root del
-    # repo no tiene go.mod, asi que construir "$SDD_TOOL_BIN/cmd/sdd-tool/"
-    # desde REPO falla silenciosamente). Un fallo de build aca debe ser LOUD,
-    # nunca un skip silencioso de T40-T47.
-    if ( cd "$SDD_TOOL_BIN" && "$_go_bin" build -o "$_sdd_build_tmp/sdd-tool" ./cmd/sdd-tool/ ) 2>"$_sdd_build_tmp/build-err.txt"; then
-      _sdd_tool_built=1
-    else
-      echo "  [ERROR] sdd-tool build fallo (module root: $SDD_TOOL_BIN):" >&2
-      sed 's/^/    /' "$_sdd_build_tmp/build-err.txt" >&2
-      rm -rf "$_sdd_build_tmp"
-      _sdd_build_tmp=""
-    fi
-  else
-    echo "  [ERROR] go no encontrado en PATH ni ubicaciones comunes; no se puede construir sdd-tool" >&2
-  fi
-else
-  echo "  [ERROR] faltan fuentes de sdd-tool ($SDD_TOOL_BIN/cmd/sdd-tool/main.go); bloque T40-T48 roto" >&2
-fi
+# (El warm build de sdd-tool vive al inicio del suite, antes de los sandboxes:
+# calienta GOMODCACHE/GOCACHE del host para que el 5d-2 de setup.sh en los
+# sandboxes no descargue modulos ni compile desde cero.)
 
 t "T40 sdd-tool one-parse (scanner lazy)"
 if [[ $_sdd_tool_built -eq 1 ]]; then
@@ -1011,121 +1052,146 @@ t "T47b setup.sh 5d-2 warn (no Go → warn, no error)"
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T48 changelog PRE-archive cumulative (append; no archive-report dependency)"
+t "T48 poda prompts/skills: wiring/prompts/sdd con EXACTAMENTE 2 prompts; skills changelog/quest/council ausentes"
 {
   bad=0
-  sk="$REPO/skills/sdd-changelog/SKILL.md"
-  # D10 flip (replan): changelog corre PRE-archive, acumulativo por append, en el
-  # cierre changelog → pre-experience → archive → PR ready. El orchestrator-side
-  # close-chain se pinnea cuando U2 reescribe el orquestador (tasks 2.2).
-  grep -q "PRE-archive" "$sk" || { ko "sdd-changelog: changelog no es PRE-archive"; bad=1; }
-  grep -q "cumulative" "$sk" || { ko "sdd-changelog: sin semantica cumulative"; bad=1; }
-  grep -q "append" "$sk" || { ko "sdd-changelog: sin mecanica de append"; bad=1; }
-  grep -q "never overwrit" "$sk" || { ko "sdd-changelog: sin clausula never-overwrite (entradas no usadas)"; bad=1; }
-  # D10: sin dependencia de archive-report — el changelog corre ANTES de archive,
-  # el archive-report aun no existe; ausente → nada de clausula required/blocked.
-  grep -q "archive-report" "$sk" && { ko "sdd-changelog: conserva dependencia de archive-report"; bad=1; }
+  # v3 (poda total): los unicos prompts propios son rfc-author + arch-plan.
+  n_prompts="$(ls "$REPO/wiring/prompts/sdd/"*.md 2>/dev/null | wc -l)"
+  [[ "$n_prompts" == "2" ]] || { ko "wiring/prompts/sdd con $n_prompts prompts (esperado 2)"; bad=1; }
+  for f in sdd-rfc-author.md sdd-architecture-plan.md; do
+    [[ -f "$REPO/wiring/prompts/sdd/$f" ]] || { ko "wiring/prompts/sdd/$f ausente"; bad=1; }
+  done
+  # Skills podadas de la era U1/U2 no existen
+  for s in sdd-changelog sdd-quest sdd-council; do
+    [[ -e "$REPO/skills/$s" ]] && { ko "skills/$s no podada"; bad=1; }
+  done
+  # El cierre de changelog quedo fuera del pipeline v3 (sin orchestrator propio)
+  n="$(grep -rilE 'changelog' "$REPO/wiring" 2>/dev/null | wc -l)"
+  [[ "$n" == "0" ]] || { ko "wiring con $n referencias a changelog"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T49 bootstrap Q40: sdd-tool pre-resuelto, command-not-found = contract violation, rfc-author nunca skill target"
+t "T49 rfc-author prompt-defined: file-based en fragment, nunca skill target, branch-parametric"
 {
   bad=0
-  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
-  grep -q 'Bootstrap (Q40)' "$orch" || { ko "Q40: sin bootstrap block"; bad=1; }
-  grep -q 'sdd-own/bin/sdd-tool' "$orch" || { ko "Q40: sin ruta canonica sdd-tool"; bad=1; }
-  grep -q 'command not found' "$orch" || { ko "Q40: sin clausula command-not-found"; bad=1; }
-  grep -q 'NEVER a skill search target' "$orch" || { ko "Q40: sdd-rfc-author no pinneado como prompt-defined"; bad=1; }
+  w="$REPO/wiring/opencode.sdd.json"
+  # Q40 (v3): rfc-author y arch-plan son agentes prompt-defined ({file:...}),
+  # NO skills full-install; el fragment apunta a wiring/prompts/sdd.
+  jq -e '.agent["sdd-rfc-author"].prompt == "{file:./prompts/sdd/sdd-rfc-author.md}"' "$w" >/dev/null 2>&1 || { ko "rfc-author sin prompt file-based"; bad=1; }
+  jq -e '.agent["sdd-architecture-plan"].prompt == "{file:./prompts/sdd/sdd-architecture-plan.md}"' "$w" >/dev/null 2>&1 || { ko "arch-plan sin prompt file-based"; bad=1; }
+  [[ -e "$REPO/skills/sdd-rfc-author" ]] && { ko "skills/sdd-rfc-author existe (debe ser prompt)"; bad=1; }
+  ra="$REPO/wiring/prompts/sdd/sdd-rfc-author.md"
+  grep -q 'branch-parametric' "$ra" || { ko "rfc-author: sin branch-parametric"; bad=1; }
+  grep -q 'You NEVER interview the human' "$ra" || { ko "rfc-author: sin never-interview"; bad=1; }
+  grep -q 'NEVER assemble both' "$ra" || { ko "rfc-author: sin never-assemble-both"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T50 2 quests/2 gates: Product 50 → gate 1 → Architecture 20 → gate 2, reopens solo rama afectada"
+t "T50 quest split 50/20 + 2 gates: skills dedicadas con budgets, RFC gates y reopens-only-branch"
 {
   bad=0
-  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
-  grep -q 'Product Quest (hard budget 50)' "$orch" || { ko "orchestrator: sin Product Quest 50"; bad=1; }
-  grep -q 'Architecture Quest (hard budget 20)' "$orch" || { ko "orchestrator: sin Architecture Quest 20"; bad=1; }
-  grep -q '\[RFC gate 1' "$orch" || { ko "orchestrator: sin gate 1"; bad=1; }
-  grep -q '\[RFC gate 2' "$orch" || { ko "orchestrator: sin gate 2"; bad=1; }
-  grep -q 'reopens ONLY' "$orch" || { ko "orchestrator: sin reopens-only-rama"; bad=1; }
-  qs="$REPO/skills/sdd-quest/SKILL.md"
-  grep -q 'two branches and two explicit RFC gates' "$qs" || { ko "quest: sin dos branches/gates"; bad=1; }
-  grep -q 'hard budget 50' "$qs" || { ko "quest: sin budget 50"; bad=1; }
-  grep -q 'hard budget 20' "$qs" || { ko "quest: sin budget 20"; bad=1; }
-  grep -q '## Approval:' "$qs" || { ko "quest: sin header Approval"; bad=1; }
-  grep -q 'reopens ONLY the affected branch' "$qs" || { ko "quest: sin reopen solo rama"; bad=1; }
+  pq="$REPO/skills/sdd-product-quest/SKILL.md"
+  aq="$REPO/skills/sdd-architecture-quest/SKILL.md"
+  # Product Quest: budget 50 + RFC gate + reopen solo rama product
+  grep -q 'Product Quest = \*\*50\*\*' "$pq" || { ko "product-quest: sin budget 50"; bad=1; }
+  grep -q 'One explicit RFC gate' "$pq" || { ko "product-quest: sin RFC gate"; bad=1; }
+  grep -q 'reopens ONLY the product branch' "$pq" || { ko "product-quest: sin reopen-only-product"; bad=1; }
+  # Architecture Quest: budget 20 + RFC gate + reopen solo rama architecture
+  grep -q 'Architecture Quest = \*\*20\*\*' "$aq" || { ko "arch-quest: sin budget 20"; bad=1; }
+  grep -q 'One explicit RFC gate' "$aq" || { ko "arch-quest: sin RFC gate"; bad=1; }
+  grep -q 'reopens ONLY the architecture branch' "$aq" || { ko "arch-quest: sin reopen-only-arch"; bad=1; }
+  # rfc-author: nunca entrevista al human ni ensambla ambos RFCs (branch-parametric)
+  ra="$REPO/wiring/prompts/sdd/sdd-rfc-author.md"
+  grep -Fq 'product-rfc.md` OR `arch-rfc.md' "$ra" || { ko "rfc-author: sin dual-artifact OR"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T51 PR draft + merge human + gh-git-mcp preflight (repo/commit/push/PR)"
+t "T51 routing lean: sin PR/merge/MCP en el routing extension; clausula 100% native"
 {
   bad=0
-  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
-  grep -q 'Create a draft PR on branch' "$orch" || { ko "orchestrator: sin draft PR sdd/{change}"; bad=1; }
-  grep -q 'MCP surfaces only' "$orch" || { ko "orchestrator: sin MCP-only (no-git-crudo)"; bad=1; }
-  grep -q 'merge ALWAYS human' "$orch" || { ko "orchestrator: sin merge human-only"; bad=1; }
-  grep -qF 'gh-git-mcp` availability' "$orch" || { ko "orchestrator: sin gh-git-mcp preflight"; bad=1; }
+  rt="$REPO/wiring/sdd-own-routing.md"
+  # El routing NO replica machinery de repo (PR/merge/MCP): eso es del core.
+  n="$(grep -cE 'draft PR|merge ALWAYS human|MCP surfaces|gh-git-mcp|nextRecommended' "$rt")"
+  [[ "$n" == "0" ]] || { ko "routing no-lean: $n menciones de PR/merge/MCP"; bad=1; }
+  grep -q '100% native gentle-ai (ODD/SDD)' "$rt" || { ko "routing: sin clausula 100% native"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T52 hard gate + sdd-attempt ledger + F4 byte-stable"
+t "T52 machinery podado ausente: sin sdd-attempt/hard-gate/pre-experience en routing ni skills; lint ALWAYS"
 {
   bad=0
-  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
-  grep -q 'Hard gate (pre-close, ALWAYS)' "$orch" || { ko "orchestrator: sin hard gate ALWAYS"; bad=1; }
-  grep -q 'sdd-attempt' "$orch" || { ko "orchestrator: sin ledger sdd-attempt"; bad=1; }
-  grep -q 'ADDITIVE around F4' "$orch" || { ko "orchestrator: hard gate no aditivo a F4"; bad=1; }
-  hg="$REPO/wiring/prompts/sdd/sdd-hard-gate.md"
-  grep -q 'sdd-attempt acquire' "$hg" || { ko "hard-gate: sin acquire"; bad=1; }
-  grep -q 'sdd-attempt settle' "$hg" || { ko "hard-gate: sin settle"; bad=1; }
-  grep -q 'return-edge (≤2)' "$hg" || { ko "hard-gate: sin return-edge"; bad=1; }
-  grep -q 'Fail-closed' "$hg" || { ko "hard-gate: sin fail-closed"; bad=1; }
-  grep -q 'F4 byte-stable (T31)' "$hg" || { ko "hard-gate: sin F4 byte-stable"; bad=1; }
+  rt="$REPO/wiring/sdd-own-routing.md"
+  # La machinery U1/U2 (ledger, hard gates, pre-experience) no dejo rastro
+  n="$(grep -ciE 'sdd-attempt|hard.gate|hard.verify|pre.experience' "$rt")"
+  [[ "$n" == "0" ]] || { ko "routing con $n menciones de machinery podada"; bad=1; }
+  # El unico hook post-apply es el lint ALWAYS (segunda mirada antes de verify/archive)
+  grep -q 'sdd-architecture-lint always runs as the independent' "$rt" || { ko "routing: sin lint ALWAYS"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T53 preflight 3 grupos canonicos + confirm separado + worktree ~/.agent_worktrees (repo selection)"
+t "T53 Paso 3b en sync: orden 3 < 3b < 4 + salteado --skip-opencode + exit contract 0/1/2"
 {
   bad=0
-  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
-  grep -q '3 canonical groups' "$orch" || { ko "orchestrator: sin 3 grupos canonicos"; bad=1; }
-  grep -q 'NEVER a 4th/5th canonical group' "$orch" || { ko "orchestrator: sin clausula 4+ grupos"; bad=1; }
-  grep -q 'SEPARATE orchestrator step' "$orch" || { ko "orchestrator: sin confirm separado"; bad=1; }
-  grep -q 'agent_worktrees' "$orch" || { ko "orchestrator: sin path worktree canonico"; bad=1; }
-  grep -q 'NEVER `/tmp`' "$orch" || { ko "orchestrator: worktree sin pin NEVER /tmp"; bad=1; }
+  ss="$REPO/sync-skills.sh"
+  # Orden estructural: Paso 3 (merge opencode) < Paso 3b (routing) < Paso 4 (registries)
+  i3="$(grep -n '^# --- Paso 3:' "$ss" | head -1 | cut -d: -f1)"
+  i3b="$(grep -n 'sync_routing_extension()' "$ss" | head -1 | cut -d: -f1)"
+  i4="$(grep -n '^# --- Paso 4:' "$ss" | head -1 | cut -d: -f1)"
+  [[ -n "$i3" && -n "$i3b" && -n "$i4" ]] || { ko "Paso 3b: encabezados no hallados"; bad=1; }
+  [[ "$i3" -lt "$i3b" && "$i3b" -lt "$i4" ]] || { ko "Paso 3b desordenado ($i3 < $i3b < $i4)"; bad=1; }
+  # El skip-opencode saltea tambien el routing extension
+  grep -q '\[salteado\]   routing extension (--skip-opencode)' "$ss" || { ko "Paso 3b: sin salteado --skip-opencode"; bad=1; }
+  # Exit contract documentado: 0 = up-to-date, 1 = pendiente/DESYNC/actualizado, 2 = estructura
+  grep -q '0 = up-to-date' "$ss" || { ko "Paso 3b: sin exit 0 contract"; bad=1; }
+  grep -q '2 = error de estructura/configuración' "$ss" || { ko "Paso 3b: sin exit 2 contract"; bad=1; }
+  # La funcion consume wiring/sdd-own-routing.md
+  grep -q 'sdd-own-routing.md' "$ss" || { ko "Paso 3b: no consume wiring/sdd-own-routing.md"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T54 arch-plan acta + user gate: post-spec pre-design, resolvable, fail-closed"
+t "T54 arch-plan acta + user gate: post-spec pre-design, resolvable, fail-closed, user gate"
 {
   bad=0
-  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
-  grep -q 'Architecture Plan → user gate → design' "$orch" || { ko "orchestrator: sin arch-plan gate"; bad=1; }
-  grep -q 'arch-plan.md' "$orch" || { ko "orchestrator: sin acta arch-plan.md"; bad=1; }
   ap="$REPO/wiring/prompts/sdd/sdd-architecture-plan.md"
   grep -q 'binding architecture plan acta' "$ap" || { ko "arch-plan: sin acta binding"; bad=1; }
   grep -q 'titled decisions' "$ap" || { ko "arch-plan: sin titled decisions"; bad=1; }
   grep -q 'resolvable against the inputs' "$ap" || { ko "arch-plan: sin resolvable"; bad=1; }
   grep -q 'fail-closed' "$ap" || { ko "arch-plan: sin fail-closed"; bad=1; }
   grep -q 'Design MUST NOT start until the user approves your plan' "$ap" || { ko "arch-plan: sin user gate"; bad=1; }
+  # El routing encadena arch-rfc aprobado -> arquitectura-plan (acta binding)
+  grep -q 'An approved arch-rfc.md precedes sdd-architecture-plan' "$REPO/wiring/sdd-own-routing.md" || { ko "routing: sin cadena arch-rfc->plan"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T55 hard-verify ≠ hard gate: opt-in post-verify NO-default; hard gate ALWAYS pre-close"
+t "T55 arch-quest ODD triggers: mandato = approved Product RFC; budget 20; STOP/blocked sin mandato"
 {
   bad=0
-  orch="$REPO/wiring/prompts/sdd/orchestrator.md"
-  grep -q 'Hard Verify (opt-in)' "$orch" || { ko "orchestrator: sin hard-verify opt-in"; bad=1; }
-  grep -q 'NO (the default)' "$orch" || { ko "orchestrator: sin NO-default"; bad=1; }
-  grep -q 'adversarial break testing' "$orch" || { ko "orchestrator: sin break testing"; bad=1; }
-  grep -q 'Hard gate (pre-close, ALWAYS)' "$orch" || { ko "orchestrator: sin hard gate ALWAYS"; bad=1; }
-  hv="$REPO/wiring/prompts/sdd/sdd-hard-verify.md"
-  grep -q 'OPT-IN' "$hv" || { ko "hard-verify: sin opt-in"; bad=1; }
-  grep -q 'Deliberate and isolated breaks only' "$hv" || { ko "hard-verify: sin breaks aislados"; bad=1; }
-  grep -q 'testing error, never soundness' "$hv" || { ko "hard-verify: sin testing-error-nunca-soundness"; bad=1; }
-  grep -q 'declined' "$hv" || { ko "hard-verify: sin declined"; bad=1; }
-  hg="$REPO/wiring/prompts/sdd/sdd-hard-gate.md"
-  grep -q 'adversarial' "$hg" || { ko "hard-gate: sin adversarial"; bad=1; }
+  aq="$REPO/skills/sdd-architecture-quest/SKILL.md"
+  # El arch-quest arranca del Product RFC aprobado (mandato vinculante)
+  grep -q 'approved Product RFC' "$aq" || { ko "arch-quest: sin mandato approved Product RFC"; bad=1; }
+  grep -q 'Architecture Quest = **20**' "$aq" || { ko "arch-quest: sin budget 20"; bad=1; }
+  grep -q 'STOP and report' "$aq" || { ko "arch-quest: sin STOP/report"; bad=1; }
+  # En el routing: la rama de arquitectura exige design ahead o incertidumbre arq
+  grep -q 'substantial with' "$REPO/wiring/sdd-own-routing.md" || { ko "routing: sin condicion de incertidumbre"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T55 poda hard-gate era: wiring/prompts/sdd sin hard-gate/hard-verify/pre-experience; fragment sin agentes gates"
+{
+  bad=0
+  # U1/U2 podado: los prompts de hard gates/verify/pre-experience no existen
+  for f in sdd-hard-gate.md sdd-hard-verify.md sdd-pre-experience.md; do
+    [[ -e "$REPO/wiring/prompts/sdd/$f" ]] && { ko "wiring/prompts/sdd/$f no podado"; bad=1; }
+  done
+  # Las skills de la era gates tampoco existen
+  for s in sdd-hard-gate sdd-hard-verify sdd-pre-experience; do
+    [[ -e "$REPO/skills/$s" ]] && { ko "skills/$s no podada"; bad=1; }
+  done
+  # El fragment no define agentes de gates
+  w="$REPO/wiring/opencode.sdd.json"
+  for a in sdd-hard-gate sdd-hard-verify sdd-pre-experience; do
+    jq -e --arg a "$a" '.agent[$a] == null' "$w" >/dev/null 2>&1 || { ko "fragment define $a"; bad=1; }
+  done
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
@@ -1295,51 +1361,26 @@ t "T52 shared-loop join: catalog junto a codegraph.md en todos los loops, copy-o
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T53 quest rework: 8 base Qs + stack, branch table (trigger/IDs/questions/early-stop/precedence), budget 20, gaps decision|knowledge|blocking, catalog by path"
+t "T53 quest arch rework v3: skill unificada PODADA (sdd-quest ausente); split product/arch con budgets y gates propios"
 {
   bad=0
-  qf="$REPO/skills/sdd-quest/SKILL.md"
-  [[ -f "$qf" ]] || { ko "quest ausente: skills/sdd-quest/SKILL.md"; bad=1; }
-  # 8 base context questions, asked first, never principle-by-principle (A1; acta Q3/Q4; design D6)
-  grep -q '^\*\*8 base context questions\*\*' "$qf" || { ko "sin marcador '8 base context questions' (A1)"; bad=1; }
-  # solo las base questions usan 'N. **label** — ' (em-dash); las hard constraints
-  # usan 'N. **label.** ' y no deben contarse (patron refinado en RED: 7 de fondo)
-  nb="$(grep -cE '^[1-8]\. \*\*[^*]+\*\* — ' "$qf")"
-  [[ "$nb" == "8" ]] || { ko "base Qs numeradas = $nb (esperado 8)"; bad=1; }
-  for dim in 'Scope/surface' 'Boundary structure' 'Stack driver' 'Distribution' 'Data & persistence' 'State & concurrency' 'Integration/framework' 'Non-functional envelope'; do
-    grep -qF "$dim" "$qf" || { ko "dimension base '$dim' ausente (design D6)"; bad=1; }
-  done
-  # stack trigger semantics (A4/A5/A10): yes -> technology branch; no -> skip; confirmed-no-branch -> driver + early-stop
-  grep -q '^\*\*Stack trigger\*\*' "$qf" || { ko "sin marcador 'Stack trigger' (A4/A5)"; bad=1; }
-  grep -q 'enable the technology branch' "$qf" || { ko "stack yes no habilita la technology branch (A4)"; bad=1; }
-  grep -q 'preserving the default language-agnostic stance' "$qf" || { ko "stack no no preserva el default language-agnostic (A5)"; bad=1; }
-  grep -q 'zero questions' "$qf" || { ko "confirmed-no-branch sin early-stop a cero preguntas (A10)"; bad=1; }
-  # declarative branch table, walked as the ONLY question-selection source (A2/A9)
-  grep -q 'ONLY question-selection source' "$qf" || { ko "sin 'ONLY question-selection source' (tabla unica, A2)"; bad=1; }
-  grep -q '^| Trigger | Catalog IDs (loaded by path) | Branch questions | Early-stop | Precedence |$' "$qf" || { ko "tabla sin columnas trigger/IDs/questions/early-stop/precedence (task 3.1)"; bad=1; }
-  grep -q '^| Base Q4 = yes (distribution / microservices context) |' "$qf" || { ko "fila microservices ausente (trigger A3)"; bad=1; }
-  grep -q '^| Base Q3 = yes (stack/technology driver) |' "$qf" || { ko "fila technology branch ausente (A4)"; bad=1; }
-  grep -q '^| Any other context (default, language-agnostic) |' "$qf" || { ko "fila default ausente"; bad=1; }
-  grep -q 'declared precedence' "$qf" || { ko "sin precedencia declarada (A9)"; bad=1; }
-  # budget 20 FIXED + early-stop + consolidation report (A6/A7)
-  grep -q '^\*\*Hard budget: 20\*\*' "$qf" || { ko "sin 'Hard budget: 20' (budget fijo)"; bad=1; }
-  grep -q 'never raised' "$qf" || { ko "budget sin 'never raised' (A7)"; bad=1; }
-  grep -q 'Early-stop triggers when every triggered branch resolves within budget' "$qf" || { ko "sin early-stop dentro del budget (A6)"; bad=1; }
-  grep -q 'consolidation report with classified gaps' "$qf" || { ko "sin consolidation report con gaps (A7)"; bad=1; }
-  # gap classification: exactly one of decision | knowledge | blocking (A8)
-  grep -q '^\- \*\*decision gap\*\*' "$qf" || { ko "sin decision gap (A8)"; bad=1; }
-  grep -q '^\- \*\*knowledge gap\*\*' "$qf" || { ko "sin knowledge gap (A8)"; bad=1; }
-  grep -q '^\- \*\*blocking gap\*\*' "$qf" || { ko "sin blocking gap (A8)"; bad=1; }
-  grep -q 'No gap MAY disappear silently' "$qf" || { ko "sin 'No gap MAY disappear silently' (A8)"; bad=1; }
-  # catalog by path, no inline copy (S3; catalogo alimenta branching, nunca la entrevista)
-  grep -q 'catalog feeds branching' "$qf" || { ko "sin 'catalog feeds branching' (RFC branching contract)"; bad=1; }
-  grep -q 'never principle-by-principle' "$qf" || { ko "sin 'never principle-by-principle' (A1)"; bad=1; }
-  grep -Fq 'skills/_shared/architecture-principles.md' "$qf" || { ko "quest no referencia el catalog por path (S3)"; bad=1; }
-  ninline="$(grep -cE '^- (Definition|Concrete evidence|Default severity):' "$qf")"
-  [[ "$ninline" == "0" ]] || { ko "quest con $ninline lineas del schema del catalog inline (copia duplicada, S3)"; bad=1; }
-  # Product Quest untouched: budget 50 y estructura actual presentes (spec A1/A2 regression)
-  grep -q 'Product Quest = \*\*50\*\*' "$qf" || { ko "budget product 50 alterado (Product Quest untouched)"; bad=1; }
-  grep -q '\*\*Product branch\*\* covers' "$qf" || { ko "estructura product branch alterada (Product Quest untouched)"; bad=1; }
+  # v3 (poda total): la skill unificada sdd-quest (8 base Qs + branch table +
+  # stack trigger, design D6) NO existe; fue reemplazada por dos skills
+  # dedicadas con budgets/gates propios (ver T36/T50/T55 del grupo 7).
+  [[ -e "$REPO/skills/sdd-quest" ]] && { ko "skills/sdd-quest no podada (split v3)"; bad=1; }
+  # Sin restos del design D6 en el wiring: ni la routing extension ni el
+  # fragment mencionan la quest unificada; solo las ramas split.
+  n="$(grep -cE 'sdd-quest|branch table|base context questions' "$REPO/wiring/sdd-own-routing.md")"
+  [[ "$n" == "0" ]] || { ko "routing con $n restos del quest unificado (D6)"; bad=1; }
+  # El catalogo de principios sigue por path en skills/_shared (fuente unica) y
+  # alimenta el LINT (axis 3, T49/T52), no la entrevista de quest (S3/S4).
+  catf="$REPO/skills/_shared/architecture-principles.md"
+  [[ -f "$catf" ]] || { ko "catalog ausente: skills/_shared/architecture-principles.md"; bad=1; }
+  heads="$(grep -rl '^## Principles' "$REPO/skills" "$REPO/wiring" 2>/dev/null | wc -l)"
+  [[ "$heads" == "1" ]] || { ko "corpus duplicado: $heads archivos con ## Principles (esperado 1)"; bad=1; }
+  # Las 2 skills split existen y conservan sus budgets (regresion spec A1/A2)
+  grep -q 'Product Quest = **50**' "$REPO/skills/sdd-product-quest/SKILL.md" || { ko "Product Quest budget 50 alterado"; bad=1; }
+  grep -q 'Architecture Quest = **20**' "$REPO/skills/sdd-architecture-quest/SKILL.md" || { ko "Architecture Quest budget 20 alterado"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 

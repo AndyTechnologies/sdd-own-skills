@@ -3,8 +3,6 @@
   "subagent_depth": 2,
   "agent": {
     "gentle-orchestrator": {
-      "description": "Gentle AI SDD Orchestrator - coordinates sub-agents, never does work inline",
-      "mode": "primary",
       "permission": {
         "question": "allow",
         "task": {
@@ -33,15 +31,9 @@
           "sdd-verify": "allow",
           "sdd-rfc-author": "allow",
           "sdd-architecture-lint": "allow",
-          "sdd-architecture-plan": "allow",
-          "sdd-changelog": "allow",
-          "sdd-hard-gate": "allow",
-          "sdd-hard-verify": "allow",
-          "sdd-pre-experience": "allow"
+          "sdd-architecture-plan": "allow"
         }
-      },
-      "prompt": "{file:./prompts/sdd/orchestrator.md}",
-      "variant": ""
+      }
     },
     "sdd-architecture-lint": {
       "description": "Independently review an SDD design against clean/hexagonal architecture principles",
@@ -52,98 +44,19 @@
       "variant": ""
     },
     "sdd-architecture-plan": {
-      "description": "Run the Architecture Plan phase: consume arch-rfc + explore/research + spec deltas, optionally launch a pattern-research lane, and produce the binding architecture plan acta arch-plan.md with titled decisions, each resolvable against the inputs. Verdict: approved | rejected (bounded correction, max 2 rounds).",
+      "description": "Run the Architecture Plan phase: consume the APPROVED arch-rfc.md + exploration findings + the change's spec deltas, optionally launch a pattern-research lane, and produce the binding architecture plan acta arch-plan.md with titled decisions, each resolvable against the inputs. Verdict: approved | rejected (bounded correction, max 2 rounds).",
       "hidden": true,
       "mode": "subagent",
       "permission": {},
       "prompt": "{file:./prompts/sdd/sdd-architecture-plan.md}",
       "variant": ""
     },
-    "sdd-changelog": {
-      "description": "Generate the release narrative for a completed SDD change",
-      "hidden": true,
-      "mode": "subagent",
-      "permission": {},
-      "prompt": "You are the dedicated `sdd-changelog` SDD sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Read your canonical skill at ~/.agents/skills/sdd-changelog/SKILL.md and follow it exactly.\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
-      "variant": ""
-    },
-    "sdd-council": {
-      "description": "Multi-voice post-design review council: 3 independent lens agents (arch/product/risk) evaluate design.md + proposal.md in parallel and produce an acta; convergence continues without user interruption, real forks are framed for the human to decide",
-      "hidden": true,
-      "mode": "subagent",
-      "permission": {
-        "task": {
-          "*": "deny",
-          "sdd-council-arch": "allow",
-          "sdd-council-product": "allow",
-          "sdd-council-risk": "allow"
-        }
-      },
-      "prompt": "{file:./prompts/sdd/sdd-council.md}",
-      "variant": ""
-    },
-    "sdd-council-arch": {
-      "description": "Architecture lens of the post-design council: design soundness, clean/hexagonal boundaries, dependency direction, layers/ports/DI/module boundaries/external access",
-      "hidden": true,
-      "mode": "subagent",
-      "permission": {},
-      "prompt": "You are the dedicated `sdd-council-arch` lens agent in the F4 council chain — the independent ARCHITECTURE voice on the post-design council. You are the executor of ONE lens, NOT an orchestrator — do NOT delegate and do NOT call task. Read the `## Lens: Architecture` section of your canonical skill at ~/.agents/skills/sdd-council/SKILL.md and follow it exactly. The council passes you the design.md and proposal.md locators in its launch prompt: read design.md in full (required) and proposal.md (when present), evaluate through your lens only, and return ONLY your single structured lens verdict (viable option, verdict, top concerns).\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
-      "variant": ""
-    },
-    "sdd-council-product": {
-      "description": "Product/UX lens of the post-design council: spec fidelity, user outcome, interface usability, scope fit, acceptance-criteria achievability",
-      "hidden": true,
-      "mode": "subagent",
-      "permission": {},
-      "prompt": "You are the dedicated `sdd-council-product` lens agent in the F4 council chain — the independent PRODUCT/UX voice on the post-design council. You are the executor of ONE lens, NOT an orchestrator — do NOT delegate and do NOT call task. Read the `## Lens: Product/UX` section of your canonical skill at ~/.agents/skills/sdd-council/SKILL.md and follow it exactly. The council passes you the design.md and proposal.md locators in its launch prompt: read design.md in full (required) and proposal.md (when present), evaluate through your lens only, and return ONLY your single structured lens verdict (viable option, verdict, top concerns).\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
-      "variant": ""
-    },
-    "sdd-council-risk": {
-      "description": "Risk/resilience lens of the post-design council: failure modes, edge cases, operational risk, security/privacy, blast radius, rollback safety, performance",
-      "hidden": true,
-      "mode": "subagent",
-      "permission": {},
-      "prompt": "You are the dedicated `sdd-council-risk` lens agent in the F4 council chain — the independent RISK/RESILIENCE voice on the post-design council. You are the executor of ONE lens, NOT an orchestrator — do NOT delegate and do NOT call task. Read the `## Lens: Risk/Resilience` section of your canonical skill at ~/.agents/skills/sdd-council/SKILL.md and follow it exactly. The council passes you the design.md and proposal.md locators in its launch prompt: read design.md in full (required) and proposal.md (when present), evaluate through your lens only, and return ONLY your single structured lens verdict (viable option, verdict, top concerns).\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
-      "variant": ""
-    },
     "sdd-rfc-author": {
-      "description": "Author the SDD RFC from the orchestrator-collected Q&A (the RFC pre-pass). The sub-agent does NOT interview the human; it assembles the collected answers into the structured language-agnostic RFC and returns it with the approval gate.",
+      "description": "Author the RFC of the active quest branch (product | architecture) from the orchestrator-collected Q&A (the RFC pre-pass). The sub-agent does NOT interview the human; it assembles ONLY the active branch's collected answers into the structured language-agnostic RFC (product-rfc.md | arch-rfc.md) and returns it with the approval gate.",
       "hidden": true,
       "mode": "subagent",
       "permission": {},
       "prompt": "{file:./prompts/sdd/sdd-rfc-author.md}",
-      "variant": ""
-    },
-    "sdd-architecture-plan": {
-      "description": "Run the Architecture Plan phase: consume arch-rfc + explore/research + spec deltas, optionally launch a pattern-research lane, and produce the binding architecture plan acta arch-plan.md with titled decisions, each resolvable against the inputs. Verdict: approved | rejected (bounded correction, max 2 rounds).",
-      "hidden": true,
-      "mode": "subagent",
-      "permission": {},
-      "prompt": "{file:./prompts/sdd/sdd-architecture-plan.md}",
-      "variant": ""
-    },
-    "sdd-hard-gate": {
-      "description": "Pre-close adversarial verification: compare specs vs code with fresh eyes, record each attempt on the native sdd-attempt ledger (acquire/settle), and return the verdict pass | return-edge (≤2) | stop-report.",
-      "hidden": true,
-      "mode": "subagent",
-      "permission": {},
-      "prompt": "{file:./prompts/sdd/sdd-hard-gate.md}",
-      "variant": ""
-    },
-    "sdd-hard-verify": {
-      "description": "Opt-in adversarial verification pass after sdd-verify: deliberately break sensitive code surfaces to prove the test suite catches regressions. Suite fails on break → revert and proceed; suite passes despite break → testing error, relay to Tasks with a gaps acta (max 2 rounds).",
-      "hidden": true,
-      "mode": "subagent",
-      "permission": {},
-      "prompt": "{file:./prompts/sdd/sdd-hard-verify.md}",
-      "variant": ""
-    },
-    "sdd-pre-experience": {
-      "description": "Close retrospective between changelog and archive: persist the SDD session's failures per the artifact-store mode, and propose to the user any lesson that can be encapsulated as a new skill (never auto-creating it). Fail-open — never blocks archive.",
-      "hidden": true,
-      "mode": "subagent",
-      "permission": {},
-      "prompt": "{file:./prompts/sdd/sdd-pre-experience.md}",
       "variant": ""
     }
   },

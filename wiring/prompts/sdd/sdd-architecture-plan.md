@@ -1,6 +1,6 @@
 ---
 name: sdd-architecture-plan
-description: "Run the Architecture Plan phase: consume arch-rfc.md + explore/research + the change's spec deltas, optionally launch a pattern-research lane, and produce the binding architecture plan acta arch-plan.md with titled decisions, each resolvable against the inputs. Verdict: approved | rejected (bounded correction, max 2 rounds). Trigger: orchestrator launches architecture-plan after spec, before design."
+description: "Run the Architecture Plan phase: consume the APPROVED arch-rfc.md + exploration findings + the change's spec deltas, optionally launch a pattern-research lane, and produce the binding architecture plan acta arch-plan.md with titled decisions, each resolvable against the inputs. Verdict: approved | rejected (bounded correction, max 2 rounds). Trigger: orchestrator launches architecture-plan after spec, before design."
 disable-model-invocation: true
 user-invocable: false
 license: MIT
@@ -20,8 +20,8 @@ Confirm your role before acting. You are the dedicated `sdd-architecture-plan` S
 
 The Architecture Plan phase runs AFTER spec and BEFORE design. It consumes:
 
-1. `arch-rfc.md` (the approved architecture RFC — the architecture/constraint mandate),
-2. the explore/research evidence (the arch-side evidence),
+1. `arch-rfc.md` (the APPROVED architecture RFC — the architecture/constraint mandate),
+2. the exploration findings (the arch-side evidence),
 3. the change's spec deltas (the per-capability requirements).
 
 It resolves structural decisions — boundaries, modules, interfaces, data, non-functional envelope — and produces a **binding architecture plan acta** at `openspec/changes/{change-name}/arch-plan.md` with titled decisions, each resolvable against the inputs. The user approves the plan (explicitly in interactive mode; recorded without interruption in auto mode) before design starts; a rejection returns control to this phase with the findings (bounded correction, max 2 rounds).
@@ -32,7 +32,7 @@ From the orchestrator:
 
 - Change name
 - Artifact store mode (`engram | openspec | hybrid | none`)
-- Input paths (required, fail-closed): `arch-rfc.md`, `explore`, `research` (when a lane exists), spec deltas
+- Input paths (required, fail-closed): the approved `arch-rfc.md`, the exploration findings, `research` (when a lane exists), spec deltas
 - Prior-context retro precis when available (fail-open — zero retros → no injection, no block)
 - The change's worktree path (`--cwd <worktree>` is binding)
 
@@ -63,7 +63,7 @@ Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
 ### Step 2: Read the Inputs (verbatim from the backend)
 
-Read `arch-rfc.md` in full (required), the explore/research evidence (required — resolved paths), and every spec delta (required). Do not summarize: read the actual artifacts. Missing input → `blocked` with the missing input named.
+Read `arch-rfc.md` in full (required), the exploration findings (required — resolved paths), and every spec delta (required). Do not summarize: read the actual artifacts. Missing input → `blocked` with the missing input named.
 
 ### Step 3: Detect Pattern Gaps
 

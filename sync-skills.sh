@@ -27,7 +27,8 @@
 #   overlays/skills/<skill>/   bloques sdd-own sobre el SKILL.md que gentle-ai instala
 #   overlays/shared/<f>.md     bloques sdd-own sobre _shared/<f>
 #   overlays/commands/<f>.md   bloques sdd-own sobre ~/.config/opencode/commands/<f>
-#   wiring/prompts/sdd/*.md    prompts nuestros (orchestrator.md, sdd-rfc-author.md)
+#   wiring/prompts/sdd/*.md    prompts nuestros (sdd-rfc-author.md, sdd-architecture-plan.md)
+#   wiring/sdd-own-routing.md  routing extension (bloque en la sección agent-routing del config)
 #   wiring/opencode.sdd.json   fragmento SDD mergeado sobre el config real de opencode
 #
 # Modelo de despliegue (~/.config/sdd-own/ como canónico):
@@ -58,6 +59,10 @@
 #   Paso 1 — install de lo nuestro (copia original a ~/.config/sdd-own/ + symlinks)
 #   Paso 2 — overlays (strip+append sobre los archivos de Alan)
 #   Paso 3 — merge del fragmento SDD sobre ~/.config/opencode/opencode.json(c)
+#   Paso 3b — routing extension: anexa wiring/sdd-own-routing.md dentro de la
+#             sección <!-- gentle-ai:agent-routing --> del prompt inline del
+#             orquestador en el config real (no-op con [aviso] si no existe la
+#             sección — el contrato de routing vive en wiring/sdd-own-routing.md)
 #   Paso 4 — registries (.atl) por proyecto
 #
 # Uso:
@@ -101,8 +106,8 @@ SDD_OWN_PROMPTS_SDD_DIR="$SDD_OWN_DIR/prompts/sdd"
 SHARED_BOOTSTRAP=(README.md engram-convention.md openspec-convention.md persistence-contract.md \
   research-lifecycle.md sdd-orchestrator-sections.md sdd-status-contract.md skill-resolver.md)
 
-# Prompts propios que desplegamos (Alan no gestiona estos 7 prompts).
-OWN_PROMPTS=(orchestrator.md sdd-rfc-author.md sdd-council.md sdd-architecture-plan.md sdd-hard-verify.md sdd-pre-experience.md sdd-hard-gate.md)
+# Prompts propios que desplegamos (Alan no gestiona estos 2 prompts).
+OWN_PROMPTS=(sdd-rfc-author.md sdd-architecture-plan.md)
 
 # --- Opciones --------------------------------------------------------------
 
@@ -264,6 +269,7 @@ apply_overlay() {
 
   # Base actual (sin bloques nuestros del id).
   tmp="$target.sdd-own-strip.$$"
+  trap 'rm -f "$tmp"' RETURN
   cp "$target" "$tmp" || { printf "   [ERROR]     no se pudo leer %s\n" "$target" >&2; return 2; }
   for id in "${ids[@]}"; do
     strip_block_id "$tmp" "$id"
@@ -646,7 +652,7 @@ fi
 # Prompts propios → original en ~/.config/sdd-own/prompts/sdd/ + symlinks por
 # archivo en ~/.config/opencode/prompts/sdd/ y ~/.claude/prompts/sdd/ (no se
 # symlinkea el directorio completo porque ahí conviven prompts de Alan).
-echo "  prompts propios (orchestrator.md, sdd-rfc-author.md)"
+echo "  prompts propios (sdd-rfc-author.md, sdd-architecture-plan.md)"
 for pf in "${OWN_PROMPTS[@]}"; do
   src_pf="$PROMPTS_SRC_DIR/$pf"
   dest_own_pf="$SDD_OWN_PROMPTS_SDD_DIR/$pf"
@@ -752,6 +758,7 @@ done
 # Symlinks de Claude para los commands overlaid (sdd-new.md, sdd-continue.md).
 if [[ -d "$HOME/.claude" ]]; then
   for _c in "$OVERLAYS_DIR"/commands/*.md; do
+    [[ -f "$_c" ]] || continue
     _f="${_c##*/}"
     rc=0
     ensure_symlink "$CLAUDE_COMMANDS_DIR/$_f" "../../.config/opencode/commands/$_f" || rc=$?
@@ -901,9 +908,249 @@ PYEOF
   return 1
 }
 
+# --- Paso 3b: routing extension ----------------------------------------------
+#
+# Anexa wiring/sdd-own-routing.md dentro de la sección agent-routing del prompt
+# inline del orquestador en el config real de opencode. La sección puede estar
+# en forma plana (<!-- gentle-ai:agent-routing -->) o JSON-escapada (\u003c!--
+# gentle-ai:agent-routing --\u003e, tal como la serializa el prompt inline en
+# opencode.jsonc). El splice es cirugía de texto (python3) que respeta bytes y
+# comillas: busca el marcador de inicio y el de cierre, quita cualquier bloque
+# sdd-own previo (idempotente) y anexa el contenido de wiring/sdd-own-routing.md
+# antes del marcador de cierre, usando la MISMA forma de escape que la sección
+# ya usa (plana o \u003c/>). No toca nada fuera de la sección.
+#
+# Salida (exit code):
+#   0 = up-to-date, o no-op con [aviso] si la sección/agente no existe (no falla)
+#   1 = [pendiente]/[DESYNC]/[actualizado] (cuenta en total_updated)
+#   2 = error de estructura/configuración (cuenta en total_failures)
+sync_routing_extension() {
+  local file="$WIRING_DIR/sdd-own-routing.md"
+  local target=""
+
+  if [[ $SKIP_OPENCODE -eq 1 ]]; then
+    printf "  [salteado]   routing extension (--skip-opencode)\n"
+    return 0
+  fi
+
+  if [[ -n "${OPENCODE_CONFIG:-}" ]]; then
+    target="$OPENCODE_CONFIG"
+  elif [[ -f "$HOME/.config/opencode/opencode.jsonc" ]]; then
+    target="$HOME/.config/opencode/opencode.jsonc"
+  elif [[ -f "$HOME/.config/opencode/opencode.json" ]]; then
+    target="$HOME/.config/opencode/opencode.json"
+  fi
+
+  if [[ -z "$target" ]]; then
+    printf "  [aviso]      no existe config de opencode; routing extension no aplicable\n"
+    return 0
+  fi
+
+  if [[ ! -f "$file" ]]; then
+    printf "  [ERROR]      falta wiring/sdd-own-routing.md (routing extension)\n" >&2
+    return 2
+  fi
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf "  [ERROR]      routing extension requiere python3\n" >&2
+    return 2
+  fi
+
+  local rc=0
+  python3 - "$target" "$file" "$CHECK_MODE" "$DRY_RUN" <<'PYEOF' || rc=$?
+import os
+import shutil
+import sys
+
+target, routing_file, check_mode, dry_run = sys.argv[1], sys.argv[2], sys.argv[3] == "1", sys.argv[4] == "1"
+# os.replace debe escribir el archivo real, no reemplazar un symlink
+# (Paso 3 escribe a través del symlink: el comportamiento debe coincidir).
+target = os.path.realpath(target)
+
+# Invariante: 0 = al día, 1 = cambio (aplicado o pendiente/desync), 2 = error.
+# CPython sale con 1 ante una excepción no manejada, así que el hook la
+# traduce a 2 (el wrapper clasifica rc=1 como "actualizado").
+_TMP_PATHS = []
+
+
+def _fail(msg):
+    print("  [ERROR]      routing extension: %s" % msg, file=sys.stderr)
+    sys.exit(2)
+
+
+def _fatal_hook(exc_type, exc, tb):
+    for path in _TMP_PATHS:
+        if os.path.exists(path):
+            os.unlink(path)
+    _fail("excepción no manejada (%s: %s)" % (exc_type.__name__, exc))
+
+
+sys.excepthook = _fatal_hook
+
+with open(routing_file, encoding="utf-8") as fh:
+    routing = fh.read()
+if not routing.endswith("\n"):
+    routing += "\n"
+
+try:
+    with open(target, encoding="utf-8") as fh:
+        raw = fh.read()
+except (OSError, UnicodeDecodeError) as exc:
+    _fail("no se pudo leer %s (%s)" % (target, exc))
+
+# Marcadores de la sección agent-routing, en forma plana y JSON-escapada.
+PLAIN_START = "<!-- gentle-ai:agent-routing -->"
+PLAIN_END   = "<!-- /gentle-ai:agent-routing -->"
+ESC_START   = "\\u003c!-- gentle-ai:agent-routing --\\u003e"
+ESC_END     = "\\u003c!-- /gentle-ai:agent-routing --\\u003e"
+SDD_START   = "<!-- sdd-own:agent-routing:start -->"
+SDD_END     = "<!-- sdd-own:agent-routing:end -->"
+
+# ¿En qué forma vive la sección? La sección de Alan está escapada cuando el
+# prompt inline fue serializado con escapes HTML-safe (\u003c/> por < >).
+escaped = False
+i_start = raw.find(ESC_START)
+if i_start >= 0:
+    escaped = True
+    start_marker, end_marker = ESC_START, ESC_END
+else:
+    i_start = raw.find(PLAIN_START)
+    start_marker, end_marker = PLAIN_START, PLAIN_END
+
+if i_start < 0:
+    print("  [aviso]      sección <!-- gentle-ai:agent-routing --> no encontrada en el config; routing extension no aplicable")
+    sys.exit(0)
+
+i_end = raw.find(end_marker, i_start + len(start_marker))
+if i_end < 0:
+    print("  [ERROR]      sección agent-routing sin marcador de cierre (config corrupto)", file=sys.stderr)
+    sys.exit(2)
+
+
+def json_escape_text(text, esc):
+    """Escapa el contenido para vivir dentro de un string JSON, respetando la
+    forma de la sección (plana o con \u003c/>)."""
+    out = []
+    for ch in text:
+        if ch == "\\":
+            out.append("\\\\")
+        elif ch == '"':
+            out.append('\\"')
+        elif ch == "\n":
+            out.append("\\n")
+        elif esc and ch == "<":
+            out.append("\\u003c")
+        elif esc and ch == ">":
+            out.append("\\u003e")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+# Bloque sdd-own en la forma de la sección: marcadores propios escapados igual
+# que los de Alan (solo si la sección es escapada) + contenido escapado.
+def block_text():
+    if escaped:
+        s = SDD_START.replace("<", "\\u003c").replace(">", "\\u003e")
+        e = SDD_END.replace("<", "\\u003c").replace(">", "\\u003e")
+    else:
+        s, e = SDD_START, SDD_END
+    return s + "\\n" + json_escape_text(routing, escaped) + "\\n" + e
+
+
+block = block_text()
+
+# Quita un bloque sdd-own previo SIEMPRE que esté dentro de la sección
+# (idempotente). Solo se mira entre i_start y el cierre de la sección.
+sec_start = i_start + len(start_marker)
+sec_end = i_end
+candidate = raw[sec_start:sec_end]
+prev_start = candidate.find(SDD_START) if not escaped else candidate.find(SDD_START.replace("<", "\\u003c").replace(">", "\\u003e"))
+prev_end_marker = SDD_END if not escaped else SDD_END.replace("<", "\\u003c").replace(">", "\\u003e")
+
+cleaned_sec = candidate
+if prev_start >= 0:
+    prev_end = candidate.find(prev_end_marker, prev_start)
+    if prev_end < 0:
+        print("  [ERROR]      bloque sdd-own previo sin marcador de cierre (config corrupto)")
+        sys.exit(2)
+    cleaned_sec = candidate[:prev_start] + candidate[prev_end + len(prev_end_marker):]
+
+# Costura canónica determinista: el contenido de la sección sin escapes \n
+# finales + exactamente un \n + el bloque. Da igual cuántas veces se aplique:
+# strip + insert produce SIEMPRE los mismos bytes (idempotencia real).
+import re
+cleaned_sec = re.sub(r"(?:\\n)+$", "", cleaned_sec)
+
+# Resultado: sección limpia + \n + bloque (antes del marcador de cierre).
+new_raw = raw[:i_start] + start_marker + cleaned_sec + "\\n" + block + end_marker + raw[sec_end + len(end_marker):]
+
+if new_raw == raw:
+    print("  [up-to-date] routing extension (sección agent-routing ya contiene el bloque sdd-own)")
+    sys.exit(0)
+
+if dry_run:
+    print("  [pendiente]  routing extension (anexar wiring/sdd-own-routing.md en la sección agent-routing)")
+    sys.exit(1)
+if check_mode:
+    print("  [DESYNC]     routing extension: falta/desactualizado el bloque sdd-own en la sección agent-routing del config")
+    sys.exit(1)
+
+bak = target + ".bak"
+tmp = "%s.tmp-%d" % (target, os.getpid())
+_TMP_PATHS.append(tmp)
+try:
+    if not os.path.exists(bak):
+        shutil.copy2(target, bak)
+    # Escritura atómica: temp en el mismo directorio + fsync + replace. Un fallo
+    # (disco lleno, kill, permiso) nunca deja el config truncado ni a medias.
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(new_raw)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.chmod(tmp, os.stat(target).st_mode & 0o7777)
+    os.replace(tmp, target)
+    with open(target, encoding="utf-8") as fh:
+        written = fh.read()
+    if written != new_raw:
+        raise OSError("verificación post-escritura: los bytes no coinciden")
+except (OSError, UnicodeDecodeError) as exc:
+    restored = "; sin respaldo disponible"
+    if os.path.exists(bak):
+        try:
+            shutil.copy2(bak, target)
+            restored = "; config restaurado desde .bak"
+        except OSError as rexc:
+            restored = "; respaldo no restaurable (%s)" % rexc
+    _fail("no se pudo escribir %s (%s)%s" % (target, exc, restored))
+finally:
+    if os.path.exists(tmp):
+        os.unlink(tmp)
+print("  [actualizado] routing extension (bloque sdd-own anexado en la sección agent-routing del config)")
+sys.exit(1)
+PYEOF
+
+  # Los contadores los actualiza el caller (igual que sync_opencode_config):
+  # rc inesperado (p. ej. 130 por SIGINT) cuenta como error, nunca como update.
+  case "$rc" in
+    0) return 0 ;;
+    1) return 1 ;;
+    *) return 2 ;;
+  esac
+}
+
 echo "Paso 3 — merge del fragmento SDD sobre el config real de opencode"
 rc=0
 sync_opencode_config || rc=$?
+case "$rc" in
+  1) total_updated=$((total_updated + 1)) ;;
+  2) total_failures=$((total_failures + 1)) ;;
+esac
+echo
+
+echo "Paso 3b — routing extension (sección agent-routing del prompt del orquestador)"
+rc=0
+sync_routing_extension || rc=$?
 case "$rc" in
   1) total_updated=$((total_updated + 1)) ;;
   2) total_failures=$((total_failures + 1)) ;;
