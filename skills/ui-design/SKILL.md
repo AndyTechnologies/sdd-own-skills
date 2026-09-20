@@ -35,17 +35,16 @@ Load when a design task covers UI/UX: new pages, components, design systems, col
 | 9 | Navigation: predictable back; bottom nav <= 5; deep linking |
 | 10 | Charts & data: legends, tooltips; never color-only meaning |
 
-## Style Direction — Dark Luxury
+## Style Direction — Gentle AI
 
-Activate when the request asks for "dark luxury", "dark premium", "dark gold", "dark mode luxury", "high-end dark theme", "elegant and dark", or "dark but premium" — never design it from memory alone.
+Activate when the request targets the Gentle-AI / Gentleman Programming ecosystem or asks for "gentle-ai style", "estilo gentle", "diseño gentle", or a dark-first zinc/magenta or Rose Pine UI — never design it from memory alone.
 
-- Identity: deep near-black backgrounds; warm metallic accents (Amber/Gold default, Silver/Platinum alt); premium editorial typography; grain texture overlays; ambient glow; purposeful micro-animations.
-- Defaults: background warm black #0a0907 (never #000/#111); accent Amber/Gold; font geometric sans (Inter); type landing page.
-- Non-negotiables: headlines bold, contrast by COLOR not weight · `[Label]` brackets in mono · cards NO border (inset top highlight) · primary buttons dark bg + amber border + always-visible glow · ONE elliptical hero orb · grain overlay required · SVG only, no emoji.
-- Clarify before decisions: accent, background, font, and type options — skip to defaults when the user asks.
-- Page structure: Nav, Hero, Logo marquee, Features, Stats, Testimonials, Architecture, Pricing, FAQ, CTA, Footer.
-- Stack: React — lucide-react icons, Tailwind for layout only, colors via style or <style>; plain HTML — tokens on :root, JetBrains Mono for metadata.
-- Full tokens, all ten rules, required animations, and anti-pattern checklist: read `references/dark-luxury.md`.
+- Identity: dark-first; deep zinc backgrounds (#09090b web, #191724 TUI); single magenta accent #ea1889 (web) / #c4a7e7 lavender (TUI); Inter web typography; Rose Pine palette in terminal; subtle borders, no hard lines.
+- Defaults: background #09090b; accent #ea1889; font Inter; type web app/landing.
+- Non-negotiables: ONE chromatic accent · borders #ffffff12, never pure hard lines · rounded-lg (8px) controls, rounded-2xl (16px) cards · spacing in 4px multiples · TUI text contrast >= 4.5:1 (never #6e6a86/#31748f for normal text) · dark-first.
+- Page structure: fixed nav (bg-black/80 backdrop-blur-xl border-b), max-w-6xl container, transition-colors on interactives.
+- Stack: React — Tailwind for layout only, colors via @theme tokens or style; TUI — Rose Pine hexes directly.
+- Full tokens, palettes, and rules: read `../gentle-ui/SKILL.md`.
 
 ## Execution Steps
 
@@ -62,4 +61,4 @@ Return the `UI Decisions` section content and any unresolved UI risks; keep prod
 
 - `../_shared/sdd-phase-common.md` — phase retrieval/persistence and return envelope.
 - `../sdd-design/SKILL.md` — design phase contract this skill augments.
-- `references/dark-luxury.md` — Dark Luxury direction: clarify options, defaults, page structure, stack notes, anti-patterns.
+- `../gentle-ui/SKILL.md` — Gentle AI direction: web (zinc/magenta) and TUI (Rose Pine) tokens, structure, general rules.
