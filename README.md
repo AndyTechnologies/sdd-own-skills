@@ -192,16 +192,16 @@ El pipeline de gentle-ai v3 (ODD-first) es nativo; este repo NO lo reemplaza. Nu
 
 ![Flujo SDD configurado](docs/diagrams/sdd-flow.png)
 
-Diagrama del pipeline SDD que configura este repo (generado con nuestra skill `archify`). Camino principal — `ODD nativo → Explore → Product Quest (budget 50) → RFC gate → Architecture Quest (budget 20, cuando hay superficie de producto/arquitectura) → RFC gate → Architecture Plan (solo cambios sustanciales, acta + user gate) → Design → Tasks → Apply → Architecture Lint (post-apply, contra los RFCs + acta) → Verify + Archive`. En cambios mecánicos o solo de documentación el flujo saltea ambas quests; si además el cambio no es sustancial, saltea también el Architecture Plan. El council de 3 lentes (era U2) fue retirado del flujo canónico (maquinaria retenida, no invocable desde el orquestador).
+Diagrama del pipeline SDD que configura este repo (generado con nuestra skill `archify`). Camino principal — `ODD nativo → Explore → Product Quest (budget 50) → RFC gate → seed ALWAYS del task doc (odd/tasks/<feature>.md) → Architecture Quest (budget 20, cuando el product RFC o el explore exponen decisiones de arquitectura) → RFC gate → Architecture Plan (solo cambios sustanciales, acta integrada al task doc + user gate) → Design → Tasks → Apply → Architecture Lint (post-apply, contra los RFCs + task doc + acta) → Verify + Archive`. En cambios mecánicos o solo de documentación el flujo saltea ambas quests; si además el cambio no es sustancial, saltea también el Architecture Plan. El council de 3 lentes (era U2) fue retirado del flujo canónico (maquinaria retenida, no invocable desde el orquestador).
 
 - **HTML interactivo**: [`docs/diagrams/sdd-flow.html`](docs/diagrams/sdd-flow.html) (autocontenido, ábrelo en el navegador; incluye 3 vistas guiadas).
 - **Fuente editable**: [`docs/diagrams/sdd-flow.workflow.json`](docs/diagrams/sdd-flow.workflow.json) (JSON IR schema v2; editar y re-renderizar/validar con la skill `archify`).
 
 ### 1. El RFC es la source of truth (quest bifurcado en dos ramas con gates)
 
-- **Product Quest** (`product-quest`, después de explore): entrevista acotada UNA pregunta a la vez (tope duro de **50**) + **gate RFC explícito** (`Approval: approved`); produce `product-rfc.md` (mandato vinculante). **Corre SIEMPRE después del explore** (ODD y SDD); solo los cambios mecánicos o solo de documentación pueden saltear ambas quests a criterio del orquestador.
-- **Architecture Quest** (`architecture-quest`, tope duro de **20** + gate RFC): produce `arch-rfc.md`. Corre cuando el pedido involucra producto/features o decisiones de arquitectura.
-- **`rfc-author`** (subagente file-based) ensambla el RFC canónico de CADA rama desde las Q&A recolectadas — nunca entrevista, nunca ensambla ambas ramas en una corrida (branch-parametric).
+- **Product Quest** (`product-quest`, después de explore): entrevista acotada UNA pregunta a la vez (tope duro de **50**) + **gate RFC explícito** presentado SOBRE el RFC ensamblado por `rfc-author` (`Approval: pending → approved`); produce `product-rfc.md` (mandato vinculante) y, al aprobarse, **siembra SIEMPRE el task doc** `odd/tasks/<feature>.md` (todos los tamaños de cambio). **Corre SIEMPRE después del explore** (ODD-first); solo los cambios mecánicos o solo de documentación pueden saltear ambas quests a criterio del orquestador.
+- **Architecture Quest** (`architecture-quest`, tope duro de **20** + gate RFC): produce `arch-rfc.md`. Corre cuando el product RFC aprobado o los hallazgos del explore exponen decisiones de arquitectura, o el usuario pide explícitamente trabajo de arquitectura.
+- **`rfc-author`** (subagente file-based) ensambla el RFC canónico de CADA rama desde las Q&A recolectadas — nunca entrevista, nunca ensambla ambas ramas en una corrida (branch-parametric). El gate se presenta DESPUÉS del ensamblado (decisión 5): el RFC nace `Approval: pending` y el orquestador presenta el gate al usuario.
 - **Nunca se auto-aprueba una decisión** en nombre del usuario: cada gate requiere aprobación explícita; `needs-changes` reabre SOLO la rama afectada dentro de su presupuesto restante.
 
 ### 2. El routing del orquestador (Paso 3b)
@@ -210,13 +210,13 @@ Sin tocar `nextRecommended` ni el prompt inline de Alan, el orquestador enruta p
 
 ### 3. Architecture Plan y lint post-apply
 
-- **`architecture-plan`** (subagente file-based) produce `arch-plan.md`: acta con decisiones tituladas + **user gate**, entre el arch-rfc y el design. Corre solo para cambios sustanciales/grandes que necesitan planificación más profunda; consume los RFCs aprobados (`product-rfc.md` / `arch-rfc.md`) + los hallazgos del explore.
-- **`architecture-lint`** corre SIEMPRE después del apply, como parte de la verificación del apply (antes de dar el cambio por completo): estilo de segunda mirada que (1) verifica requisitos/scope de los boundaries implementados, (2) verifica contra los RFCs generados (`product-rfc.md` / `arch-rfc.md`) y, cuando el arch-plan corrió, el acta `arch-plan.md` (fail-closed si el arch-plan corrió pero el acta falta) título por título contra el diseño Y la implementación, y (3) verifica la implementación contra el catálogo compartido de principios de arquitectura (P01..P10 / A01..A11, resuelto por path con veredicto independiente pass|fail).
-- **`sdd-research`** — evidencia externa auditada antes de `propose` (fase de soporte nativa del ecosistema).
+- **`architecture-plan`** (subagente file-based) produce el acta con decisiones tituladas + **user gate**, entre el arch-rfc y el design. Corre solo para cambios sustanciales/grandes que necesitan planificación más profunda (`substantial/large and needs deeper planning`); consume los RFCs aprobados (`product-rfc.md` / `arch-rfc.md`) + los hallazgos del explore + el task doc `odd/tasks/<feature>.md`, e **integra su acta EN el task doc** (`## Architecture Plan Acta`, artefacto `arch-plan.md` — sin archivo separado).
+- **`architecture-lint`** corre SIEMPRE después del apply, como parte de la verificación del apply (antes de dar el cambio por completo): estilo de segunda mirada que (1) verifica requisitos/scope de los boundaries implementados, (2) verifica contra los RFCs generados (`product-rfc.md` / `arch-rfc.md`) y, cuando el arch-plan corrió, el acta (`## Architecture Plan Acta` del task doc, fail-closed si el arch-plan corrió pero el acta falta) título por título contra el task doc Y la implementación, y (3) verifica la implementación contra el catálogo compartido de principios de arquitectura (P01..P10 / A01..A11, resuelto por path con veredicto independiente pass|fail). La remediación va PRIMERO al writer (apply), con corrección acotada (máx 2 rondas en auto); solo un hallazgo que invalide una decisión de arquitectura re-lanza `architecture-plan` (acotado al eje afectado).
+- **`sdd-research`** — evidencia externa auditada (fase de soporte nativa del ecosistema; el `architecture-plan` la delega según necesidad de evidencia).
 
 ### 4. Contratos transversales (`sdd-phase-common.md`)
 
-Único overlay superviviente: 7 bloques `sdd-own:shared-*` anexados al `_shared/sdd-phase-common.md` de Alan — **Language Domain Contract** (artefactos en inglés, registro neutral), **Quest↔Explore contract** (el quest corre antes del explore y es el mandato; explore lee SIEMPRE el artefacto completo y si el RFC no es implementable lo devuelve a `needs-changes`), caveman-communication, no-git-crudo, result-contract-strictness, untrusted-data y worktree-binding.
+Único overlay superviviente: 7 bloques `sdd-own:shared-*` anexados al `_shared/sdd-phase-common.md` de Alan — **Language Domain Contract** (artefactos en inglés, registro neutral), **Quest↔Explore contract** (la exploración corre PRIMERO y las quests consumen sus hallazgos; el quest gatea el RFC sobre el artefacto ensamblado y si un RFC aprobado resulta no implementable se devuelve a `needs-changes`), caveman-communication, no-git-crudo, result-contract-strictness, untrusted-data y worktree-binding.
 
 ---
 
@@ -240,7 +240,7 @@ sdd-own-skills/
 │   ├── mcp.d/                      # definiciones declarativas MCP por runtime (opencode/pi/claude/codex)
 │   └── prompts/sdd/                # rfc-author.md + architecture-plan.md (los 2 prompts propios)
 ├── engram-snapshot/                # artifacts de Engram (diseño/implementación del quest gate)
-├── docs/                           # issue-3332-rfc-gate.md, diagrams/ (flujo SDD: PNG + HTML + JSON IR)
+├── docs/                           # diagrams/ (flujo SDD: PNG + HTML + JSON IR)
 └── .gitignore                      # ignora .atl/ (registry con rutas absolutas locales)
 ```
 

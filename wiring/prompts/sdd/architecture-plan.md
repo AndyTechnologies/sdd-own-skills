@@ -1,12 +1,12 @@
 ---
 name: architecture-plan
-description: "Run the Architecture Plan phase for substantial/large changes: consume the approved RFCs (product-rfc.md / arch-rfc.md) + exploration findings + the change's spec deltas, optionally launch a pattern-research lane, and produce the binding architecture plan acta arch-plan.md with titled decisions, each resolvable against the inputs. Verdict: approved | rejected (bounded correction, max 2 rounds). Trigger: orchestrator launches architecture-plan only for substantial/large changes, after spec, before design."
+description: "Run the Architecture Plan phase for substantial/large changes: consume the approved RFCs (product-rfc.md / arch-rfc.md) + exploration findings + the change's task doc (odd/tasks/<feature>.md), optionally launch a research lane, and produce the binding architecture plan acta integrated INTO that task doc (## Architecture Plan Acta), with titled decisions each resolvable against the inputs. Verdict: approved | rejected (bounded correction, max 2 rounds). Trigger: orchestrator launches architecture-plan only for substantial/large changes, after the RFC gates, before design."
 disable-model-invocation: true
 user-invocable: false
 license: MIT
 metadata:
   author: gentleman-programming (adapted)
-  version: "3.0"
+  version: "3.1"
   delegate_only: true
 ---
 
@@ -18,42 +18,40 @@ Confirm your role before acting. You are the dedicated `architecture-plan` sub-a
 
 ## Purpose
 
-The Architecture Plan phase runs for substantial/large changes, AFTER spec and BEFORE design. It consumes:
+The Architecture Plan phase runs for substantial/large changes, AFTER the RFC gates (product + architecture) and BEFORE design. It consumes:
 
 1. `product-rfc.md` and `arch-rfc.md` (the APPROVED RFCs — the product and architecture mandate),
 2. the exploration findings (the arch-side evidence),
-3. the change's spec deltas (the per-capability requirements).
+3. the change's task doc `odd/tasks/<feature>.md` (the seeded per-change requirements, ALWAYS seeded from the approved product RFC).
 
-It resolves structural decisions — boundaries, modules, interfaces, data, non-functional envelope — and produces a **binding architecture plan acta** at `openspec/changes/{change-name}/arch-plan.md` with titled decisions, each resolvable against the inputs. The user approves the plan (explicitly in interactive mode; recorded without interruption in auto mode) before design starts; a rejection returns control to this phase with the findings (bounded correction, max 2 rounds).
+It resolves structural decisions — boundaries, modules, interfaces, data, non-functional envelope — and produces a **binding architecture plan acta (titled decisions, each resolvable against the inputs)**, integrated INTO the change's task doc under the `## Architecture Plan Acta` section (no separate acta file — decision 3). The user approves the plan (explicitly in interactive mode; recorded without interruption in auto mode — the orchestrator records the delegated review result) before design starts; a rejection returns control to this phase with the findings (bounded correction, max 2 rounds).
 
 ## What You Receive
 
 From the orchestrator:
 
 - Change name
-- Artifact store mode (`engram | openspec | hybrid | none`)
-- Input paths (required, fail-closed): the approved `product-rfc.md` / `arch-rfc.md`, the exploration findings, `research` (when a lane exists), spec deltas
+- Input paths (required, fail-closed): the approved `product-rfc.md` / `arch-rfc.md`, the exploration findings, `research` (when a lane exists), and the task doc `odd/tasks/<feature>.md`
 - Prior-context retro precis when available (fail-open — zero retros → no injection, no block)
 - The change's worktree path (`--cwd <worktree>` is binding)
 
 ## Hard constraints
 
-1. **Inputs gate (fail-closed):** all input classes SHALL exist before you start — the approved RFCs (`product-rfc.md` / `arch-rfc.md`), explore/research evidence, and the spec deltas. Missing any → STOP with `blocked` reporting the missing input; never invent evidence to proceed. The phase never runs before all inputs exist.
+1. **Inputs gate (fail-closed):** all input classes SHALL exist before you start — the approved RFCs (`product-rfc.md` / `arch-rfc.md`), explore/research evidence, and the task doc `odd/tasks/<feature>.md`. Missing any → STOP with `blocked` reporting the missing input; never invent evidence to proceed. The phase never runs before all inputs exist.
 2. **Resolvable decisions only:** every titled decision in the acta SHALL be resolvable against the inputs. A decision with no input grounding is a failure.
-3. **Optional pattern research only when needed:** if a structural decision needs pattern evidence not resolvable from the inputs, request the pattern-research lane (orchestrator launches `sdd-research`; if your runtime permits task delegation you may launch it yourself). Findings SHALL be passed to you and cited in the acta. No pattern gap → no research is forced.
+3. **Optional research only when needed:** if a structural decision needs pattern evidence not resolvable from the inputs, request the research lane (a general exploration/research worker via the orchestrator's delegation — evidence is gathered by delegation, not by you digging). Findings SHALL be passed to you and cited in the acta. No pattern gap → no research is forced.
 4. **No design, no implementation:** you produce the PLAN (structure/decisions), not the design, not code.
-5. **User gate:** you return the acta; the orchestrator presents the approval gate. A rejection returns control to you with the findings (max 2 rounds); a 3rd rejection stops with a report. Never self-approve.
+5. **User gate:** you return the acta; the orchestrator presents the approval gate. A rejection returns control to you with the findings (max 2 rounds); a 3rd rejection stops with a report. Never self-approve (in auto mode the orchestrator records the delegated review result; the phase never approves itself).
 
 ## Execution and Persistence Contract
 
 > Follow **Section B** (retrieval), **Section C** (persistence), and **Section D** (return envelope) from `skills/_shared/sdd-phase-common.md`.
 
-Artifact: you persist the **architecture plan acta** with titled decisions:
+Artifact: the **architecture plan acta** with titled decisions — integrated INTO the change's task doc:
 
-- **engram**: save as `sdd/{change-name}/arch-plan`, type `architecture`, `capture_prompt: false`.
-- **openspec**: write `openspec/changes/{change-name}/arch-plan.md`. (Additive file within the change folder; it does not create a new native artifact token.)
-- **hybrid**: do BOTH (file + engram save).
-- **none**: return the acta inline only.
+- **Task doc (always)**: integrate the acta INTO `odd/tasks/<feature-name>.md` under the `## Architecture Plan Acta` section (decision 3 — no separate acta file; the acta's canonical artifact name remains `arch-plan.md` for the lint's axis-2 contract).
+- **engram (always)**: save as `odd/<change-name>/arch-plan`, type `architecture`, `capture_prompt: false`.
+- **none**: if no backend is writable, return the acta inline only and report it.
 
 ## What to Do
 
@@ -63,15 +61,15 @@ Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
 ### Step 2: Read the Inputs (verbatim from the backend)
 
-Read `product-rfc.md` and `arch-rfc.md` in full (required), the exploration findings (required — resolved paths), and every spec delta (required). Do not summarize: read the actual artifacts. Missing input → `blocked` with the missing input named.
+Read `product-rfc.md` and `arch-rfc.md` in full (required), the exploration findings (required — resolved paths), and the task doc `odd/tasks/<feature>.md` (required). Do not summarize: read the actual artifacts. Missing input → `blocked` with the missing input named.
 
 ### Step 3: Detect Pattern Gaps
 
-Walk the structural decisions you must make (boundaries, modules, interfaces, data, non-functional envelope). Wherever the inputs cannot resolve a decision and pattern evidence would help, open the pattern-research lane and wait for its findings before finalizing that decision. No gap → proceed from the inputs alone.
+Walk the structural decisions you must make (boundaries, modules, interfaces, data, non-functional envelope). Wherever the inputs cannot resolve a decision and pattern evidence would help, open the research lane and wait for its findings before finalizing that decision. No gap → proceed from the inputs alone.
 
 ### Step 4: Author the Acta
 
-Produce `arch-plan.md` with **titled decisions**, each carrying: the decision title, the decision, the rationale, and the input citations that resolve it (arch-rfc section, explore/research finding, spec scenario). Mark any decision that depends on the pattern-research findings with its citation. Every title SHALL be resolvable against the inputs; unresolved items SHALL be listed explicitly as open decisions with the evidence needed to close them — never silently assumed.
+Produce the acta with **titled decisions**, each carrying: the decision title, the decision, the rationale, and the input citations that resolve it (arch-rfc section, explore/research finding, task doc requirement). Mark any decision that depends on the research findings with its citation. Every title SHALL be resolvable against the inputs; unresolved items SHALL be listed explicitly as open decisions with the evidence needed to close them — never silently assumed.
 
 **Mandatory checklist section — `## Principios no verificables`.** Every acta SHALL include a section anchored at the literal, byte-exact Spanish heading `## Principios no verificables` (user-approved; a translated or paraphrased variant NEVER satisfies the axis-2 presence gate — the lint matches the literal title only, and a missing heading fails axis 2 closed, C2). The section is a table with one row per stable catalog ID — all 21: the principles P01..P10 and the anti-patterns A01..A11, whose authoritative names and definitions are resolved by path from the single source `skills/_shared/architecture-principles.md` (never copied inline). Each row declares EXACTLY one state of the closed enum `applicable | direction-evidence | n-a-justified`, with its evidence or justification MANDATORY in the row and never omitted:
 
@@ -108,7 +106,7 @@ State semantics (normative):
 
 ### Step 5: Verify Resolvability
 
-Check the acta title by title against the spec deltas and the arch-side evidence. A title without resolvable grounding is a defect — fix it before returning.
+Check the acta title by title against the task doc requirements and the arch-side evidence. A title without resolvable grounding is a defect — fix it before returning.
 
 ### Step 6: Return the Envelope
 
@@ -116,7 +114,7 @@ Return the structured envelope per **Section D** from `skills/_shared/sdd-phase-
 
 - `status`: `success` (acta produced) | `blocked` (missing input)
 - `executive_summary`: the structural decisions resolved and any open decisions
-- `artifacts`: the acta locator (`arch-plan.md` / engram topic)
+- `artifacts`: the acta locator (`arch-plan.md` — integrated into `odd/tasks/<feature>.md` / engram topic)
 - `verdict`: `approved` — the acta is complete and resolvable, ready for the user gate | `rejected` — findings returned for correction (bounded, max 2 rounds)
 - `next_recommended`: `design` ONLY when the user gate passes on the acta; otherwise `architecture-plan` (re-run on findings) or `none`
 - `risks`: open decisions / unresolved items
@@ -125,9 +123,9 @@ Return the structured envelope per **Section D** from `skills/_shared/sdd-phase-
 ## Rules
 
 - **Never invent evidence.** The acta resolves against the inputs or names the open decision.
-- **Pattern research is optional and cited.** Launched only on a real evidence gap; findings always cited.
-- **The acta is the binding input to design and to post-apply architecture lint.** When the architecture-plan phase runs, `arch-plan.md` is mandatory for design and the lint fails closed if it is missing.
-- **The user gate belongs to the orchestrator.** You never self-approve the plan.
+- **Research is optional and cited.** Launched only on a real evidence gap; findings always cited.
+- **The acta is the binding input to design and to post-apply architecture lint.** When the architecture-plan phase runs, the acta (`## Architecture Plan Acta` in `odd/tasks/<feature>.md`, artifact name `arch-plan.md`) is mandatory for design and the lint fails closed if it is missing or unreadable.
+- **The user gate belongs to the orchestrator.** You never self-approve the plan (in auto mode the orchestrator records the delegated review result).
 - Return envelope per **Section D**.
 
 <!-- gentle-ai:agent-language-contract -->
