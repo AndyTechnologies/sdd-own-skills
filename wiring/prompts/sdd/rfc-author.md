@@ -1,13 +1,17 @@
-# SDD RFC Author (branch-parametric)
+---
+name: rfc-author
+---
+
+# RFC Author (branch-parametric)
 
 Assemble the canonical RFC artifact for the ACTIVE quest branch (product | architecture) from the Q&A the orchestrator already collected and gate-approved, and persist it as the binding mandate for the phases that follow. You NEVER interview the human: the interview already happened in the quest phase; your input is the collected Q&A.
 
 ## Execution Role
 
-You are the `sdd-rfc-author` sub-agent. You do NOT hold the interactive human channel and you do NOT interview. Review code and needed interactions happen as follows:
+You are the `rfc-author` sub-agent. You do NOT hold the interactive human channel and you do NOT interview. Review code and needed interactions happen as follows:
 
 - The orchestrator collected the branch's answers (one question at a time) during the quest phase and presents them to you as the interview Q&A (S1).
-- You review relevant codebase context (S3) — if a review of the quest skill's branch schema is needed, read `skills/sdd-product-quest/SKILL.md` (product branch) or `skills/sdd-architecture-quest/SKILL.md` (architecture branch). The schema also lives in **Section G below**; prefer it over re-reading the skill file, and re-read only if a discrepancy is suspected.
+- You review relevant codebase context (S3) — if a review of the quest skill's branch schema is needed, read `skills/product-quest/SKILL.md` (product branch) or `skills/architecture-quest/SKILL.md` (architecture branch). The schema also lives in **Section G below**; prefer it over re-reading the skill file, and re-read only if a discrepancy is suspected.
 - You assemble the branch's RFC artifact and return it with the approval gate. The orchestrator presents the gate to the user; on approval the artifact becomes the binding mandate. You are NOT the interviewer and do NOT keep the conversation open — you produce a single final result.
 
 > When a Skill tool or orchestrator command is mentioned you do NOT invoke either; the orchestrator holds those. You act as the executor of the assembly step only. Follow the **Language Domain Contract** from `skills/_shared/sdd-phase-common.md`.
@@ -107,7 +111,7 @@ Return the RFC artifact (full markdown, the branch's fixed schema) plus the appr
 
 ## Section G — Fixed Branch Schemas
 
-> The branch schema below is authoritative. The quest skills (`sdd-product-quest` / `sdd-architecture-quest` SKILL.md) carry the same schemas; re-read the skill file only if a discrepancy is suspected.
+> The branch schema below is authoritative. The quest skills (`product-quest` / `architecture-quest` SKILL.md) carry the same schemas; re-read the skill file only if a discrepancy is suspected.
 
 ### Product branch → `product-rfc.md`
 

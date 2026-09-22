@@ -1,6 +1,6 @@
 ---
-name: sdd-architecture-quest
-description: "SDD/ODD architecture question phase — the RFC pre-pass (architecture branch). Bounded RFC interview AFTER exploration AND the approved product RFC, one question at a time, hard budget 20, then an explicit architecture RFC gate; on approval sdd-rfc-author assembles arch-rfc.md. In SDD: before sdd-design. In ODD: only when the change is substantial and carries architecture uncertainty."
+name: architecture-quest
+description: "Architecture question phase — the RFC pre-pass (architecture branch). Bounded RFC interview AFTER exploration AND the approved product RFC, one question at a time, hard budget 20, then an explicit architecture RFC gate; on approval rfc-author assembles arch-rfc.md. Runs whenever the request involves product/feature work or needs architectural decisions (default ODD workflow and explicit SDD)."
 disable-model-invocation: true
 user-invocable: false
 license: MIT
@@ -14,20 +14,20 @@ metadata:
 
 Confirm your role before acting. In OpenCode, **only the orchestrator holds the interactive human channel** (the `question` tool permission); a `task()` sub-agent returns a single final result and cannot sustain a live one-question-at-a-time interview. Therefore the ARCHITECTURE QUEST interview is always performed by whoever holds that channel.
 
-- **If you are the orchestrator** (you loaded this skill through the `skill()` tool): you PERFORM the interview yourself. Do NOT delegate the interview to the `sdd-rfc-author` sub-agent — it cannot talk to the human in OpenCode. Proceed with the phase work below, asking the user one focused question at a time via your `question` tool.
-- **If you are the `sdd-rfc-author` sub-agent**: you do NOT interview the human. You are the RFC author: you receive the user's answers (Q&A pairs) collected by the orchestrator for the architecture branch, assemble them into `arch-rfc.md`, and present the approval gate back to the orchestrator. Do not call the Skill tool or another orchestrator command.
+- **If you are the orchestrator** (you loaded this skill through the `skill()` tool): you PERFORM the interview yourself. Do NOT delegate the interview to the `rfc-author` sub-agent — it cannot talk to the human in OpenCode. Proceed with the phase work below, asking the user one focused question at a time via your `question` tool.
+- **If you are the `rfc-author` sub-agent**: you do NOT interview the human. You are the RFC author: you receive the user's answers (Q&A pairs) collected by the orchestrator for the architecture branch, assemble them into `arch-rfc.md`, and present the approval gate back to the orchestrator. Do not call the Skill tool or another orchestrator command.
 
 > Follow the **Language Domain Contract** in `skills/_shared/sdd-phase-common.md`.
 
 ## Purpose
 
-You are responsible for the **ARCHITECTURE QUEST** phase (the architecture branch of the RFC pre-pass): a bounded RFC interview with the human user about architecture and design decisions, run **after** exploration and the approved product RFC, and before the architecture plan. In OpenCode the interviewer is the orchestrator (the only role with the `question` channel); the `sdd-rfc-author` sub-agent, when launched, is the RFC author that shapes the collected answers into `arch-rfc.md`.
+You are responsible for the **ARCHITECTURE QUEST** phase (the architecture branch of the RFC pre-pass): a bounded RFC interview with the human user about architecture and design decisions, run **after** exploration and the approved product RFC, and before the architecture plan. In OpenCode the interviewer is the orchestrator (the only role with the `question` channel); the `rfc-author` sub-agent, when launched, is the RFC author that shapes the collected answers into `arch-rfc.md`.
 
 Your job:
 1. Interview the user **one focused question at a time** to discover and pin the architecture constraints and design decisions (never invent architectural decisions or constraints), within the **hard budget of 20**.
 2. Produce a **language-agnostic, structured architecture RFC** that describes architecture constraints, modules, interfaces and envelopes — not a step-by-step implementation.
 3. Present the architecture RFC for **explicit user approval** at the architecture RFC gate. `needs-changes` reopens the architecture branch only, within its remaining budget.
-4. Mark the **approved architecture RFC as the binding mandate** — the source of truth `sdd-architecture-plan` must trace to. After the gate approves, delegate the collected Q&A to `sdd-rfc-author` for `arch-rfc.md` persistence.
+4. Mark the **approved architecture RFC as the binding mandate** — the source of truth `architecture-plan` must trace to. After the gate approves, delegate the collected Q&A to `rfc-author` for `arch-rfc.md` persistence.
 
 The architecture quest starts from the **approved Product RFC**, the **exploration findings**, and the user's stated architecture intent. Do not re-explore the codebase yourself — the explore phase already produced the findings. This is one of the two SDD phases that talk to the human (the other is the product quest). Every other phase is a silent executor. The RFC discipline separates "a handoff of decisions" from "an RFC that describes behavior without choosing a language/framework".
 
@@ -46,7 +46,7 @@ From the orchestrator:
 ## Hard constraints
 
 1. **Hard question budget.** Architecture Quest = **20**. Never exceed it; exhaustion stops the branch with a report, never silently extends.
-2. **One explicit RFC gate.** The architecture RFC gate (before `sdd-rfc-author` runs and before `sdd-architecture-plan` starts). The RFC is not approved by an empty frontier — the user must explicitly approve it. Never auto-approve on the human's behalf.
+2. **One explicit RFC gate.** The architecture RFC gate (before `rfc-author` runs and before `architecture-plan` starts). The RFC is not approved by an empty frontier — the user must explicitly approve it. Never auto-approve on the human's behalf.
 3. **`needs-changes` reopens ONLY the architecture branch.** A gate rejection re-interviews the architecture branch within its REMAINING budget; no other branch is touched by this rejection.
 4. **One question at a time.** Ask exactly ONE focused question; follow the answer until that branch resolves before the next. Never batch a frontier.
 5. **Never invent missing decisions.** If something is unspecified, ASK — do not assume.
@@ -56,7 +56,7 @@ From the orchestrator:
 ## Loop guard
 
 - Stop when every branch of the architecture decision tree is resolved **OR** the hard budget is spent (20).
-- Gate `approved` → hand off to `sdd-rfc-author` (architecture branch only). You never start a new question just to keep going.
+- Gate `approved` → hand off to `rfc-author` (architecture branch only). You never start a new question just to keep going.
 - If the user asks you to stop early, STOP immediately and persist a `rejected`/`needs-changes` result — never force a full session.
 
 ## Execution and Persistence Contract
@@ -76,7 +76,7 @@ Artifact: you persist a **quest artifact** containing the **architecture RFC** s
 
 Follow **Section A** from `skills/_shared/sdd-phase-common.md`. You MUST load the `grilling` skill first — it owns the bounded, branch-following interview primitive and the question-budget discipline (Architecture 20).
 
-> **Runtime note (OpenCode):** the interviewer is the orchestrator. If you are the orchestrator and loaded this skill via `skill()`, run Steps 2–5 yourself against the user with your `question` tool. The `sdd-rfc-author` sub-agent is not used for the interview; after the user approves the RFC, the orchestrator launches it with the collected Q&A to draft the final canonical RFC, which the orchestrator persists as the binding mandate.
+> **Runtime note (OpenCode):** the interviewer is the orchestrator. If you are the orchestrator and loaded this skill via `skill()`, run Steps 2–5 yourself against the user with your `question` tool. The `rfc-author` sub-agent is not used for the interview; after the user approves the RFC, the orchestrator launches it with the collected Q&A to draft the final canonical RFC, which the orchestrator persists as the binding mandate.
 
 ### Step 2: Ground in the Approved Product RFC
 
@@ -156,8 +156,8 @@ Generate the branch's RFC using EXACTLY the fixed architecture schema (every sec
 ```
 
 - The RFC describes **architecture constraints, boundaries, interfaces and envelopes**, not a step-by-step implementation. Do not state a stack unless the user explicitly confirmed it as a requirement (then note it as a confirmed requirement).
-- **Binding mandate**: the approved architecture RFC is the binding source of truth for `sdd-architecture-plan` — the architecture plan's titled decisions must be resolvable against it.
-- **Delegation note (OpenCode):** When the artifact store is `engram`, `openspec`, or `hybrid`, the orchestrator may delegate the final RFC drafting to the `sdd-rfc-author` sub-agent after the gate approves (via `task()`) to produce the canonical artifact (`arch-rfc.md`). The interactive draft presented for user approval in this step remains the orchestrator's work; only the persistence-ready artifact is delegated.
+- **Binding mandate**: the approved architecture RFC is the binding source of truth for `architecture-plan` — the architecture plan's titled decisions must be resolvable against it.
+- **Delegation note (OpenCode):** When the artifact store is `engram`, `openspec`, or `hybrid`, the orchestrator may delegate the final RFC drafting to the `rfc-author` sub-agent after the gate approves (via `task()`) to produce the canonical artifact (`arch-rfc.md`). The interactive draft presented for user approval in this step remains the orchestrator's work; only the persistence-ready artifact is delegated.
 
 ### Step 7: The architecture RFC gate
 
@@ -167,7 +167,7 @@ Present the branch's RFC to the user and ask for EXPLICIT approval. Do NOT auto-
 
 ### Step 8: Persist the Quest Artifact (RFC)
 
-Persist per the Persistence Contract with the `## Approval:` header and the branch's full RFC schema. The `Approval:` value is the ONLY gate the routing uses to decide re-run vs skip vs proceed. **This is MANDATORY** when tied to a named change — do not skip it. If the orchestrator delegated the final RFC drafting to `sdd-rfc-author` after the gate approved (see Step 6 delegation note), persist the sub-agent's artifact output (`arch-rfc.md`); otherwise persist the branch RFC drafted in Step 6.
+Persist per the Persistence Contract with the `## Approval:` header and the branch's full RFC schema. The `Approval:` value is the ONLY gate the routing uses to decide re-run vs skip vs proceed. **This is MANDATORY** when tied to a named change — do not skip it. If the orchestrator delegated the final RFC drafting to `rfc-author` after the gate approved (see Step 6 delegation note), persist the sub-agent's artifact output (`arch-rfc.md`); otherwise persist the branch RFC drafted in Step 6.
 
 ### Step 9: Return the Envelope
 
@@ -190,7 +190,7 @@ Return the structured envelope per **Section D** from `skills/_shared/sdd-phase-
 - **`needs-changes` reopens ONLY the architecture branch**, within its remaining budget; no other branch is touched by the rejection.
 - **NEVER drag the stack into the RFC** unless the user confirms the stack choice as a requirement.
 - **Start AFTER exploration and the approved product RFC, from the findings.** Do not read the codebase during the interview; facts come from the exploration findings, the approved product RFC, and the user, with single bounded environment lookups delegated to a sub-agent only when necessary.
-- The **approved architecture RFC is the binding source of truth** for `sdd-architecture-plan` — not merely a recommendation.
+- The **approved architecture RFC is the binding source of truth** for `architecture-plan` — not merely a recommendation.
 - Ask the user directly via the host's question primitive. Do NOT delegate your interview to a sub-agent.
 - Keep the interview moving: after each answer, ask the NEXT question without pausing for a "continue" confirmation. Do not end the turn waiting for the user to say "continúa"/"go on" between questions. The interview only pauses for the user's explicit go-ahead at the RFC gate (Step 7).
 - If the user stops early, STOP and persist `rejected` or `needs-changes` — never force a full session.

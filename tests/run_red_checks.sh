@@ -37,7 +37,12 @@
 #   T57 axis-3 fixtures: AMBIGUOUS -> warning, nunca blocker (L4)
 #   T58 axis-3 fixtures: n-a-justified suprime (L5) + contradiction dual signal (L6/C7)
 #   T59 axis-3 fixtures: missing-checklist + translated-anchor fail-closed (C1/C2)
-#   T60 wiring (B5): sdd-architecture-plan agent key + allow-list
+#   T60 wiring (B5): architecture-plan agent key + allow-list
+#   T61 cleanup-sdd-own contrato: check/dry/real, sucesor requerido, inmunidad
+#       de _shared y dirs reales
+#   T62 cleanup-sdd-own R9: agents obsoletos del config opencode (derivados),
+#       splice byte-a-byte (orchestrator intacto), respaldo .bak.sdd-own,
+#       tombstones clase c (--purge-manual)
 #
 # Exit: 0 = todo verde (skips permitidos), 1 = fallos.
 # =============================================================================
@@ -694,7 +699,7 @@ t "T32 poda council/gates: allow-list sin council ni hard gates; skills/overlays
   for a in sdd-council sdd-hard-gate sdd-hard-verify sdd-pre-experience; do
     jq -e --arg a "$a" '.agent["gentle-orchestrator"].permission.task[$a] == null' "$w" >/dev/null 2>&1 || { ko "allow-list permite $a"; bad=1; }
   done
-  for a in sdd-architecture-plan sdd-architecture-lint sdd-rfc-author; do
+  for a in architecture-plan architecture-lint rfc-author; do
     jq -e --arg a "$a" '.agent["gentle-orchestrator"].permission.task[$a] == "allow"' "$w" >/dev/null 2>&1 || { ko "allow-list no permite $a"; bad=1; }
   done
   # Directories podados: skills/overlays de la era v2 ya no existen
@@ -725,42 +730,42 @@ t "T33 fragment wiring v3: orquestador solo permission; subagent_depth 2; sin __
   # subagent_depth top-level (R1) habilita el encadenamiento profundo
   jq -e '.subagent_depth == 2' "$w" >/dev/null 2>&1 || { ko "subagent_depth != 2"; bad=1; }
   # Los 3 agentes propios: hidden subagents, sin __managed_by, permission vacio (deny por default)
-  for a in sdd-architecture-plan sdd-architecture-lint sdd-rfc-author; do
+  for a in architecture-plan architecture-lint rfc-author; do
     jq -e --arg a "$a" '.agent[$a].mode == "subagent" and .agent[$a].hidden == true' "$w" >/dev/null 2>&1 || { ko "$a no es subagent hidden"; bad=1; }
     jq -e --arg a "$a" '(.agent[$a].permission | length) == 0' "$w" >/dev/null 2>&1 || { ko "$a con permission no vacio"; bad=1; }
     jq -e --arg a "$a" '.agent[$a] | has("__managed_by") | not' "$w" >/dev/null 2>&1 || { ko "$a con __managed_by"; bad=1; }
   done
   # arch-plan y rfc-author: prompts file-based apuntando a wiring/prompts/sdd
-  jq -e '.agent["sdd-architecture-plan"].prompt == "{file:./prompts/sdd/sdd-architecture-plan.md}"' "$w" >/dev/null 2>&1 || { ko "arch-plan sin prompt file-based"; bad=1; }
-  jq -e '.agent["sdd-rfc-author"].prompt == "{file:./prompts/sdd/sdd-rfc-author.md}"' "$w" >/dev/null 2>&1 || { ko "rfc-author sin prompt file-based"; bad=1; }
+  jq -e '.agent["architecture-plan"].prompt == "{file:./prompts/sdd/architecture-plan.md}"' "$w" >/dev/null 2>&1 || { ko "arch-plan sin prompt file-based"; bad=1; }
+  jq -e '.agent["rfc-author"].prompt == "{file:./prompts/sdd/rfc-author.md}"' "$w" >/dev/null 2>&1 || { ko "rfc-author sin prompt file-based"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
 t "T34 OWN_PROMPTS exacto: 2 prompts instalables (rfc-author + arch-plan), deploy loop, delegate_only"
 {
   bad=0
-  grep -q 'OWN_PROMPTS=(sdd-rfc-author.md sdd-architecture-plan.md)' "$REPO/sync-skills.sh" || { ko "OWN_PROMPTS no es (rfc-author, arch-plan)"; bad=1; }
-  for f in sdd-rfc-author.md sdd-architecture-plan.md; do
+  grep -q 'OWN_PROMPTS=(rfc-author.md architecture-plan.md)' "$REPO/sync-skills.sh" || { ko "OWN_PROMPTS no es (rfc-author, arch-plan)"; bad=1; }
+  for f in rfc-author.md architecture-plan.md; do
     [[ -f "$REPO/wiring/prompts/sdd/$f" ]] || { ko "wiring/prompts/sdd/$f ausente"; bad=1; }
   done
   grep -qF 'for pf in "${OWN_PROMPTS[@]}"' "$REPO/sync-skills.sh" || { ko "sync-skills.sh sin deploy loop de OWN_PROMPTS"; bad=1; }
   # Los prompts file-based de los 2 agentes propios definen el rol sub-agent:
   # el orquestador los llama como sub-agentes, no como skills full-install.
-  grep -q 'You are the `sdd-rfc-author` sub-agent' "$REPO/wiring/prompts/sdd/sdd-rfc-author.md" || { ko "rfc-author sin rol sub-agent"; bad=1; }
-  grep -q 'You are the dedicated `sdd-architecture-plan` SDD sub-agent' "$REPO/wiring/prompts/sdd/sdd-architecture-plan.md" || { ko "arch-plan sin rol sub-agent"; bad=1; }
+  grep -q 'You are the `rfc-author` sub-agent' "$REPO/wiring/prompts/sdd/rfc-author.md" || { ko "rfc-author sin rol sub-agent"; bad=1; }
+  grep -q 'You are the dedicated `architecture-plan` sub-agent' "$REPO/wiring/prompts/sdd/architecture-plan.md" || { ko "arch-plan sin rol sub-agent"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
 t "T35 acta fail-closed POST-apply: arch-plan.md MANDATORY, title-by-title, N/A solo trivial"
 {
   bad=0
-  al="$REPO/skills/sdd-architecture-lint/SKILL.md"
+  al="$REPO/skills/architecture-lint/SKILL.md"
   # D9 (v3 U1): axis 2 corre POST-apply contra el acta arch-plan.md; acta
   # ausente → fail-closed; el lint nunca corre pre-apply.
   grep -q 'post-apply' "$al" || { ko "arch-lint sin post-apply"; bad=1; }
   grep -q 'POST-apply' "$al" || { ko "arch-lint sin POST-apply (axis 2)"; bad=1; }
   grep -q 'arch-plan.md' "$al" || { ko "arch-lint sin acta arch-plan.md"; bad=1; }
-  grep -q 'MANDATORY input' "$al" || { ko "arch-lint sin acta MANDATORY"; bad=1; }
+  grep -q 'axis 2 input when the architecture-plan phase ran' "$al" || { ko "arch-lint sin axis-2 condicional fail-closed"; bad=1; }
   grep -q 'FAILS CLOSED' "$al" || { ko "arch-lint sin fail-closed"; bad=1; }
   grep -q 'title-by-title' "$al" || { ko "arch-lint sin title-by-title"; bad=1; }
   grep -q 'empty or trivial design' "$al" || { ko "arch-lint sin N/A-trivial"; bad=1; }
@@ -778,19 +783,19 @@ t "T36 quest gates (2 ramas): product-quest y arch-quest skills existen con dele
   bad=0
   # Las 2 skills de quest viven como full-install con delegate_only: el
   # orquestador las dispara como sub-agentes (nunca autoconsulta).
-  for sq in sdd-product-quest sdd-architecture-quest; do
+  for sq in product-quest architecture-quest; do
     [[ -f "$REPO/skills/$sq/SKILL.md" ]] || { ko "skills/$sq/SKILL.md ausente"; bad=1; }
     grep -q '^  delegate_only: true' "$REPO/skills/$sq/SKILL.md" || { ko "$sq sin delegate_only"; bad=1; }
   done
   # Product Quest: hard budget 50 y un RFC gate explicito
-  grep -q 'Product Quest = **50**' "$REPO/skills/sdd-product-quest/SKILL.md" || { ko "product-quest: sin budget 50"; bad=1; }
-  grep -q 'One explicit RFC gate' "$REPO/skills/sdd-product-quest/SKILL.md" || { ko "product-quest: sin RFC gate"; bad=1; }
+  grep -q 'Product Quest = **50**' "$REPO/skills/product-quest/SKILL.md" || { ko "product-quest: sin budget 50"; bad=1; }
+  grep -q 'One explicit RFC gate' "$REPO/skills/product-quest/SKILL.md" || { ko "product-quest: sin RFC gate"; bad=1; }
   # Architecture Quest: hard budget 20 y su propio RFC gate
-  grep -q 'Architecture Quest = **20**' "$REPO/skills/sdd-architecture-quest/SKILL.md" || { ko "arch-quest: sin budget 20"; bad=1; }
-  grep -q 'One explicit RFC gate' "$REPO/skills/sdd-architecture-quest/SKILL.md" || { ko "arch-quest: sin RFC gate"; bad=1; }
+  grep -q 'Architecture Quest = **20**' "$REPO/skills/architecture-quest/SKILL.md" || { ko "arch-quest: sin budget 20"; bad=1; }
+  grep -q 'One explicit RFC gate' "$REPO/skills/architecture-quest/SKILL.md" || { ko "arch-quest: sin RFC gate"; bad=1; }
   # Ambos gates SIEMPRE con intervencion humana (nunca auto-approve)
-  n1="$(grep -c 'never auto-approve\|NEVER auto-approve' "$REPO/skills/sdd-product-quest/SKILL.md")"
-  n2="$(grep -c 'never auto-approve\|NEVER auto-approve' "$REPO/skills/sdd-architecture-quest/SKILL.md")"
+  n1="$(grep -c 'never auto-approve\|NEVER auto-approve' "$REPO/skills/product-quest/SKILL.md")"
+  n2="$(grep -c 'never auto-approve\|NEVER auto-approve' "$REPO/skills/architecture-quest/SKILL.md")"
   [[ $((n1 + n2)) -ge 2 ]] || { ko "quests sin clausulas never auto-approve (n=$((n1 + n2)))"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
@@ -1058,7 +1063,7 @@ t "T48 poda prompts/skills: wiring/prompts/sdd con EXACTAMENTE 2 prompts; skills
   # v3 (poda total): los unicos prompts propios son rfc-author + arch-plan.
   n_prompts="$(ls "$REPO/wiring/prompts/sdd/"*.md 2>/dev/null | wc -l)"
   [[ "$n_prompts" == "2" ]] || { ko "wiring/prompts/sdd con $n_prompts prompts (esperado 2)"; bad=1; }
-  for f in sdd-rfc-author.md sdd-architecture-plan.md; do
+  for f in rfc-author.md architecture-plan.md; do
     [[ -f "$REPO/wiring/prompts/sdd/$f" ]] || { ko "wiring/prompts/sdd/$f ausente"; bad=1; }
   done
   # Skills podadas de la era U1/U2 no existen
@@ -1077,10 +1082,10 @@ t "T49 rfc-author prompt-defined: file-based en fragment, nunca skill target, br
   w="$REPO/wiring/opencode.sdd.json"
   # Q40 (v3): rfc-author y arch-plan son agentes prompt-defined ({file:...}),
   # NO skills full-install; el fragment apunta a wiring/prompts/sdd.
-  jq -e '.agent["sdd-rfc-author"].prompt == "{file:./prompts/sdd/sdd-rfc-author.md}"' "$w" >/dev/null 2>&1 || { ko "rfc-author sin prompt file-based"; bad=1; }
-  jq -e '.agent["sdd-architecture-plan"].prompt == "{file:./prompts/sdd/sdd-architecture-plan.md}"' "$w" >/dev/null 2>&1 || { ko "arch-plan sin prompt file-based"; bad=1; }
-  [[ -e "$REPO/skills/sdd-rfc-author" ]] && { ko "skills/sdd-rfc-author existe (debe ser prompt)"; bad=1; }
-  ra="$REPO/wiring/prompts/sdd/sdd-rfc-author.md"
+  jq -e '.agent["rfc-author"].prompt == "{file:./prompts/sdd/rfc-author.md}"' "$w" >/dev/null 2>&1 || { ko "rfc-author sin prompt file-based"; bad=1; }
+  jq -e '.agent["architecture-plan"].prompt == "{file:./prompts/sdd/architecture-plan.md}"' "$w" >/dev/null 2>&1 || { ko "arch-plan sin prompt file-based"; bad=1; }
+  [[ -e "$REPO/skills/rfc-author" ]] && { ko "skills/rfc-author existe (debe ser prompt)"; bad=1; }
+  ra="$REPO/wiring/prompts/sdd/rfc-author.md"
   grep -q 'branch-parametric' "$ra" || { ko "rfc-author: sin branch-parametric"; bad=1; }
   grep -q 'You NEVER interview the human' "$ra" || { ko "rfc-author: sin never-interview"; bad=1; }
   grep -q 'NEVER assemble both' "$ra" || { ko "rfc-author: sin never-assemble-both"; bad=1; }
@@ -1090,8 +1095,8 @@ t "T49 rfc-author prompt-defined: file-based en fragment, nunca skill target, br
 t "T50 quest split 50/20 + 2 gates: skills dedicadas con budgets, RFC gates y reopens-only-branch"
 {
   bad=0
-  pq="$REPO/skills/sdd-product-quest/SKILL.md"
-  aq="$REPO/skills/sdd-architecture-quest/SKILL.md"
+  pq="$REPO/skills/product-quest/SKILL.md"
+  aq="$REPO/skills/architecture-quest/SKILL.md"
   # Product Quest: budget 50 + RFC gate + reopen solo rama product
   grep -q 'Product Quest = \*\*50\*\*' "$pq" || { ko "product-quest: sin budget 50"; bad=1; }
   grep -q 'One explicit RFC gate' "$pq" || { ko "product-quest: sin RFC gate"; bad=1; }
@@ -1101,7 +1106,7 @@ t "T50 quest split 50/20 + 2 gates: skills dedicadas con budgets, RFC gates y re
   grep -q 'One explicit RFC gate' "$aq" || { ko "arch-quest: sin RFC gate"; bad=1; }
   grep -q 'reopens ONLY the architecture branch' "$aq" || { ko "arch-quest: sin reopen-only-arch"; bad=1; }
   # rfc-author: nunca entrevista al human ni ensambla ambos RFCs (branch-parametric)
-  ra="$REPO/wiring/prompts/sdd/sdd-rfc-author.md"
+  ra="$REPO/wiring/prompts/sdd/rfc-author.md"
   grep -Fq 'product-rfc.md` OR `arch-rfc.md' "$ra" || { ko "rfc-author: sin dual-artifact OR"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
@@ -1125,7 +1130,7 @@ t "T52 machinery podado ausente: sin sdd-attempt/hard-gate/pre-experience en rou
   n="$(grep -ciE 'sdd-attempt|hard.gate|hard.verify|pre.experience' "$rt")"
   [[ "$n" == "0" ]] || { ko "routing con $n menciones de machinery podada"; bad=1; }
   # El unico hook post-apply es el lint ALWAYS (segunda mirada antes de verify/archive)
-  grep -q 'sdd-architecture-lint always runs as the independent' "$rt" || { ko "routing: sin lint ALWAYS"; bad=1; }
+  grep -q 'architecture-lint ALWAYS runs as part of the apply' "$rt" || { ko "routing: sin lint ALWAYS"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
@@ -1152,27 +1157,27 @@ t "T53 Paso 3b en sync: orden 3 < 3b < 4 + salteado --skip-opencode + exit contr
 t "T54 arch-plan acta + user gate: post-spec pre-design, resolvable, fail-closed, user gate"
 {
   bad=0
-  ap="$REPO/wiring/prompts/sdd/sdd-architecture-plan.md"
+  ap="$REPO/wiring/prompts/sdd/architecture-plan.md"
   grep -q 'binding architecture plan acta' "$ap" || { ko "arch-plan: sin acta binding"; bad=1; }
   grep -q 'titled decisions' "$ap" || { ko "arch-plan: sin titled decisions"; bad=1; }
   grep -q 'resolvable against the inputs' "$ap" || { ko "arch-plan: sin resolvable"; bad=1; }
   grep -q 'fail-closed' "$ap" || { ko "arch-plan: sin fail-closed"; bad=1; }
   grep -q 'Design MUST NOT start until the user approves your plan' "$ap" || { ko "arch-plan: sin user gate"; bad=1; }
   # El routing encadena arch-rfc aprobado -> arquitectura-plan (acta binding)
-  grep -q 'An approved arch-rfc.md precedes sdd-architecture-plan' "$REPO/wiring/sdd-own-routing.md" || { ko "routing: sin cadena arch-rfc->plan"; bad=1; }
+  grep -q 'architecture-plan consumes the approved RFCs' "$REPO/wiring/sdd-own-routing.md" || { ko "routing: sin cadena RFCs->plan"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
 t "T55 arch-quest ODD triggers: mandato = approved Product RFC; budget 20; STOP/blocked sin mandato"
 {
   bad=0
-  aq="$REPO/skills/sdd-architecture-quest/SKILL.md"
+  aq="$REPO/skills/architecture-quest/SKILL.md"
   # El arch-quest arranca del Product RFC aprobado (mandato vinculante)
   grep -q 'approved Product RFC' "$aq" || { ko "arch-quest: sin mandato approved Product RFC"; bad=1; }
   grep -q 'Architecture Quest = **20**' "$aq" || { ko "arch-quest: sin budget 20"; bad=1; }
   grep -q 'STOP and report' "$aq" || { ko "arch-quest: sin STOP/report"; bad=1; }
   # En el routing: la rama de arquitectura exige design ahead o incertidumbre arq
-  grep -q 'substantial with' "$REPO/wiring/sdd-own-routing.md" || { ko "routing: sin condicion de incertidumbre"; bad=1; }
+  grep -q 'substantial/large and needs deeper planning' "$REPO/wiring/sdd-own-routing.md" || { ko "routing: sin condicion de incertidumbre"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
@@ -1200,7 +1205,7 @@ t "T55 poda hard-gate era: wiring/prompts/sdd sin hard-gate/hard-verify/pre-expe
 t "T54 plan checklist: anchor ## Principios no verificables (byte-exact Spanish), 21 rows, 3 states, evidence mandatory, translated rejected"
 {
   bad=0
-  pf="$REPO/wiring/prompts/sdd/sdd-architecture-plan.md"
+  pf="$REPO/wiring/prompts/sdd/architecture-plan.md"
   [[ -f "$pf" ]] || { ko "plan prompt ausente"; bad=1; }
   # C1/C2: the literal Spanish anchor MUST be present (byte-exact)
   grep -qF '## Principios no verificables' "$pf" || { ko "anchor '## Principios no verificables' ausente (C1/C2 fail-closed)"; bad=1; }
@@ -1242,7 +1247,7 @@ t "T50 catalog↔lint cross-check (S4): every catalog ID in lint, every lint ID 
 {
   bad=0
   catf="$REPO/skills/_shared/architecture-principles.md"
-  lintf="$REPO/skills/sdd-architecture-lint/SKILL.md"
+  lintf="$REPO/skills/architecture-lint/SKILL.md"
   [[ -f "$catf" ]] || { ko "catalog ausente"; bad=1; }
   [[ -f "$lintf" ]] || { ko "lint SKILL ausente"; bad=1; }
   if [[ $bad -eq 0 ]]; then
@@ -1379,8 +1384,8 @@ t "T53 quest arch rework v3: skill unificada PODADA (sdd-quest ausente); split p
   heads="$(grep -rl '^## Principles' "$REPO/skills" "$REPO/wiring" 2>/dev/null | wc -l)"
   [[ "$heads" == "1" ]] || { ko "corpus duplicado: $heads archivos con ## Principles (esperado 1)"; bad=1; }
   # Las 2 skills split existen y conservan sus budgets (regresion spec A1/A2)
-  grep -q 'Product Quest = **50**' "$REPO/skills/sdd-product-quest/SKILL.md" || { ko "Product Quest budget 50 alterado"; bad=1; }
-  grep -q 'Architecture Quest = **20**' "$REPO/skills/sdd-architecture-quest/SKILL.md" || { ko "Architecture Quest budget 20 alterado"; bad=1; }
+  grep -q 'Product Quest = **50**' "$REPO/skills/product-quest/SKILL.md" || { ko "Product Quest budget 50 alterado"; bad=1; }
+  grep -q 'Architecture Quest = **20**' "$REPO/skills/architecture-quest/SKILL.md" || { ko "Architecture Quest budget 20 alterado"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
@@ -1503,15 +1508,403 @@ t "T59 axis-3 fixtures: missing-checklist y translated-anchor fail-closed (C1/C2
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T60 wiring (B5): sdd-architecture-plan agent key (subagent, hidden, file-based) + orchestrator allow-list"
+t "T60 wiring (B5): architecture-plan agent key (subagent, hidden, file-based) + orchestrator allow-list"
 {
   bad=0
   w="$REPO/wiring/opencode.sdd.json"
-  jq -e '.agent["sdd-architecture-plan"] != null' "$w" >/dev/null 2>&1 || { ko "agente sdd-architecture-plan ausente"; bad=1; }
-  jq -e '.agent["sdd-architecture-plan"].mode == "subagent" and .agent["sdd-architecture-plan"].hidden == true and (.agent["sdd-architecture-plan"].permission | length) == 0' "$w" >/dev/null 2>&1 || { ko "sdd-architecture-plan mode/hidden/permission mal"; bad=1; }
-  jq -e '.agent["sdd-architecture-plan"].prompt == "{file:./prompts/sdd/sdd-architecture-plan.md}"' "$w" >/dev/null 2>&1 || { ko "sdd-architecture-plan sin prompt file-based (B4)"; bad=1; }
-  jq -e '.agent["gentle-orchestrator"].permission.task["sdd-architecture-plan"] == "allow"' "$w" >/dev/null 2>&1 || { ko "orchestrator no permite sdd-architecture-plan (allow-list B5)"; bad=1; }
-  [[ -f "$REPO/wiring/prompts/sdd/sdd-architecture-plan.md" ]] || { ko "wiring/prompts/sdd/sdd-architecture-plan.md ausente (B3)"; bad=1; }
+  jq -e '.agent["architecture-plan"] != null' "$w" >/dev/null 2>&1 || { ko "agente architecture-plan ausente"; bad=1; }
+  jq -e '.agent["architecture-plan"].mode == "subagent" and .agent["architecture-plan"].hidden == true and (.agent["architecture-plan"].permission | length) == 0' "$w" >/dev/null 2>&1 || { ko "architecture-plan mode/hidden/permission mal"; bad=1; }
+  jq -e '.agent["architecture-plan"].prompt == "{file:./prompts/sdd/architecture-plan.md}"' "$w" >/dev/null 2>&1 || { ko "architecture-plan sin prompt file-based (B4)"; bad=1; }
+  jq -e '.agent["gentle-orchestrator"].permission.task["architecture-plan"] == "allow"' "$w" >/dev/null 2>&1 || { ko "orchestrator no permite architecture-plan (allow-list B5)"; bad=1; }
+  [[ -f "$REPO/wiring/prompts/sdd/architecture-plan.md" ]] || { ko "wiring/prompts/sdd/architecture-plan.md ausente (B3)"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T61 cleanup-sdd-own: contrato (check/dry/real), sucesor requerido, _shared y Alan intactos"
+{
+  bad=0
+  cl="$REPO/cleanup-sdd-own.sh"
+  bash -n "$cl" || { ko "cleanup-sdd-own.sh: bash -n falla"; bad=1; }
+  [[ -x "$cl" ]] || { ko "cleanup-sdd-own.sh no es ejecutable"; bad=1; }
+  init_sandbox
+  SDD="$SB_HOME/.config/sdd-own"
+  mkdir -p "$SDD/skills/sdd-product-quest" "$SDD/skills/product-quest" \
+           "$SDD/prompts/sdd" \
+           "$SB_HOME/.agents/skills" "$SB_HOME/.config/opencode/skills" \
+           "$SB_HOME/.claude/skills" \
+           "$SB_HOME/.config/opencode/prompts/sdd" "$SB_HOME/.claude/prompts/sdd"
+  touch "$SDD/skills/sdd-product-quest/SKILL.md" "$SDD/skills/product-quest/SKILL.md"
+  touch "$SDD/prompts/sdd/sdd-rfc-author.md" "$SDD/prompts/sdd/rfc-author.md"
+  ln -s ../../.config/sdd-own/skills/sdd-product-quest "$SB_HOME/.agents/skills/sdd-product-quest"
+  ln -s ../../.config/sdd-own/skills/product-quest "$SB_HOME/.agents/skills/product-quest"
+  # grafía real del runtime: opencode guarda ../../../sdd-own/... (sin ".config/")
+  ln -s ../../../sdd-own/prompts/sdd/sdd-rfc-author.md "$SB_HOME/.config/opencode/prompts/sdd/sdd-rfc-author.md"
+  # no-sdd-own jamas tocados: dir real y _shared apuntando fuera de sdd-own
+  mkdir -p "$SB_HOME/.agents/skills/alan-real"
+  touch "$SB_HOME/.agents/skills/alan-real/SKILL.md"
+  ln -s "$SB_HOME/.agents/skills/_shared" "$SB_HOME/.config/opencode/skills/_shared"
+  run_env=("env" "HOME=$SB_HOME" "SDD_OWN_DIR=$SDD" "SDD_OWN_REPO=$REPO")
+  snapshot_tree "$SB_HOME" "$SB_TMP/t61-before.txt"
+  # --check: exit 1, lista stale, no muta
+  "${run_env[@]}" "$cl" --check > "$SB_TMP/t61-check.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 1 ]] || { ko "cleanup --check exit $rc != 1"; bad=1; }
+  grep -q 'symlink obsoleto' "$SB_TMP/t61-check.txt" || { ko "cleanup --check sin symlinks stale"; bad=1; }
+  snapshot_tree "$SB_HOME" "$SB_TMP/t61-mid.txt"
+  diff -q "$SB_TMP/t61-before.txt" "$SB_TMP/t61-mid.txt" >/dev/null || { ko "cleanup --check muto el HOME"; bad=1; }
+  # --dry-run: exit 1, WOULD-RM, no muta
+  "${run_env[@]}" "$cl" --dry-run > "$SB_TMP/t61-dry.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 1 ]] || { ko "cleanup --dry-run exit $rc != 1"; bad=1; }
+  grep -q 'WOULD-RM' "$SB_TMP/t61-dry.txt" || { ko "cleanup --dry-run sin WOULD-RM"; bad=1; }
+  snapshot_tree "$SB_HOME" "$SB_TMP/t61-dry2.txt"
+  diff -q "$SB_TMP/t61-before.txt" "$SB_TMP/t61-dry2.txt" >/dev/null || { ko "cleanup --dry-run muto el HOME"; bad=1; }
+  # flags: mezcla check+dry-run -> exit 1 ; flag desconocido -> exit 1
+  "${run_env[@]}" "$cl" --check --dry-run > "$SB_TMP/t61-mix.txt" 2>&1 && { ko "cleanup check+dry no fallo"; bad=1; }
+  "${run_env[@]}" "$cl" --bogus > "$SB_TMP/t61-bogus.txt" 2>&1 && { ko "cleanup --bogus no fallo"; bad=1; }
+  # real --yes: exit 0; stale fuera; nuevo/Alan/_shared intactos
+  "${run_env[@]}" "$cl" --yes > "$SB_TMP/t61-real.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 0 ]] || { ko "cleanup real exit $rc: $(tail -2 "$SB_TMP/t61-real.txt")"; bad=1; }
+  [[ ! -e "$SB_HOME/.agents/skills/sdd-product-quest" ]] || { ko "symlink stale no eliminado"; bad=1; }
+  [[ ! -e "$SDD/skills/sdd-product-quest" ]] || { ko "original stale no eliminado"; bad=1; }
+  [[ ! -e "$SB_HOME/.config/opencode/prompts/sdd/sdd-rfc-author.md" ]] || { ko "prompt stale no eliminado"; bad=1; }
+  [[ -L "$SB_HOME/.agents/skills/product-quest" ]] || { ko "symlink nuevo eliminado (no debe)"; bad=1; }
+  [[ -d "$SDD/skills/product-quest" ]] || { ko "original nuevo eliminado (no debe)"; bad=1; }
+  [[ -e "$SB_HOME/.agents/skills/alan-real/SKILL.md" ]] || { ko "dir real (Alan) tocado"; bad=1; }
+  [[ -L "$SB_HOME/.config/opencode/skills/_shared" ]] || { ko "_shared symlink tocado"; bad=1; }
+  # re-run --check post-limpieza: exit 0 (idempotente)
+  "${run_env[@]}" "$cl" --check > "$SB_TMP/t61-clean.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 0 ]] || { ko "cleanup post-limpieza exit $rc != 0"; bad=1; }
+  # sucesor ausente: real NO elimina nada y pide sync (exit 1)
+  init_sandbox
+  SDD2="$SB_HOME/.config/sdd-own"
+  mkdir -p "$SDD2/skills/sdd-product-quest" "$SB_HOME/.agents/skills"
+  touch "$SDD2/skills/sdd-product-quest/SKILL.md"
+  ln -s ../../.config/sdd-own/skills/sdd-product-quest "$SB_HOME/.agents/skills/sdd-product-quest"
+  run_env2=("env" "HOME=$SB_HOME" "SDD_OWN_DIR=$SDD2" "SDD_OWN_REPO=$REPO")
+  "${run_env2[@]}" "$cl" --yes > "$SB_TMP/t61-nosucc.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 1 ]] || { ko "cleanup sin sucesor exit $rc != 1"; bad=1; }
+  grep -q 'sync-skills.sh' "$SB_TMP/t61-nosucc.txt" || { ko "sin mensaje 'sync-skills.sh'"; bad=1; }
+  [[ -e "$SB_HOME/.agents/skills/sdd-product-quest" && -e "$SDD2/skills/sdd-product-quest" ]] || { ko "sin sucesor: eliminó algo (debe abortar sin mutar)"; bad=1; }
+  # real sin TTY y sin --yes: rechazado
+  "${run_env2[@]}" "$cl" < /dev/null > "$SB_TMP/t61-notty.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 1 ]] || { ko "real sin TTY/sin --yes exit $rc != 1"; bad=1; }
+  # huérfano de poda (sin contraparte canónica) junto a un rename-class:
+  # el huérfano NO bloquea ni se borra; el rename-class se limpia y el
+  # canónico nuevo sobrevive
+  init_sandbox
+  SDD3="$SB_HOME/.config/sdd-own"
+  mkdir -p "$SDD3/skills/sdd-council" "$SDD3/skills/sdd-product-quest" \
+           "$SDD3/skills/product-quest" "$SB_HOME/.agents/skills"
+  touch "$SDD3/skills/sdd-council/SKILL.md" "$SDD3/skills/sdd-product-quest/SKILL.md" \
+        "$SDD3/skills/product-quest/SKILL.md"
+  ln -s ../../.config/sdd-own/skills/sdd-council "$SB_HOME/.agents/skills/sdd-council"
+  ln -s ../../.config/sdd-own/skills/sdd-product-quest "$SB_HOME/.agents/skills/sdd-product-quest"
+  ln -s ../../.config/sdd-own/skills/product-quest "$SB_HOME/.agents/skills/product-quest"
+  run_env3=("env" "HOME=$SB_HOME" "SDD_OWN_DIR=$SDD3" "SDD_OWN_REPO=$REPO")
+  "${run_env3[@]}" "$cl" --check > "$SB_TMP/t61-orphan-check.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 1 ]] || { ko "huérfano: --check exit $rc != 1"; bad=1; }
+  grep -q 'sin contraparte canónica' "$SB_TMP/t61-orphan-check.txt" || { ko "huérfano: sin [MANUAL] de poda"; bad=1; }
+  grep -q 'original obsoleto' "$SB_TMP/t61-orphan-check.txt" || { ko "huérfano: sin rename-class en el plan"; bad=1; }
+  grep -q '\[STALE\]' "$SB_TMP/t61-orphan-check.txt" && { ko "huérfano: STALE no debe aparecer (poda no bloquea)"; bad=1; }
+  "${run_env3[@]}" "$cl" --yes > "$SB_TMP/t61-orphan-real.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 0 ]] || { ko "huérfano: real exit $rc != 0"; bad=1; }
+  [[ ! -e "$SDD3/skills/sdd-product-quest" && ! -L "$SB_HOME/.agents/skills/sdd-product-quest" ]] || { ko "huérfano: no limpió el rename-class"; bad=1; }
+  [[ -e "$SDD3/skills/product-quest" && -L "$SB_HOME/.agents/skills/product-quest" ]] || { ko "huérfano: canónico nuevo eliminado (no debe)"; bad=1; }
+  [[ ! -L "$SB_HOME/.agents/skills/sdd-council" ]] || { ko "huérfano: no retiró el symlink huérfano"; bad=1; }
+  [[ -d "$SDD3/skills/sdd-council" ]] || { ko "huérfano: borró el original manual"; bad=1; }
+  # re-check post: sigue exit 1 por el manual, sin obsoletos de rename
+  "${run_env3[@]}" "$cl" --check > "$SB_TMP/t61-orphan-after.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 1 ]] || { ko "huérfano: re-check exit $rc != 1 (queda manual)"; bad=1; }
+  grep -q 'sin contraparte canónica' "$SB_TMP/t61-orphan-after.txt" || { ko "huérfano: re-check sin manual"; bad=1; }
+  grep -q 'original obsoleto' "$SB_TMP/t61-orphan-after.txt" && { ko "huérfano: re-check con rename pendiente"; bad=1; }
+  # --purge-manual (opt-in explícito): el huérfano de poda se purga SOLO con el
+  # flag; la anomalía estructural (dir sin SKILL.md) NUNCA se purga; el
+  # canónico nuevo sobrevive
+  mkdir -p "$SDD3/skills/sin-skills-nota"
+  touch "$SDD3/skills/sin-skills-nota/leeme.txt"
+  "${run_env3[@]}" "$cl" --check --purge-manual > "$SB_TMP/t61-purge-check.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 1 ]] || { ko "purge: --check --purge-manual exit $rc != 1"; bad=1; }
+  grep -q '\[PURGE\]' "$SB_TMP/t61-purge-check.txt" || { ko "purge: sin [PURGE] en preview"; bad=1; }
+  grep -q 'sin contraparte canónica' "$SB_TMP/t61-purge-check.txt" || { ko "purge: preview sin [MANUAL] de poda"; bad=1; }
+  "${run_env3[@]}" "$cl" --purge-manual --yes > "$SB_TMP/t61-purge-real.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 0 ]] || { ko "purge: real exit $rc != 0: $(tail -2 "$SB_TMP/t61-purge-real.txt")"; bad=1; }
+  grep -q '\[OK\] purgado' "$SB_TMP/t61-purge-real.txt" || { ko "purge: sin [OK] purgado"; bad=1; }
+  [[ ! -d "$SDD3/skills/sdd-council" ]] || { ko "purge: huérfano de poda no purgado"; bad=1; }
+  [[ -e "$SDD3/skills/product-quest" && -L "$SB_HOME/.agents/skills/product-quest" ]] || { ko "purge: canónico nuevo eliminado (no debe)"; bad=1; }
+  [[ -d "$SDD3/skills/sin-skills-nota" ]] || { ko "purge: anomalía estructural purgada (nunca debe)"; bad=1; }
+  # re-check tras purge: queda SOLO la anomalía estructural (manual, exit 1)
+  "${run_env3[@]}" "$cl" --check > "$SB_TMP/t61-purge-after.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 1 ]] || { ko "purge: re-check exit $rc != 1 (anomalía manual)"; bad=1; }
+  grep -q 'sin SKILL.md' "$SB_TMP/t61-purge-after.txt" || { ko "purge: re-check sin anomalía"; bad=1; }
+  grep -q 'sin contraparte canónica' "$SB_TMP/t61-purge-after.txt" && { ko "purge: re-check con poda pendiente"; bad=1; }
+  # STALE + --purge-manual: el gate sigue bloqueando TODO el real (exit 1, sin mutar)
+  init_sandbox
+  SDDX="$SB_HOME/.config/sdd-own"
+  mkdir -p "$SDDX/skills/sdd-product-quest" "$SB_HOME/.agents/skills"
+  touch "$SDDX/skills/sdd-product-quest/SKILL.md"
+  ln -s ../../.config/sdd-own/skills/sdd-product-quest "$SB_HOME/.agents/skills/sdd-product-quest"
+  run_envx=("env" "HOME=$SB_HOME" "SDD_OWN_DIR=$SDDX" "SDD_OWN_REPO=$REPO")
+  "${run_envx[@]}" "$cl" --purge-manual --yes > "$SB_TMP/t61-purge-stale.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 1 ]] || { ko "purge+STALE: exit $rc != 1"; bad=1; }
+  grep -q 'sync-skills.sh' "$SB_TMP/t61-purge-stale.txt" || { ko "purge+STALE: sin mensaje sync"; bad=1; }
+  [[ -e "$SB_HOME/.agents/skills/sdd-product-quest" && -e "$SDDX/skills/sdd-product-quest" ]] || { ko "purge+STALE: mutó algo (debe abortar)"; bad=1; }
+  # symlink de prompt con target RELATIVO estilo opencode (../../../sdd-own/...,
+  # sin el literal .config/sdd-own/): la detección RESUELVE el target, no matchea texto
+  init_sandbox
+  SDD4="$SB_HOME/.config/sdd-own"
+  mkdir -p "$SDD4/skills/sdd-council" "$SDD4/prompts/sdd" \
+           "$SB_HOME/.agents/skills" "$SB_HOME/.config/opencode/prompts/sdd"
+  touch "$SDD4/skills/sdd-council/SKILL.md" "$SDD4/prompts/sdd/sdd-council.md"
+  ln -s ../../.config/sdd-own/skills/sdd-council "$SB_HOME/.agents/skills/sdd-council"
+  ln -s ../../../sdd-own/prompts/sdd/sdd-council.md "$SB_HOME/.config/opencode/prompts/sdd/sdd-council.md"
+  run_env4=("env" "HOME=$SB_HOME" "SDD_OWN_DIR=$SDD4" "SDD_OWN_REPO=$REPO")
+  "${run_env4[@]}" "$cl" --check > "$SB_TMP/t61-rel-check.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 1 ]] || { ko "rel: --check exit $rc != 1"; bad=1; }
+  grep -q 'opencode/prompts/sdd/sdd-council.md' "$SB_TMP/t61-rel-check.txt" || { ko "rel: symlink relativo no detectado"; bad=1; }
+  "${run_env4[@]}" "$cl" --yes > "$SB_TMP/t61-rel-real.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 0 ]] || { ko "rel: real exit $rc != 0"; bad=1; }
+  [[ ! -e "$SB_HOME/.config/opencode/prompts/sdd/sdd-council.md" ]] || { ko "rel: symlink relativo no eliminado"; bad=1; }
+  [[ -d "$SDD4/skills/sdd-council" && -f "$SDD4/prompts/sdd/sdd-council.md" ]] || { ko "rel: borró original (sin purge no debe)"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+# ---------------------------------------------------------------------------
+# T62 — R9: poda de agentes obsoletos del config real de opencode. La
+# detección es DERIVADA (prompt {file:./prompts/sdd/*.md} con archivo ausente
+# o tombstone <=1 byte; o prompt inline que referencia skill sin desplegar).
+# El splice es quirúrgico: el resto del archivo (comentarios, orchestrator
+# inline, default_agent, mcp) se preserva byte a byte; respaldo .bak.sdd-own.
+# Fixture: JSONC con comentarios reales, 6 stale derivados (incluyendo un run
+# de stale al FINAL del registro para la extensión backward del splice) y
+# agentes válidos que jamás deben tocarse.
+t62_mkfixture() {
+  mkdir -p "$SB_HOME/.config/opencode/prompts/sdd" \
+           "$SB_HOME/.agents/skills/architecture-lint" \
+           "$SB_HOME/.config/opencode/skills/sdd-research"
+  touch "$SB_HOME/.agents/skills/architecture-lint/SKILL.md" \
+        "$SB_HOME/.config/opencode/skills/sdd-research/SKILL.md"
+  printf 'body\n' > "$SB_HOME/.config/opencode/prompts/sdd/sdd-apply.md"
+  printf 'body\n' > "$SB_HOME/.config/opencode/prompts/sdd/rfc-author.md"
+  printf 'a' > "$SB_HOME/.config/opencode/prompts/sdd/sdd-council.md" # tombstone <=1 byte
+  cat > "$SB_HOME/.config/opencode/opencode.jsonc" <<'EOF62'
+{
+  // header comment must survive
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    /* registry block comment must survive */
+    "gentle-orchestrator": {
+      "prompt": "long inline orchestrator {\"a\": \"x:y\"} // not a comment /* not a block */ {\"nested\": [1,2,3]} // still text \u007b\u007d SENTINEL_ORCH_END_42"
+    },
+    "sdd-apply": { "prompt": "{file:./prompts/sdd/sdd-apply.md}" },
+    // line comment between keep keys must survive
+    "rfc-author": { "prompt": "{file:./prompts/sdd/rfc-author.md}" },
+    "sdd-council": { "prompt": "{file:./prompts/sdd/sdd-council.md}" },
+    "sdd-hard-gate": { "prompt": "{file:./prompts/sdd/sdd-hard-gate.md}" },
+    "sdd-archive": { "prompt": "{file:./prompts/sdd/sdd-archive.md}" },
+    "architecture-lint": { "prompt": "read ~/.agents/skills/architecture-lint/SKILL.md" },
+    "sdd-research": { "prompt": "read ~/.config/opencode/skills/sdd-research/SKILL.md" },
+    "my-custom-agent": { "prompt": "inline no file no skill" },
+    // comment before trailing stale run must survive
+    "sdd-council-arch": { "prompt": "read ~/.agents/skills/sdd-council/SKILL.md" },
+    "sdd-changelog": { "prompt": "read ~/.config/opencode/skills/sdd-changelog/SKILL.md" },
+    "sdd-council-product": { "prompt": "read ~/.claude/skills/sdd-council/SKILL.md" }
+  },
+  "default_agent": "gentle-orchestrator",
+  "mcp": { "x": { "url": "http://a" } }
+}
+EOF62
+}
+
+# F3: compara el objeto gentle-orchestrator COMPLETO (prompt largo multi-escape)
+# antes vs después de la poda; exit 0 solo si es idéntico.
+t62_orch_equals() { # $1 cfg-before, $2 cfg-after
+  python3 - "$1" "$2" <<'PY62'
+import json, sys
+def strip(s):
+    out=[]; n=len(s); i=0; st="NORMAL"
+    while i<n:
+        c=s[i]
+        if st=="STRING":
+            out.append(c)
+            if c=="\\":
+                i+=1
+                if i<n: out.append(s[i])
+                i+=1
+            elif c=='"':
+                st="NORMAL"; i+=1
+            else:
+                i+=1
+            continue
+        if st=="LINE":
+            if c=="\n": st="NORMAL"; out.append(c)
+            i+=1; continue
+        if st=="BLOCK":
+            if c=="*" and i+1<n and s[i+1]=="/": st="NORMAL"; i+=2
+            else: i+=1
+            continue
+        if c=='"': st="STRING"; out.append(c); i+=1
+        elif c=="/" and i+1<n and s[i+1]=="/": st="LINE"; i+=2
+        elif c=="/" and i+1<n and s[i+1]=="*": st="BLOCK"; i+=2
+        elif c==",":
+            j=i+1
+            while j<n:
+                ch=s[j]
+                if ch in " \t\r\n":
+                    j+=1; continue
+                if ch=="/" and j+1<n and s[j+1]=="/":
+                    k2=s.find("\n", j)
+                    j=n if k2<0 else k2+1
+                    continue
+                if ch=="/" and j+1<n and s[j+1]=="*":
+                    k2=s.find("*/", j+2)
+                    j=n if k2<0 else k2+2
+                    continue
+                break
+            if j<n and s[j] in "}]": i+=1
+            else: out.append(c); i+=1
+        else: out.append(c); i+=1
+    return "".join(out)
+def orch(path):
+    raw=open(path, encoding="utf-8").read()
+    return json.loads(strip(raw))["agent"]["gentle-orchestrator"]
+a=orch(sys.argv[1]); b=orch(sys.argv[2])
+sys.exit(0 if a==b else 1)
+PY62
+}
+
+t "T62a R9: --check reporta [CFG] stale derivados y NO muta el config"
+{
+  bad=0
+  cl="$REPO/cleanup-sdd-own.sh"
+  init_sandbox
+  t62_mkfixture
+  CFG="$SB_HOME/.config/opencode/opencode.jsonc"
+  cfg_md5="$(md5sum "$CFG" | awk '{print $1}')"
+  run_env=("env" "HOME=$SB_HOME" "SDD_OWN_DIR=$SB_HOME/.config/sdd-own" "SDD_OWN_REPO=$REPO")
+  "${run_env[@]}" "$cl" --check > "$SB_TMP/t62a-check.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 1 ]] || { ko "T62a --check exit $rc != 1"; bad=1; }
+  n_cfg="$(grep -c '\[CFG\].*is obsolete' "$SB_TMP/t62a-check.txt")"
+  [[ "$n_cfg" -eq 6 ]] || { ko "T62a [CFG] lines $n_cfg != 6"; bad=1; }
+  grep -q 'sdd-council' "$SB_TMP/t62a-check.txt" || { ko "T62a sdd-council no reportado"; bad=1; }
+  grep -q 'gentle-orchestrator' "$SB_TMP/t62a-check.txt" && { ko "T62a gentle-orchestrator reportado (nunca)"; bad=1; }
+  grep -q '\[MANUAL\].*tombstone' "$SB_TMP/t62a-check.txt" || { ko "T62a sin [MANUAL] tombstone (clase c)"; bad=1; }
+  [[ "$cfg_md5" == "$(md5sum "$CFG" | awk '{print $1}')" ]] || { ko "T62a --check mutó el config"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T62b R9: --dry-run imprime WOULD-EDIT y NO muta el config"
+{
+  bad=0
+  cl="$REPO/cleanup-sdd-own.sh"
+  init_sandbox
+  t62_mkfixture
+  CFG="$SB_HOME/.config/opencode/opencode.jsonc"
+  cfg_md5="$(md5sum "$CFG" | awk '{print $1}')"
+  run_env=("env" "HOME=$SB_HOME" "SDD_OWN_DIR=$SB_HOME/.config/sdd-own" "SDD_OWN_REPO=$REPO")
+  "${run_env[@]}" "$cl" --dry-run > "$SB_TMP/t62b-dry.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 1 ]] || { ko "T62b --dry-run exit $rc != 1"; bad=1; }
+  n_we="$(grep -c 'WOULD-EDIT opencode config' "$SB_TMP/t62b-dry.txt")"
+  [[ "$n_we" -eq 6 ]] || { ko "T62b WOULD-EDIT lines $n_we != 6"; bad=1; }
+  grep -q "WOULD-EDIT opencode config: remove obsolete agent 'sdd-council'" "$SB_TMP/t62b-dry.txt" || { ko "T62b sin WOULD-EDIT sdd-council"; bad=1; }
+  [[ "$cfg_md5" == "$(md5sum "$CFG" | awk '{print $1}')" ]] || { ko "T62b --dry-run mutó el config"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T62c R9: real --purge-manual poda el config byte-a-byte (orchestrator intacto)"
+{
+  bad=0
+  cl="$REPO/cleanup-sdd-own.sh"
+  init_sandbox
+  t62_mkfixture
+  CFG="$SB_HOME/.config/opencode/opencode.jsonc"
+run_env=("env" "HOME=$SB_HOME" "SDD_OWN_DIR=$SB_HOME/.config/sdd-own" "SDD_OWN_REPO=$REPO")
+  cp "$CFG" "$SB_TMP/t62c-cfg-before.jsonc"
+  "${run_env[@]}" "$cl" --purge-manual --yes > "$SB_TMP/t62c-real.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 0 ]] || { ko "T62c real exit $rc: $(tail -2 "$SB_TMP/t62c-real.txt")"; bad=1; }
+  grep -q 'config pruned' "$SB_TMP/t62c-real.txt" || { ko "T62c sin [OK] config pruned"; bad=1; }
+  for a in sdd-council sdd-hard-gate sdd-archive sdd-council-arch sdd-changelog sdd-council-product; do
+    grep -qF "\"$a\":" "$CFG" && { ko "T62c stale '$a' sigue en el config"; bad=1; }
+  done
+  for a in sdd-apply rfc-author architecture-lint sdd-research my-custom-agent; do
+    grep -qF "\"$a\":" "$CFG" || { ko "T62c agente válido '$a' eliminado"; bad=1; }
+  done
+  grep -qF '"gentle-orchestrator":' "$CFG" || { ko "T62c gentle-orchestrator eliminado"; bad=1; }
+  t62_orch_equals "$SB_TMP/t62c-cfg-before.jsonc" "$CFG" || { ko "T62c orchestrator mutado (objeto no idéntico)"; bad=1; }
+  grep -qF 'SENTINEL_ORCH_END_42' "$CFG" || { ko "T62c sentinela del prompt orquestador perdido"; bad=1; }
+  grep -qF '// comment before trailing stale run must survive' "$CFG" || { ko "T62c comentario antes del trailing run perdido"; bad=1; }
+  grep -qF '// header comment' "$CFG" || { ko "T62c header comment perdido"; bad=1; }
+  grep -qF '/* registry block comment' "$CFG" || { ko "T62c registry block comment perdido"; bad=1; }
+  grep -qF '// line comment between keep keys' "$CFG" || { ko "T62c line comment entre keep perdido"; bad=1; }
+  grep -qF '"default_agent": "gentle-orchestrator"' "$CFG" || { ko "T62c default_agent mutado"; bad=1; }
+  [[ -f "$CFG.bak.sdd-own" ]] || { ko "T62c sin respaldo .bak.sdd-own"; bad=1; }
+  cmp -s "$SB_TMP/t62c-cfg-before.jsonc" "$CFG.bak.sdd-own" || { ko "T62c respaldo != config original"; bad=1; }
+  [[ ! -e "$SB_HOME/.config/opencode/prompts/sdd/sdd-council.md" ]] || { ko "T62c tombstone no purgado"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T62d R9: post-poda --check/--dry-run exit 0 (idempotente)"
+{
+  bad=0
+  cl="$REPO/cleanup-sdd-own.sh"
+  init_sandbox
+  t62_mkfixture
+  CFG="$SB_HOME/.config/opencode/opencode.jsonc"
+  run_env=("env" "HOME=$SB_HOME" "SDD_OWN_DIR=$SB_HOME/.config/sdd-own" "SDD_OWN_REPO=$REPO")
+  "${run_env[@]}" "$cl" --purge-manual --yes > "$SB_TMP/t62d-real.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 0 ]] || { ko "T62d real exit $rc != 0"; bad=1; }
+  "${run_env[@]}" "$cl" --check > "$SB_TMP/t62d-check.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 0 ]] || { ko "T62d re-check exit $rc != 0: $(cat "$SB_TMP/t62d-check.txt")"; bad=1; }
+  grep -q 'limpio' "$SB_TMP/t62d-check.txt" || { ko "T62d re-check sin 'limpio'"; bad=1; }
+  "${run_env[@]}" "$cl" --dry-run > "$SB_TMP/t62d-dry.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 0 ]] || { ko "T62d re-dry exit $rc != 0"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+t "T62e R9: tombstones clase c — [MANUAL], sobreviven sin --purge-manual"
+{
+  bad=0
+  cl="$REPO/cleanup-sdd-own.sh"
+  init_sandbox
+  SDD="$SB_HOME/.config/sdd-own"
+  mkdir -p "$SB_HOME/.config/opencode/prompts/sdd"
+  printf 'a' > "$SB_HOME/.config/opencode/prompts/sdd/sdd-council.md" # tombstone
+  run_env=("env" "HOME=$SB_HOME" "SDD_OWN_DIR=$SDD" "SDD_OWN_REPO=$REPO")
+  "${run_env[@]}" "$cl" --check > "$SB_TMP/t62e-check.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 1 ]] || { ko "T62e --check exit $rc != 1 (tombstone manual)"; bad=1; }
+  grep -q '\[MANUAL\].*tombstone' "$SB_TMP/t62e-check.txt" || { ko "T62e sin [MANUAL] tombstone"; bad=1; }
+  "${run_env[@]}" "$cl" --yes > "$SB_TMP/t62e-real.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 0 ]] || { ko "T62e real sin purge exit $rc != 0"; bad=1; }
+  [[ -f "$SB_HOME/.config/opencode/prompts/sdd/sdd-council.md" ]] || { ko "T62e tombstone purgado sin flag"; bad=1; }
+  grep -q '\[CFG\]' "$SB_TMP/t62e-real.txt" && { ko "T62e config tocado sin stale derivados"; bad=1; }
+  "${run_env[@]}" "$cl" --purge-manual --yes > "$SB_TMP/t62e-purge.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 0 ]] || { ko "T62e purge exit $rc != 0"; bad=1; }
+  [[ ! -e "$SB_HOME/.config/opencode/prompts/sdd/sdd-council.md" ]] || { ko "T62e tombstone no purgado con flag"; bad=1; }
+  "${run_env[@]}" "$cl" --check > "$SB_TMP/t62e-clean.txt" 2>&1
+  rc=$?
+  [[ $rc -eq 0 ]] || { ko "T62e re-check exit $rc != 0: $(cat "$SB_TMP/t62e-clean.txt")"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 

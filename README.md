@@ -16,9 +16,9 @@ Cada carpeta es nuestra y se **full-instala**: la copia física ORIGINAL va a `~
 
 | Skill | Rol |
 |-------|-----|
-| `sdd-product-quest` | **Product Quest (rama product del RFC pre-pass):** entrevista acotada UNA pregunta a la vez (tope duro de 50) + gate RFC explícito (`Approval: approved`); produce `product-rfc.md` (mandato vinculante). Corre DESPUÉS del explore. En SDD explícito es obligatorio; en ODD se ofrece solo si el orquestador detecta ≥2 decisiones de producto sin resolver. |
-| `sdd-architecture-quest` | **Architecture Quest (rama architecture):** entrevista acotada (tope duro de 20) + gate RFC; produce `arch-rfc.md` antes del arch-plan/design, solo cuando hay incertidumbre de arquitectura. |
-| `sdd-architecture-lint` | Segunda mirada independiente POST-apply: verifica el acta `arch-plan.md` título por título contra el diseño Y la implementación, y la implementación contra el catálogo compartido de principios (P01..P10/A01..A11, eje 3 con veredicto independiente). **Siempre-on en SDD, antes de verify/archive.** |
+| `product-quest` | **Product Quest (rama product del RFC pre-pass):** entrevista acotada UNA pregunta a la vez (tope duro de 50) + gate RFC explícito (`Approval: approved`); produce `product-rfc.md` (mandato vinculante). Corre SIEMPRE después del explore (ODD y SDD). |
+| `architecture-quest` | **Architecture Quest (rama architecture):** entrevista acotada (tope duro de 20) + gate RFC; produce `arch-rfc.md`. Corre cuando el pedido involucra producto/features o decisiones de arquitectura; cambios mecánicos o solo de documentación pueden saltearla. |
+| `architecture-lint` | Segunda mirada independiente POST-apply, como parte de la verificación del apply: verifica contra los RFCs generados (`product-rfc.md` / `arch-rfc.md`), el acta `arch-plan.md` cuando se produjo (fail-closed si el arch-plan corrió pero el acta falta), y la implementación contra el catálogo compartido de principios (P01..P10/A01..A11, eje 3 con veredicto independiente). **Siempre corre después del apply.** |
 | `skill-sdd-blueprint` | Reference/patrón para crear skills SDD nuevas sin tocar `nextRecommended` ni sobre-ingeniar. |
 | `ui-design` | Decisiones de UI (dark luxury / premium), diseño de sistemas, accesibilidad. |
 | `web-search` | Búsqueda web con preferencia por MCP dedicados (donsetch, context7). |
@@ -59,8 +59,8 @@ En la poda v3 quedó **UN solo overlay**: las carpetas `overlays/skills/` (quest
 ### Wiring (`wiring/`)
 
 - `wiring/sdd-own-routing.md` — **routing extension**: nuestro ÚNICO gancho sobre el prompt del orquestador. El Paso 3b del sync lo inyecta como bloque `sdd-own:agent-routing` dentro de la sección `<!-- gentle-ai:agent-routing -->` del prompt INLINE de Alan (strip+append idempotente; maneja el formato PLAIN y JSON-escaped del prompt almacenado). NUNCA se toca una línea del prompt de Alan.
-- `wiring/prompts/sdd/sdd-rfc-author.md` — prompt del subagente autor de los RFCs (recibe las Q&A recolectadas, **no entrevista**, branch-parametric: ensambla UNA rama por corrida).
-- `wiring/prompts/sdd/sdd-architecture-plan.md` — prompt del subagente que produce el `arch-plan.md` (acta con decisiones tituladas + user gate).
+- `wiring/prompts/sdd/rfc-author.md` — prompt del subagente autor de los RFCs (recibe las Q&A recolectadas, **no entrevista**, branch-parametric: ensambla UNA rama por corrida).
+- `wiring/prompts/sdd/architecture-plan.md` — prompt del subagente que produce el `arch-plan.md` (acta con decisiones tituladas + user gate).
 - `wiring/opencode.sdd.json` — fragmento merge-safe con los agentes SDD (se mergea sobre el config real de opencode; ver sección de merge).
 
 Alan **no gestiona** esos 2 prompts; el prompt del orquestador ya NO es nuestro (lo porta inline gentle-ai v3 en el config real) y los prompts de fase de Alan (`sdd-apply.md`, etc.) viven en el mismo directorio y NO se tocan.
@@ -72,7 +72,7 @@ Alan **no gestiona** esos 2 prompts; el prompt del orquestador ya NO es nuestro 
 El flujo del sync (en orden):
 
 1. **Paso 0 — `gentle-ai sync`**: instala/resetea las bases canónicas de Alan (skills, commands, prompts). Solo en modo real; con `--skip-gentleai-sync` se omite; si el binario no está en PATH, avisa y sigue.
-2. **Paso 1 — install de lo nuestro**: skills exclusivas (original en `~/.config/sdd-own/skills/<skill>/` + symlinks en `~/.agents/skills/<skill>/`, `~/.config/opencode/skills/<skill>/` y `~/.claude/skills/<skill>/`), bootstrap de `_shared` (solo si falta: copia a `~/.config/sdd-own/skills/_shared/` y al directorio real compartido `~/.agents/skills/_shared/`, con los `_shared` de opencode/claude como symlinks al compartido), y los prompts propios (`sdd-rfc-author.md`, `sdd-architecture-plan.md`) a `~/.config/sdd-own/prompts/sdd/` (+ symlink por archivo en `~/.config/opencode/prompts/sdd/` y `~/.claude/prompts/sdd/`).
+2. **Paso 1 — install de lo nuestro**: skills exclusivas (original en `~/.config/sdd-own/skills/<skill>/` + symlinks en `~/.agents/skills/<skill>/`, `~/.config/opencode/skills/<skill>/` y `~/.claude/skills/<skill>/`), bootstrap de `_shared` (solo si falta: copia a `~/.config/sdd-own/skills/_shared/` y al directorio real compartido `~/.agents/skills/_shared/`, con los `_shared` de opencode/claude como symlinks al compartido), y los prompts propios (`rfc-author.md`, `architecture-plan.md`) a `~/.config/sdd-own/prompts/sdd/` (+ symlink por archivo en `~/.config/opencode/prompts/sdd/` y `~/.claude/prompts/sdd/`).
 3. **Paso 2 — overlays**: strip+append de cada `overlays/**` sobre su target de Alan (en v3: el único superviviente es `overlays/shared/sdd-phase-common.md`). Si el target no existe → **ERROR** explícito (probablemente `gentle-ai sync` no instaló esa skill; nunca se crea el base).
 4. **Paso 3 — merge opencode**: fragmento SDD sobre el config real (detecta `.jsonc` primero, si no `.json`).
 5. **Paso 3b — routing extension**: inyecta `wiring/sdd-own-routing.md` como bloque `sdd-own:agent-routing` dentro de la sección `agent-routing` del prompt inline del orquestador en el config real de opencode (`sync_routing_extension()`, idempotente, respeta `--check`/`--dry-run`).
@@ -103,7 +103,7 @@ Salida (exit code): `0` = sincronizado / verificado sin desyncs (cero desyncs), 
 
 #### Merge de opencode (fragmento SDD)
 
-El repo versiona **`wiring/opencode.sdd.json`**, un fragmento merge-safe que contiene SOLO claves SDD: `$schema`, `agent` (la entrada `gentle-orchestrator` — que porta SOLO `permission`, el allow-list — y los agentes propios `sdd-rfc-author`, `sdd-architecture-plan`, `sdd-architecture-lint`), `default_agent` y la llave sancionada `subagent_depth`. El sync lo mergea sobre el config real de opencode — que puede llamarse `opencode.json` o `opencode.jsonc` (opencode resuelve `.jsonc` primero si ambos existen; el script lo detecta y mergea sobre ese):
+El repo versiona **`wiring/opencode.sdd.json`**, un fragmento merge-safe que contiene SOLO claves SDD: `$schema`, `agent` (la entrada `gentle-orchestrator` — que porta SOLO `permission`, el allow-list — y los agentes propios `rfc-author`, `architecture-plan`, `architecture-lint`), `default_agent` y la llave sancionada `subagent_depth`. El sync lo mergea sobre el config real de opencode — que puede llamarse `opencode.json` o `opencode.jsonc` (opencode resuelve `.jsonc` primero si ambos existen; el script lo detecta y mergea sobre ese):
 
 - **Añade** los agentes SDD que falten y **actualiza** los existentes (`description`, `mode`, `hidden`, `permission`, `prompt` — solo en agentes propios, como `{file:./prompts/sdd/...}` — `variant`).
 - **Preserva todo lo personal**: `providers`, `mcp`, `permission`, `models`, `share`, otros agentes y `default_agent` si ya está seteado. Nada se borra; las claves del fragmento ganan solo en las claves SDD.
@@ -114,6 +114,20 @@ El repo versiona **`wiring/opencode.sdd.json`**, un fragmento merge-safe que con
 #### Refresh de registries (`.atl/`)
 
 `./sync-skills.sh --registries <proyecto1> <proyecto2> ...` ejecuta `gentle-ai skill-registry refresh --force` en cada proyecto listado (con el proyecto como cwd) después del sync. Requiere el CLI `gentle-ai` en el PATH; si no está, avisa y omite el paso. El `.atl/` de cada proyecto es local (contiene rutas absolutas) y está gitignoreado. Con `--check`/`--dry-run` solo reporta estado (`[FALTA]` / `[pendiente]`) sin ejecutar nada.
+
+#### Limpieza post-rename (`cleanup-sdd-own.sh`)
+
+El sync despliega nombres nuevos pero **nunca poda**: tras un rename propio quedan copias originales en `~/.config/sdd-own/` y symlinks viejos en los directorios de agentes. `cleanup-sdd-own.sh` retira SOLO esos artefactos, después de correr el sync real:
+
+```bash
+./sync-skills.sh                    # primero: despliega los nombres nuevos
+./cleanup-sdd-own.sh --check        # lista lo obsoleto (exit 0 = limpio, 1 = hay trabajo)
+./cleanup-sdd-own.sh --dry-run      # imprime los rm EXACTOS sin mutar nada
+./cleanup-sdd-own.sh                # real: plan + confirmación y/N (o --yes sin TTY)
+./cleanup-sdd-own.sh --purge-manual # real + purga los [MANUAL] de poda (opt-in)
+```
+
+Rejas: la "verdad" canónica es el repo (`skills/*` + `wiring/prompts/sdd/*.md`); en los directorios de agentes se eliminan SOLO symlinks que apunten dentro de `$SDD_OWN_DIR` — el target se RESUELVE (`readlink -f`) para cubrir las grafías relativas de cada runtime (opencode guarda `../../../sdd-own/...`, claude `../../../.config/sdd-own/...`), nunca se matchea el texto del target; `_shared` se excluye siempre; un obsoleto `sdd-<name>` solo se borra si su sucesor `<name>` está canónico en el repo **y** ya instalado (si falta desplegar → `[STALE]` y aborta sin mutar nada); los obsoletos sin contraparte canónica (poda/eliminación, ej. `sdd-council` tras la poda v3) van a `[MANUAL]`: nunca se borran automáticamente ni bloquean la limpieza del resto, y solo se eliminan con `--purge-manual` explícito. Las anomalías estructurales (directorio sin `SKILL.md`, symlink dentro de sdd-own) jamás se tocan, ni con `--purge-manual`. El refresh de `.atl/` es aparte (`--registries`). Variables de entorno para aislar pruebas: `SDD_OWN_DIR`, `SDD_OWN_REPO`.
 
 #### Quick-start (clonar el repo)
 
@@ -178,16 +192,16 @@ El pipeline de gentle-ai v3 (ODD-first) es nativo; este repo NO lo reemplaza. Nu
 
 ![Flujo SDD configurado](docs/diagrams/sdd-flow.png)
 
-Diagrama del pipeline SDD que configura este repo (generado con nuestra skill `archify`). Camino principal — `ODD nativo → Explore → Product Quest (budget 50) → RFC gate → Architecture Quest (budget 20) → RFC gate → Architecture Plan (acta + user gate) → Design → Tasks → Apply → Architecture Lint (post-apply) → Verify + Archive`. En ODD puro (sin quest) el flujo es el nativo de gentle-ai. El council de 3 lentes (era U2) fue retirado del flujo canónico (maquinaria retenida, no invocable desde el orquestador).
+Diagrama del pipeline SDD que configura este repo (generado con nuestra skill `archify`). Camino principal — `ODD nativo → Explore → Product Quest (budget 50) → RFC gate → Architecture Quest (budget 20, cuando hay superficie de producto/arquitectura) → RFC gate → Architecture Plan (solo cambios sustanciales, acta + user gate) → Design → Tasks → Apply → Architecture Lint (post-apply, contra los RFCs + acta) → Verify + Archive`. En cambios mecánicos o solo de documentación el flujo saltea ambas quests; si además el cambio no es sustancial, saltea también el Architecture Plan. El council de 3 lentes (era U2) fue retirado del flujo canónico (maquinaria retenida, no invocable desde el orquestador).
 
 - **HTML interactivo**: [`docs/diagrams/sdd-flow.html`](docs/diagrams/sdd-flow.html) (autocontenido, ábrelo en el navegador; incluye 3 vistas guiadas).
 - **Fuente editable**: [`docs/diagrams/sdd-flow.workflow.json`](docs/diagrams/sdd-flow.workflow.json) (JSON IR schema v2; editar y re-renderizar/validar con la skill `archify`).
 
 ### 1. El RFC es la source of truth (quest bifurcado en dos ramas con gates)
 
-- **Product Quest** (`sdd-product-quest`, después de explore): entrevista acotada UNA pregunta a la vez (tope duro de **50**) + **gate RFC explícito** (`Approval: approved`); produce `product-rfc.md` (mandato vinculante). En SDD explícito es obligatorio; en ODD se OFRECE solo si el orquestador detecta ≥2 decisiones de producto/dominio sin resolver (el usuario puede declinar → ODD puro).
-- **Architecture Quest** (`sdd-architecture-quest`, tope duro de **20** + gate RFC): produce `arch-rfc.md` antes del arch-plan/design. En SDD corre cuando hay una fase de design adelante; en ODD solo si el cambio trae incertidumbre de arquitectura sustancial.
-- **`sdd-rfc-author`** (subagente file-based) ensambla el RFC canónico de CADA rama desde las Q&A recolectadas — nunca entrevista, nunca ensambla ambas ramas en una corrida (branch-parametric).
+- **Product Quest** (`product-quest`, después de explore): entrevista acotada UNA pregunta a la vez (tope duro de **50**) + **gate RFC explícito** (`Approval: approved`); produce `product-rfc.md` (mandato vinculante). **Corre SIEMPRE después del explore** (ODD y SDD); solo los cambios mecánicos o solo de documentación pueden saltear ambas quests a criterio del orquestador.
+- **Architecture Quest** (`architecture-quest`, tope duro de **20** + gate RFC): produce `arch-rfc.md`. Corre cuando el pedido involucra producto/features o decisiones de arquitectura.
+- **`rfc-author`** (subagente file-based) ensambla el RFC canónico de CADA rama desde las Q&A recolectadas — nunca entrevista, nunca ensambla ambas ramas en una corrida (branch-parametric).
 - **Nunca se auto-aprueba una decisión** en nombre del usuario: cada gate requiere aprobación explícita; `needs-changes` reabre SOLO la rama afectada dentro de su presupuesto restante.
 
 ### 2. El routing del orquestador (Paso 3b)
@@ -196,8 +210,8 @@ Sin tocar `nextRecommended` ni el prompt inline de Alan, el orquestador enruta p
 
 ### 3. Architecture Plan y lint post-apply
 
-- **`sdd-architecture-plan`** (subagente file-based) produce `arch-plan.md`: acta con decisiones tituladas + **user gate**, entre el arch-rfc y el design.
-- **`sdd-architecture-lint`** corre SIEMPRE después de apply (D9, antes de verify/archive): estilo de segunda mirada que (1) verifica requisitos/scope de los boundaries implementados, (2) verifica el acta `arch-plan.md` (obligatoria — fail-closed si falta) título por título contra el diseño Y la implementación, y (3) verifica la implementación contra el catálogo compartido de principios de arquitectura (P01..P10 / A01..A11, resuelto por path con veredicto independiente pass|fail).
+- **`architecture-plan`** (subagente file-based) produce `arch-plan.md`: acta con decisiones tituladas + **user gate**, entre el arch-rfc y el design. Corre solo para cambios sustanciales/grandes que necesitan planificación más profunda; consume los RFCs aprobados (`product-rfc.md` / `arch-rfc.md`) + los hallazgos del explore.
+- **`architecture-lint`** corre SIEMPRE después del apply, como parte de la verificación del apply (antes de dar el cambio por completo): estilo de segunda mirada que (1) verifica requisitos/scope de los boundaries implementados, (2) verifica contra los RFCs generados (`product-rfc.md` / `arch-rfc.md`) y, cuando el arch-plan corrió, el acta `arch-plan.md` (fail-closed si el arch-plan corrió pero el acta falta) título por título contra el diseño Y la implementación, y (3) verifica la implementación contra el catálogo compartido de principios de arquitectura (P01..P10 / A01..A11, resuelto por path con veredicto independiente pass|fail).
 - **`sdd-research`** — evidencia externa auditada antes de `propose` (fase de soporte nativa del ecosistema).
 
 ### 4. Contratos transversales (`sdd-phase-common.md`)
@@ -224,7 +238,7 @@ sdd-own-skills/
 │   ├── opencode.sdd.json           # fragmento merge-safe: agentes SDD para opencode
 │   ├── sdd-own-routing.md          # routing extension (bloque inyectado en el prompt del orquestador, Paso 3b)
 │   ├── mcp.d/                      # definiciones declarativas MCP por runtime (opencode/pi/claude/codex)
-│   └── prompts/sdd/                # sdd-rfc-author.md + sdd-architecture-plan.md (los 2 prompts propios)
+│   └── prompts/sdd/                # rfc-author.md + architecture-plan.md (los 2 prompts propios)
 ├── engram-snapshot/                # artifacts de Engram (diseño/implementación del quest gate)
 ├── docs/                           # issue-3332-rfc-gate.md, diagrams/ (flujo SDD: PNG + HTML + JSON IR)
 └── .gitignore                      # ignora .atl/ (registry con rutas absolutas locales)
@@ -234,7 +248,7 @@ sdd-own-skills/
 
 ## Licencia
 
-**Este repositorio** está bajo **MIT** (ver [`LICENSE`](LICENSE)) — cubre la colección, la sincronización (`sync-skills.sh`), el setup (`setup.sh` + `wiring/mcp.d`), el wiring, las skills propias (`sdd-product-quest`, `sdd-architecture-quest`, `sdd-architecture-lint`, `skill-sdd-blueprint`, `ui-design`, `web-search`, `github-automation` — fresh reauthoring) y el overlay de `_shared`.
+**Este repositorio** está bajo **MIT** (ver [`LICENSE`](LICENSE)) — cubre la colección, la sincronización (`sync-skills.sh`), el setup (`setup.sh` + `wiring/mcp.d`), el wiring, las skills propias (`product-quest`, `architecture-quest`, `architecture-lint`, `skill-sdd-blueprint`, `ui-design`, `web-search`, `github-automation` — fresh reauthoring) y el overlay de `_shared`.
 
 **Proveniencia de las skills vendidas**: `typescript`, `tailwind-4`, `zod-4`, `playwright` y `github-pr` provienen de [Gentleman-Programming/Gentleman-Skills](https://github.com/Gentleman-Programming/Gentleman-Skills) (`curated/`, repo **MIT**), descargadas tal cual con su frontmatter original (las 4 primeras declaran `license: Apache-2.0`; `github-pr` no declara). Cada skill conserva la licencia de su archivo individual según su autor upstream.
 

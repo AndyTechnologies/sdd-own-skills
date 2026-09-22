@@ -29,34 +29,34 @@
           "sdd-spec": "allow",
           "sdd-tasks": "allow",
           "sdd-verify": "allow",
-          "sdd-rfc-author": "allow",
-          "sdd-architecture-lint": "allow",
-          "sdd-architecture-plan": "allow"
+          "architecture-lint": "allow",
+          "architecture-plan": "allow",
+          "rfc-author": "allow"
         }
       }
     },
-    "sdd-architecture-lint": {
-      "description": "Independently review an SDD design against clean/hexagonal architecture principles",
+    "architecture-lint": {
+      "description": "Independently review an applied change POST-apply, as part of the apply verification: axes 1-3 against the generated RFCs (product-rfc.md / arch-rfc.md), the arch-plan acta (when one was produced — fails closed if arch-plan ran but the acta is missing), and the shared architecture-principles catalog",
       "hidden": true,
       "mode": "subagent",
       "permission": {},
-      "prompt": "You are the dedicated `sdd-architecture-lint` SDD sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Read your canonical skill at ~/.agents/skills/sdd-architecture-lint/SKILL.md and follow it exactly.\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
+      "prompt": "You are the dedicated `architecture-lint` sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Read your canonical skill at ~/.agents/skills/architecture-lint/SKILL.md and follow it exactly.\n\n<!-- gentle-ai:agent-language-contract -->\n## Artifact Language Contract\n\nGenerated artifacts (code, comments, UI copy, docs, specs, tests, commit messages, memory entries) default to English. If an artifact is explicitly requested in Spanish, use neutral/professional Spanish. Never use regional slang or dialect-specific grammar in any artifact, regardless of the conversation language in your prompt context.\n\nBefore any Write/Edit whose content is an artifact, re-verify these artifact language rules.\n<!-- /gentle-ai:agent-language-contract -->\n",
       "variant": ""
     },
-    "sdd-architecture-plan": {
-      "description": "Run the Architecture Plan phase: consume the APPROVED arch-rfc.md + exploration findings + the change's spec deltas, optionally launch a pattern-research lane, and produce the binding architecture plan acta arch-plan.md with titled decisions, each resolvable against the inputs. Verdict: approved | rejected (bounded correction, max 2 rounds).",
+    "architecture-plan": {
+      "description": "Run the Architecture Plan phase for substantial/large changes: consume the approved RFCs (product-rfc.md / arch-rfc.md) + exploration findings + the change's spec deltas, optionally launch a pattern-research lane, and produce the binding architecture plan acta arch-plan.md with titled decisions, each resolvable against the inputs. Verdict: approved | rejected (bounded correction, max 2 rounds).",
       "hidden": true,
       "mode": "subagent",
       "permission": {},
-      "prompt": "{file:./prompts/sdd/sdd-architecture-plan.md}",
+      "prompt": "{file:./prompts/sdd/architecture-plan.md}",
       "variant": ""
     },
-    "sdd-rfc-author": {
+    "rfc-author": {
       "description": "Author the RFC of the active quest branch (product | architecture) from the orchestrator-collected Q&A (the RFC pre-pass). The sub-agent does NOT interview the human; it assembles ONLY the active branch's collected answers into the structured language-agnostic RFC (product-rfc.md | arch-rfc.md) and returns it with the approval gate.",
       "hidden": true,
       "mode": "subagent",
       "permission": {},
-      "prompt": "{file:./prompts/sdd/sdd-rfc-author.md}",
+      "prompt": "{file:./prompts/sdd/rfc-author.md}",
       "variant": ""
     }
   },

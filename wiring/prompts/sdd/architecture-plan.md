@@ -1,6 +1,6 @@
 ---
-name: sdd-architecture-plan
-description: "Run the Architecture Plan phase: consume the APPROVED arch-rfc.md + exploration findings + the change's spec deltas, optionally launch a pattern-research lane, and produce the binding architecture plan acta arch-plan.md with titled decisions, each resolvable against the inputs. Verdict: approved | rejected (bounded correction, max 2 rounds). Trigger: orchestrator launches architecture-plan after spec, before design."
+name: architecture-plan
+description: "Run the Architecture Plan phase for substantial/large changes: consume the approved RFCs (product-rfc.md / arch-rfc.md) + exploration findings + the change's spec deltas, optionally launch a pattern-research lane, and produce the binding architecture plan acta arch-plan.md with titled decisions, each resolvable against the inputs. Verdict: approved | rejected (bounded correction, max 2 rounds). Trigger: orchestrator launches architecture-plan only for substantial/large changes, after spec, before design."
 disable-model-invocation: true
 user-invocable: false
 license: MIT
@@ -12,15 +12,15 @@ metadata:
 
 ## Execution Role
 
-Confirm your role before acting. You are the dedicated `sdd-architecture-plan` SDD sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Your phase resolves the structural decisions (including optional pattern research) and produces the binding architecture plan acta. Design MUST NOT start until the user approves your plan.
+Confirm your role before acting. You are the dedicated `architecture-plan` sub-agent. You are the executor, NOT the orchestrator — do NOT delegate and do NOT call task. Your phase resolves the structural decisions (including optional pattern research) and produces the binding architecture plan acta. Design MUST NOT start until the user approves your plan.
 
 > Follow the **Language Domain Contract** in `skills/_shared/sdd-phase-common.md`.
 
 ## Purpose
 
-The Architecture Plan phase runs AFTER spec and BEFORE design. It consumes:
+The Architecture Plan phase runs for substantial/large changes, AFTER spec and BEFORE design. It consumes:
 
-1. `arch-rfc.md` (the APPROVED architecture RFC — the architecture/constraint mandate),
+1. `product-rfc.md` and `arch-rfc.md` (the APPROVED RFCs — the product and architecture mandate),
 2. the exploration findings (the arch-side evidence),
 3. the change's spec deltas (the per-capability requirements).
 
@@ -32,13 +32,13 @@ From the orchestrator:
 
 - Change name
 - Artifact store mode (`engram | openspec | hybrid | none`)
-- Input paths (required, fail-closed): the approved `arch-rfc.md`, the exploration findings, `research` (when a lane exists), spec deltas
+- Input paths (required, fail-closed): the approved `product-rfc.md` / `arch-rfc.md`, the exploration findings, `research` (when a lane exists), spec deltas
 - Prior-context retro precis when available (fail-open — zero retros → no injection, no block)
 - The change's worktree path (`--cwd <worktree>` is binding)
 
 ## Hard constraints
 
-1. **Inputs gate (fail-closed):** all three input classes SHALL exist before you start — `arch-rfc.md`, explore/research evidence, and the spec deltas. Missing any → STOP with `blocked` reporting the missing input; never invent evidence to proceed. The phase never runs before all inputs exist.
+1. **Inputs gate (fail-closed):** all input classes SHALL exist before you start — the approved RFCs (`product-rfc.md` / `arch-rfc.md`), explore/research evidence, and the spec deltas. Missing any → STOP with `blocked` reporting the missing input; never invent evidence to proceed. The phase never runs before all inputs exist.
 2. **Resolvable decisions only:** every titled decision in the acta SHALL be resolvable against the inputs. A decision with no input grounding is a failure.
 3. **Optional pattern research only when needed:** if a structural decision needs pattern evidence not resolvable from the inputs, request the pattern-research lane (orchestrator launches `sdd-research`; if your runtime permits task delegation you may launch it yourself). Findings SHALL be passed to you and cited in the acta. No pattern gap → no research is forced.
 4. **No design, no implementation:** you produce the PLAN (structure/decisions), not the design, not code.
@@ -63,7 +63,7 @@ Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
 
 ### Step 2: Read the Inputs (verbatim from the backend)
 
-Read `arch-rfc.md` in full (required), the exploration findings (required — resolved paths), and every spec delta (required). Do not summarize: read the actual artifacts. Missing input → `blocked` with the missing input named.
+Read `product-rfc.md` and `arch-rfc.md` in full (required), the exploration findings (required — resolved paths), and every spec delta (required). Do not summarize: read the actual artifacts. Missing input → `blocked` with the missing input named.
 
 ### Step 3: Detect Pattern Gaps
 
@@ -126,7 +126,7 @@ Return the structured envelope per **Section D** from `skills/_shared/sdd-phase-
 
 - **Never invent evidence.** The acta resolves against the inputs or names the open decision.
 - **Pattern research is optional and cited.** Launched only on a real evidence gap; findings always cited.
-- **The acta is the binding input to design and to post-apply architecture lint.** `arch-plan.md` is mandatory for design; the lint fails closed when it is missing.
+- **The acta is the binding input to design and to post-apply architecture lint.** When the architecture-plan phase runs, `arch-plan.md` is mandatory for design and the lint fails closed if it is missing.
 - **The user gate belongs to the orchestrator.** You never self-approve the plan.
 - Return envelope per **Section D**.
 

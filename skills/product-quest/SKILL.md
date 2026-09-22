@@ -1,6 +1,6 @@
 ---
-name: sdd-product-quest
-description: "SDD/ODD product question phase — the RFC pre-pass (product branch). Bounded RFC interview with the user AFTER exploration, one question at a time, hard budget 50, then an explicit product RFC gate; on approval sdd-rfc-author assembles product-rfc.md. In SDD: mandatory after sdd-explore, before sdd-propose. In ODD: offered when gap detection finds ≥2 unresolved product/domain decisions."
+name: product-quest
+description: "Product question phase — the RFC pre-pass (product branch). Bounded RFC interview with the user AFTER exploration, one question at a time, hard budget 50, then an explicit product RFC gate; on approval rfc-author assembles product-rfc.md. ALWAYS runs after exploration in the default ODD workflow and in explicit SDD."
 disable-model-invocation: true
 user-invocable: false
 license: MIT
@@ -14,20 +14,20 @@ metadata:
 
 Confirm your role before acting. In OpenCode, **only the orchestrator holds the interactive human channel** (the `question` tool permission); a `task()` sub-agent returns a single final result and cannot sustain a live one-question-at-a-time interview. Therefore the PRODUCT QUEST interview is always performed by whoever holds that channel.
 
-- **If you are the orchestrator** (you loaded this skill through the `skill()` tool): you PERFORM the interview yourself. Do NOT delegate the interview to the `sdd-rfc-author` sub-agent — it cannot talk to the human in OpenCode. Proceed with the phase work below, asking the user one focused question at a time via your `question` tool.
-- **If you are the `sdd-rfc-author` sub-agent**: you do NOT interview the human. You are the RFC author: you receive the user's answers (Q&A pairs) collected by the orchestrator for the product branch, assemble them into `product-rfc.md`, and present the approval gate back to the orchestrator. Do not call the Skill tool or another orchestrator command.
+- **If you are the orchestrator** (you loaded this skill through the `skill()` tool): you PERFORM the interview yourself. Do NOT delegate the interview to the `rfc-author` sub-agent — it cannot talk to the human in OpenCode. Proceed with the phase work below, asking the user one focused question at a time via your `question` tool.
+- **If you are the `rfc-author` sub-agent**: you do NOT interview the human. You are the RFC author: you receive the user's answers (Q&A pairs) collected by the orchestrator for the product branch, assemble them into `product-rfc.md`, and present the approval gate back to the orchestrator. Do not call the Skill tool or another orchestrator command.
 
 > Follow the **Language Domain Contract** in `skills/_shared/sdd-phase-common.md`.
 
 ## Purpose
 
-You are responsible for the **PRODUCT QUEST** phase (the product branch of the RFC pre-pass): a bounded RFC interview with the human user about the product and domain decisions, run **after** exploration and before the proposal. In OpenCode the interviewer is the orchestrator (the only role with the `question` channel); the `sdd-rfc-author` sub-agent, when launched, is the RFC author that shapes the collected answers into `product-rfc.md`.
+You are responsible for the **PRODUCT QUEST** phase (the product branch of the RFC pre-pass): a bounded RFC interview with the human user about the product and domain decisions, run **after** exploration and before the proposal. In OpenCode the interviewer is the orchestrator (the only role with the `question` channel); the `rfc-author` sub-agent, when launched, is the RFC author that shapes the collected answers into `product-rfc.md`.
 
 Your job:
 1. Interview the user **one focused question at a time** to discover and pin the product and domain requirements and behavior (never invent product or domain decisions), within the **hard budget of 50**.
 2. Produce a **language-agnostic, structured product RFC** that describes behavior and contracts — NOT an implementation or a stack choice.
 3. Present the product RFC for **explicit user approval** at the product RFC gate. `needs-changes` reopens the product branch only, within its remaining budget.
-4. Mark the **approved product RFC as the binding mandate** — the source of truth `sdd-propose` and `sdd-spec` must trace to. After the gate approves, delegate the collected Q&A to `sdd-rfc-author` for `product-rfc.md` persistence.
+4. Mark the **approved product RFC as the binding mandate** — the source of truth `sdd-propose` and `sdd-spec` must trace to. After the gate approves, delegate the collected Q&A to `rfc-author` for `product-rfc.md` persistence.
 
 The product quest runs AFTER exploration: the interview starts from the change's problem statement (`$ARGUMENTS`) AND the exploration findings. Do not re-explore the codebase yourself — the explore phase already produced the findings. This is one of the two SDD phases that talk to the human (the other is the architecture quest). Every other phase is a silent executor. The RFC discipline separates "a handoff of decisions" from "an RFC that describes behavior without choosing a language/framework".
 
@@ -44,7 +44,7 @@ From the orchestrator:
 ## Hard constraints
 
 1. **Hard question budget.** Product Quest = **50**. Never exceed it; exhaustion stops the branch with a report, never silently extends.
-2. **One explicit RFC gate.** The product RFC gate (before `sdd-rfc-author` runs and before any architecture quest starts). The RFC is not approved by an empty frontier — the user must explicitly approve it. Never auto-approve on the human's behalf.
+2. **One explicit RFC gate.** The product RFC gate (before `rfc-author` runs and before any architecture quest starts). The RFC is not approved by an empty frontier — the user must explicitly approve it. Never auto-approve on the human's behalf.
 3. **`needs-changes` reopens ONLY the product branch.** A gate rejection re-interviews the product branch within its REMAINING budget; no other branch is touched by this rejection.
 4. **One question at a time.** Ask exactly ONE focused question; follow the answer until that branch resolves before the next. Never batch a frontier.
 5. **Never invent missing decisions.** If something is unspecified, ASK — do not assume.
@@ -54,7 +54,7 @@ From the orchestrator:
 ## Loop guard
 
 - Stop when every branch of the product decision tree is resolved **OR** the hard budget is spent (50).
-- Gate `approved` → hand off to `sdd-rfc-author` (product branch only). You never start a new question just to keep going.
+- Gate `approved` → hand off to `rfc-author` (product branch only). You never start a new question just to keep going.
 - If the user asks you to stop early, STOP immediately and persist a `rejected`/`needs-changes` result — never force a full session.
 
 ## Execution and Persistence Contract
@@ -74,7 +74,7 @@ Artifact: you persist a **quest artifact** containing the **product RFC** so dow
 
 Follow **Section A** from `skills/_shared/sdd-phase-common.md`. You MUST load the `grilling` skill first — it owns the bounded, branch-following interview primitive and the question-budget discipline (Product 50).
 
-> **Runtime note (OpenCode):** the interviewer is the orchestrator. If you are the orchestrator and loaded this skill via `skill()`, run Steps 2–5 yourself against the user with your `question` tool. The `sdd-rfc-author` sub-agent is not used for the interview; after the user approves the RFC, the orchestrator launches it with the collected Q&A to draft the final canonical RFC, which the orchestrator persists as the binding mandate.
+> **Runtime note (OpenCode):** the interviewer is the orchestrator. If you are the orchestrator and loaded this skill via `skill()`, run Steps 2–5 yourself against the user with your `question` tool. The `rfc-author` sub-agent is not used for the interview; after the user approves the RFC, the orchestrator launches it with the collected Q&A to draft the final canonical RFC, which the orchestrator persists as the binding mandate.
 
 ### Step 2: Establish the Problem Statement
 
@@ -131,7 +131,7 @@ Generate the branch's RFC using EXACTLY the fixed product schema (every section 
 
 - The RFC describes **behavior and contracts**, not language/framework. Do not state a stack unless the user explicitly confirmed it as a requirement (then note it as a confirmed requirement).
 - **Binding mandate**: the approved product RFC is the binding source of truth for `sdd-propose` AND `sdd-spec` — not just "recommended scope".
-- **Delegation note (OpenCode):** When the artifact store is `engram`, `openspec`, or `hybrid`, the orchestrator may delegate the final RFC drafting to the `sdd-rfc-author` sub-agent after the gate approves (via `task()`) to produce the canonical artifact (`product-rfc.md`). The interactive draft presented for user approval in this step remains the orchestrator's work; only the persistence-ready artifact is delegated.
+- **Delegation note (OpenCode):** When the artifact store is `engram`, `openspec`, or `hybrid`, the orchestrator may delegate the final RFC drafting to the `rfc-author` sub-agent after the gate approves (via `task()`) to produce the canonical artifact (`product-rfc.md`). The interactive draft presented for user approval in this step remains the orchestrator's work; only the persistence-ready artifact is delegated.
 
 ### Step 7: The product RFC gate
 
@@ -141,7 +141,7 @@ Present the branch's RFC to the user and ask for EXPLICIT approval. Do NOT auto-
 
 ### Step 8: Persist the Quest Artifact (RFC)
 
-Persist per the Persistence Contract with the `## Approval:` header and the branch's full RFC schema. The `Approval:` value is the ONLY gate the routing uses to decide re-run vs skip vs proceed. **This is MANDATORY** when tied to a named change — do not skip it. If the orchestrator delegated the final RFC drafting to `sdd-rfc-author` after the gate approved (see Step 6 delegation note), persist the sub-agent's artifact output (`product-rfc.md`); otherwise persist the branch RFC drafted in Step 6.
+Persist per the Persistence Contract with the `## Approval:` header and the branch's full RFC schema. The `Approval:` value is the ONLY gate the routing uses to decide re-run vs skip vs proceed. **This is MANDATORY** when tied to a named change — do not skip it. If the orchestrator delegated the final RFC drafting to `rfc-author` after the gate approved (see Step 6 delegation note), persist the sub-agent's artifact output (`product-rfc.md`); otherwise persist the branch RFC drafted in Step 6.
 
 ### Step 9: Return the Envelope
 
