@@ -5,9 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"syscall"
 )
 
@@ -70,26 +67,4 @@ func IsStale(lock *LockV2) bool {
 		return false // alive, owned by another user
 	}
 	return true // ESRCH or anything else → dead/unknown
-}
-
-// RepoNameFromGitRoot derives the canonical worktree namespace basename for
-// *repoPath*: the basename of ``git rev-parse --show-toplevel``. Any subdir
-// (``/repo``, ``/repo/sub``, ``/repo/.``) maps to the SAME name. For a
-// non-repo path the fallback is the path's own basename; degenerate results
-// (``.``, ``..``, ``/``, empty) fall back to "repo".
-func RepoNameFromGitRoot(repoPath string) string {
-	name := repoPath
-	out, err := exec.Command("git", "-C", repoPath, "rev-parse", "--show-toplevel").CombinedOutput()
-	if err == nil && strings.TrimSpace(string(out)) != "" {
-		name = strings.TrimSpace(string(out))
-	}
-	base := filepath.Base(filepath.Clean(name))
-	switch base {
-	case ".", "..", "", "/":
-		base = filepath.Base(filepath.Clean(repoPath))
-	}
-	if base == "" || base == "." || base == ".." || base == "/" {
-		return "repo"
-	}
-	return base
 }

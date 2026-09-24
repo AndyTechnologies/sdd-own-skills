@@ -5,7 +5,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"testing"
 )
 
@@ -103,43 +102,5 @@ func TestIsStaleZeroNilNegative(t *testing.T) {
 	}
 	if !IsStale(&LockV2{PID: -1}) {
 		t.Fatal("expected negative PID to be stale")
-	}
-}
-
-func TestRepoNameFromGitRoot(t *testing.T) {
-	repo := filepath.Join(t.TempDir(), "proj")
-	if err := exec.Command("git", "init", "-q", repo).Run(); err != nil {
-		t.Skipf("git init unavailable: %v", err)
-	}
-	if name := RepoNameFromGitRoot(repo); name != "proj" {
-		t.Fatalf("expected proj, got %q", name)
-	}
-	sub := filepath.Join(repo, "sub")
-	if err := os.MkdirAll(sub, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	// Any subdir resolves to the toplevel basename (same namespace).
-	if name := RepoNameFromGitRoot(sub); name != "proj" {
-		t.Fatalf("expected proj from subdir, got %q", name)
-	}
-	if name := RepoNameFromGitRoot(repo + string(filepath.Separator) + "."); name != "proj" {
-		t.Fatalf("expected proj from /./, got %q", name)
-	}
-}
-
-func TestRepoNameFromGitRootNonRepoFallback(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "notgit")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if name := RepoNameFromGitRoot(dir); name != "notgit" {
-		t.Fatalf("expected fallback name notgit, got %q", name)
-	}
-}
-
-func TestRepoNameFromGitRootDegenerate(t *testing.T) {
-	// Root has no meaningful basename → "repo" fallback.
-	if got := RepoNameFromGitRoot(string(filepath.Separator) + "nonexistent-" + strconv.Itoa(os.Getpid())); got == "" || got == "." {
-		t.Fatalf("expected sane fallback, got %q", got)
 	}
 }

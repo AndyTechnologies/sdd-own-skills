@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
+	"works-tool/internal/envelope"
 	"works-tool/internal/worktree"
 
 	"github.com/spf13/cobra"
@@ -26,16 +28,16 @@ func newWorktreeListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List convention worktrees under ~/.agent_worktrees/<repo>/<change>",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			trees := worktree.List()
+			entries := worktree.List()
 			if jsonOut {
-				return json.NewEncoder(os.Stdout).Encode(trees)
+				return json.NewEncoder(os.Stdout).Encode(envelope.NewSuccess("", entries))
 			}
-			if len(trees) == 0 {
+			if len(entries) == 0 {
 				fmt.Println("No worktrees found.")
 				return nil
 			}
-			for _, t := range trees {
-				fmt.Printf("%s  %s\n", t.Path, t.Branch)
+			for _, e := range entries {
+				fmt.Printf("%s  %s  root_ok=%t task_doc_ok=%t\n", e.Path, e.Branch, e.RepoRootOK, e.TaskDocOK)
 			}
 			return nil
 		},
@@ -46,21 +48,37 @@ func newWorktreeListCmd() *cobra.Command {
 
 func newWorktreeVerifyCmd() *cobra.Command {
 	var (
-		jsonOut     bool
-		changeName  string
-		expectedRoot string
+		jsonOut bool
+		feature string
 	)
 	cmd := &cobra.Command{
 		Use:   "verify",
-		Short: "Verify worktree binding signals (root, branch)",
+		Short: "Verify ODD binding signals (root, task doc; branch informative)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := worktree.Verify(changeName, expectedRoot)
+			if feature == "" {
+				msg := "--feature is required"
+				if jsonOut {
+					_ = json.NewEncoder(os.Stdout).Encode(envelope.NewFailure("", envelope.CodeInvalidArgs, msg, false))
+				} else {
+					fmt.Fprintln(os.Stderr, msg)
+				}
+				os.Exit(1)
+			}
+			result, err := worktree.Verify(feature)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "%v\n", err)
+				if jsonOut {
+					_ = json.NewEncoder(os.Stdout).Encode(envelope.NewFailure(feature, envelope.CodeSignalFailed, err.Error(), false))
+				} else {
+					fmt.Fprintln(os.Stderr, err)
+				}
 				os.Exit(1)
 			}
 			if jsonOut {
-				return json.NewEncoder(os.Stdout).Encode(result)
+				if result.Pass {
+					return json.NewEncoder(os.Stdout).Encode(envelope.NewSuccess(feature, result))
+				}
+				_ = json.NewEncoder(os.Stdout).Encode(envelope.NewFailure(feature, envelope.CodeSignalFailed, strings.TrimSpace(result.Text()), false))
+				os.Exit(1)
 			}
 			fmt.Print(result.Text())
 			if !result.Pass {
@@ -70,7 +88,6 @@ func newWorktreeVerifyCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit structured JSON")
-	cmd.Flags().StringVar(&changeName, "change", "", "change name")
-	cmd.Flags().StringVar(&expectedRoot, "root", "", "expected repo root (default: cwd")
+	cmd.Flags().StringVar(&feature, "feature", "", "feature/change name (required)")
 	return cmd
 }
