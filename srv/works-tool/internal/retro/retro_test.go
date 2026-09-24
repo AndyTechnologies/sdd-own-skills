@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"works-tool/internal/engram"
 )
 
 func TestResolveBodyFromFlag(t *testing.T) {
@@ -311,5 +313,123 @@ func TestAppendLedgerToDocIgnoresInlineMention(t *testing.T) {
 	}
 	if strings.Count(got, "\n## Retros") != 1 {
 		t.Fatalf("expected exactly one real line-start heading, got: %q", got)
+	}
+}
+
+// memEngram is an in-memory Engram adapter for tests: save accepts writes,
+// search answers by title substring (the same topic-lookup semantics the
+// production subprocess adapter relies on for the retro topic).
+type memEngram struct{ topics map[string]string }
+
+func newMemEngram() *memEngram { return &memEngram{topics: make(map[string]string)} }
+
+func (m *memEngram) save(topic, body, typ string) error {
+	m.topics[topic] = body
+	return nil
+}
+
+func (m *memEngram) search(query string, limit int) ([]engram.SearchResult, error) {
+	var results []engram.SearchResult
+	for title, content := range m.topics {
+		if !strings.Contains(title, query) {
+			continue
+		}
+		results = append(results, engram.SearchResult{Title: title, Content: content, Type: "learning"})
+	}
+	return results, nil
+}
+
+// TestPersistDedupesMergedLedgerByLineIdentity pins the P03 body contract
+// fixed by the post-apply lint finding: CurrentLedger merges the task-doc
+// appendix AND the Engram primary, and the merge must dedupe by exact
+// trimmed-line identity so the Engram primary never contains a duplicated
+// entry line. Scenario: BOTH stores already carry the first entry (the drift
+// the lint reproduced), then two distinct-ref persists run — exactly one line
+// per entry must survive in the Engram body and in the task-doc appendix, and
+// re-persisting an existing key stays an idempotent no-op.
+func TestPersistDedupesMergedLedgerByLineIdentity(t *testing.T) {
+	// Hermetic sandbox: a temp dir that LOOKS like a repo (empty .git marker)
+	// with a seeded task doc, so Persist's task-doc appendix path runs inside
+	// the test and never touches the real repo.
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tasksDir := filepath.Join(root, "odd", "tasks")
+	if err := os.MkdirAll(tasksDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	taskDoc := filepath.Join(tasksDir, "probe2-x.md")
+	doc := "# probe2-x\n\n## Retros\n\n- [Retro verify] AAA: entry one\n"
+	if err := os.WriteFile(taskDoc, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mem := newMemEngram()
+	// Engram primary already carries the first entry too — BOTH stores
+	// populated, the exact drift the lint reproduced.
+	mem.topics[topic("probe2-x")] = "- [Retro verify] AAA: entry one"
+
+	oldSave, oldSearch := engramSave, engramSearch
+	engramSave, engramSearch = mem.save, mem.search
+	t.Cleanup(func() { engramSave, engramSearch = oldSave, oldSearch })
+
+	t.Chdir(root)
+
+	entries := []string{
+		"- [Retro verify] AAA: entry one",
+		"- [Retro verify] BBB: entry one",
+		"- [Retro verify] CCC: entry one",
+	}
+	for _, ref := range []string{"BBB", "CCC"} {
+		res, err := Persist("probe2-x", "verify", ref, "entry one", "")
+		if err != nil {
+			t.Fatalf("persist %s: %v", ref, err)
+		}
+		if !res.EngramWritten {
+			t.Fatalf("persist %s: EngramWritten=false, EngramError=%s", ref, res.EngramError)
+		}
+		if !res.TaskDocAppended {
+			t.Fatalf("persist %s: TaskDocAppended=false", ref)
+		}
+	}
+
+	// Engram primary: one line per entry, never a duplicate.
+	engramBody := mem.topics[topic("probe2-x")]
+	for _, e := range entries {
+		if got := strings.Count(engramBody, e); got != 1 {
+			t.Fatalf("engram primary: line %q appears %d times (want 1):\n%s", e, got, engramBody)
+		}
+	}
+
+	// Task-doc appendix: the SAME single-line guarantee (secondary copy).
+	data, err := os.ReadFile(taskDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	section, ok := extractRetrosSection(string(data))
+	if !ok {
+		t.Fatalf("task doc lost its Retros section:\n%s", data)
+	}
+	for _, e := range entries {
+		if got := strings.Count(section, e); got != 1 {
+			t.Fatalf("task-doc appendix: line %q appears %d times (want 1):\n%s", e, got, section)
+		}
+	}
+
+	// HasMarker stays intact through the deduped merge: re-persisting an
+	// existing key is a no-op and must NOT touch the Engram body.
+	if !HasMarker(CurrentLedger("probe2-x"), "verify", "BBB") {
+		t.Fatal("HasMarker lost (verify, BBB) through the deduped merge")
+	}
+	res, err := Persist("probe2-x", "verify", "BBB", "entry one", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.AlreadyRecorded {
+		t.Fatal("re-persist of an existing key must be AlreadyRecorded")
+	}
+	if got := strings.Count(mem.topics[topic("probe2-x")], "- [Retro verify] BBB: entry one"); got != 1 {
+		t.Fatalf("re-persist duplicated BBB in engram primary:\n%s", mem.topics[topic("probe2-x")])
 	}
 }

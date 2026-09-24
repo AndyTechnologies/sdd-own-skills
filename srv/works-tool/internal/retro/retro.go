@@ -45,6 +45,14 @@ import (
 	"works-tool/internal/worktree"
 )
 
+// Engram adapter seam. Production defaults are the subprocess-only CLI
+// adapter (internal/engram); tests substitute in-memory fakes. Package
+// callers keep the subprocess-only behavior.
+var (
+	engramSave   = engram.Save
+	engramSearch = engram.Search
+)
+
 // Precis holds the structured retro lookup result.
 type Precis struct {
 	Count  int          `json:"count"`
@@ -218,11 +226,38 @@ func nextH2(s string) int {
 	return -1
 }
 
+// mergeLedgerBodies joins ledger source bodies with line-identity dedupe:
+// an exact trimmed-line match appears once, first occurrence wins. Both
+// durable copies (task-doc appendix, Engram primary) carry the SAME shared
+// entry lines, so a line present in both stores must never be duplicated in
+// the merged ledger — that is the P03 body contract ("ordered list of signed
+// entries, one per work-unit, never a duplicate").
+func mergeLedgerBodies(bodies []string) string {
+	seen := make(map[string]bool)
+	var lines []string
+	for _, body := range bodies {
+		for _, line := range strings.Split(body, "\n") {
+			key := strings.TrimSpace(line)
+			if key == "" {
+				continue
+			}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			lines = append(lines, key)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 // CurrentLedger returns the accumulated ledger body for feature: the Engram
 // topic (primary) merged with the task-doc `## Retros` appendix (secondary
-// durable copy); "" when none exists in either source. Read failures are
-// fail-open: any source that reads contributes; an unreadable source is
-// skipped rather than aborting a persist.
+// durable copy); "" when none exists in either source. The merge dedupes by
+// line identity so an entry line present in BOTH stores (the normal state
+// after a persist) is never saved back to Engram as a duplicate. Read
+// failures are fail-open: any source that reads contributes; an unreadable
+// source is skipped rather than aborting a persist.
 func CurrentLedger(feature string) string {
 	var bodies []string
 	if root := worktree.RepoRootFromCwd(); root != "" {
@@ -234,7 +269,7 @@ func CurrentLedger(feature string) string {
 			}
 		}
 	}
-	if results, err := engram.Search(topic(feature), 5); err == nil {
+	if results, err := engramSearch(topic(feature), 5); err == nil {
 		for _, r := range results {
 			if r.Title == topic(feature) {
 				if s := strings.TrimSpace(r.Content); s != "" {
@@ -244,7 +279,7 @@ func CurrentLedger(feature string) string {
 			}
 		}
 	}
-	return strings.TrimSpace(strings.Join(bodies, "\n"))
+	return mergeLedgerBodies(bodies)
 }
 
 // extractRetrosSection returns the content of the document's `## Retros`
@@ -289,7 +324,7 @@ func Persist(feature, phase, commitRef, summary, detail string) (*PersistResult,
 	}
 	entry := BuildLedgerEntry(phase, commitRef, summary, detail)
 	next := AppendToLedger(CurrentLedger(feature), entry)
-	if err := engram.Save(topic(feature), scrub.Scrub(next), "learning"); err != nil {
+	if err := engramSave(topic(feature), scrub.Scrub(next), "learning"); err != nil {
 		res.EngramError = err.Error()
 	} else {
 		res.EngramWritten = true
@@ -333,7 +368,7 @@ func Lookup(feature string, verifyDomain bool) (*Precis, error) {
 	}
 	entries = append(entries, docEntries...)
 
-	if results, serr := engram.Search("retrospective", 20); serr == nil {
+	if results, serr := engramSearch("retrospective", 20); serr == nil {
 		for _, r := range results {
 			if !strings.HasPrefix(r.Title, "odd/") || !strings.HasSuffix(r.Title, "/retrospective") {
 				continue
