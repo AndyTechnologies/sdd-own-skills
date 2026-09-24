@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"works-tool/internal/envelope"
 	"works-tool/internal/retro"
 	"works-tool/internal/worktree"
 
@@ -26,22 +27,24 @@ func newRetroCmd() *cobra.Command {
 
 func newRetroPersistCmd() *cobra.Command {
 	var (
-		body, bodyFile, commitRef string
-		verifyDomain, jsonOut     bool
+		body, bodyFile, commitRef, feature, phase string
+		verifyDomain, jsonOut                     bool
 	)
 	cmd := &cobra.Command{
-		Use:   "persist <phase> <feature>",
+		Use:   "persist",
 		Short: "Record a retro ledger line: Engram primary, task-doc ## Retros appendix secondary",
-		Args:  cobra.ExactArgs(2),
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			phase, feature := args[0], args[1]
+			if feature == "" || phase == "" {
+				return retroInvalidArgs("persist: --feature and --phase are required", jsonOut)
+			}
 			resolved, err := retro.ResolveBody(body, bodyFile, verifyDomain)
 			if err != nil {
-				return retroFailOpen(err)
+				return retroFailOpen(feature, envelope.CodeInvalidArgs, "FAIL-OPEN: retro lost write — "+err.Error(), jsonOut)
 			}
 			ref, err := resolveCommitRef(commitRef)
 			if err != nil {
-				return retroFailOpen(err)
+				return retroFailOpen(feature, envelope.CodeInvalidArgs, "FAIL-OPEN: retro lost write — "+err.Error(), jsonOut)
 			}
 			summary, detail := retro.SplitBody(resolved)
 			res, err := retro.Persist(feature, phase, ref, summary, detail)
@@ -56,19 +59,12 @@ func newRetroPersistCmd() *cobra.Command {
 					} else {
 						msg = fmt.Sprintf("FAIL-OPEN: retro write lost — task doc appendix lost: %v", err)
 					}
-					fmt.Fprintln(os.Stderr, msg)
-					if jsonOut {
-						_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
-							"ok":      false,
-							"message": msg,
-						})
-					}
-					os.Exit(2)
+					return retroFailOpen(feature, envelope.CodeWriteFailed, msg, jsonOut)
 				}
-				return retroFailOpen(err)
+				return retroFailOpen(feature, envelope.CodeWriteFailed, "FAIL-OPEN: retro lost write — "+err.Error(), jsonOut)
 			}
 			if jsonOut {
-				return json.NewEncoder(os.Stdout).Encode(res)
+				return json.NewEncoder(os.Stdout).Encode(envelope.NewSuccess(feature, res))
 			}
 			if res.AlreadyRecorded {
 				fmt.Printf("Retro already recorded: %s [%s] %s (no-op)\n", feature, phase, ref)
@@ -81,6 +77,8 @@ func newRetroPersistCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&feature, "feature", "", "feature/change name (required)")
+	cmd.Flags().StringVar(&phase, "phase", "", "ODD phase (required): explore|propose|design|apply|verify|archive")
 	cmd.Flags().StringVar(&body, "body", "", "retro body text")
 	cmd.Flags().StringVar(&bodyFile, "body-file", "", "path to retro body file")
 	cmd.Flags().BoolVar(&verifyDomain, "verify-domain", false, "persist verification domain only (Verification Gaps + Verify-Phase Incidents)")
@@ -89,10 +87,29 @@ func newRetroPersistCmd() *cobra.Command {
 	return cmd
 }
 
+// retroInvalidArgs surfaces a persist usage error (missing required flag)
+// and exits 1 — the envelope CodeInvalidArgs path; with --json the failure
+// envelope goes to stdout.
+func retroInvalidArgs(msg string, jsonOut bool) error {
+	if jsonOut {
+		_ = json.NewEncoder(os.Stdout).Encode(envelope.NewFailure("", envelope.CodeInvalidArgs, msg, false))
+	} else {
+		fmt.Fprintln(os.Stderr, msg)
+	}
+	os.Exit(1)
+	return nil
+}
+
 // retroFailOpen surfaces a D2 loud FAIL-OPEN marker for a lost retro write
-// and exits 2 (the write path failed; the orchestrator must notice).
-func retroFailOpen(err error) error {
-	fmt.Fprintf(os.Stderr, "FAIL-OPEN: retro lost write — %v\n", err)
+// and exits 2 (the write path failed; the orchestrator must notice). The
+// marker prose always goes to stderr; with --json the machine-readable
+// failure envelope (acta A10: {ok:false, error:{code, message, fail_open}})
+// goes to stdout so callers can parse the outcome.
+func retroFailOpen(feature, code, msg string, jsonOut bool) error {
+	fmt.Fprintln(os.Stderr, msg)
+	if jsonOut {
+		_ = json.NewEncoder(os.Stdout).Encode(envelope.NewFailure(feature, code, msg, true))
+	}
 	os.Exit(2)
 	return nil
 }
@@ -136,7 +153,7 @@ func newRetroLookupCmd() *cobra.Command {
 				return nil
 			}
 			if jsonOut {
-				return json.NewEncoder(os.Stdout).Encode(precis)
+				return json.NewEncoder(os.Stdout).Encode(envelope.NewSuccess(feature, precis))
 			}
 			if precis.Count == 0 {
 				fmt.Println("No retrospectives found.")

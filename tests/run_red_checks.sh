@@ -901,10 +901,18 @@ if [[ $_works_tool_built -eq 1 ]]; then
   # FAIL-OPEN: sin engram CLI y fuera de un git checkout, el anexo al task doc
   # es imposible (cwd sin .git → docFail) y la persistencia a Engram tambien
   # falla; el CLI debe salir 2 con el marcador FAIL-OPEN, jamas exit 0.
-  persist_out="$(cd "$SB_HOME" && env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" retro persist verify test-x --body "line one" --commit-ref deadbeef 2>&1)"
+  persist_out="$(cd "$SB_HOME" && env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" retro persist --phase verify --feature test-x --body "line one" --commit-ref deadbeef 2>&1)"
   persist_rc=$?
   [[ $persist_rc -eq 2 ]] || { ko "retro persist (sin engram): exit $persist_rc != 2 (FAIL-OPEN esperado)"; bad=1; }
   echo "$persist_out" | grep -q "FAIL-OPEN" || { ko "retro persist: missing FAIL-OPEN marker"; bad=1; }
+  # Con --json el envelope de error (acta A10) va a stdout: ok:false + code +
+  # fail_open:true, exit 2; la prosa del marcador sigue en stderr.
+  failjson_out="$(cd "$SB_HOME" && env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" retro persist --json --phase verify --feature test-x --body "line one" --commit-ref deadbeef 2>/dev/null)"
+  failjson_rc=$?
+  [[ $failjson_rc -eq 2 ]] || { ko "retro persist --json (sin engram): exit $failjson_rc != 2"; bad=1; }
+  echo "$failjson_out" | grep -q '"ok":false'           || { ko "retro persist --json: sin ok:false"; bad=1; }
+  echo "$failjson_out" | grep -q '"fail_open":true'     || { ko "retro persist --json: sin fail_open:true"; bad=1; }
+  echo "$failjson_out" | grep -q '"code":"write_failed"' || { ko "retro persist --json: sin code write_failed"; bad=1; }
   # Lectura sin engram CLI: warn-and-continue (exit 0), sin error/panic.
   look_out="$(cd "$SB_HOME" && env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" retro lookup --feature test-x 2>&1)"
   look_rc=$?
@@ -1005,12 +1013,14 @@ if [[ $_works_tool_built -eq 1 ]]; then
   bad=0
   init_sandbox
   cp "$_wt_build_tmp/works-tool" "$SB_BIN/works-tool"
-  # Superficies vacias honestas: exit 0, sin error, sin panic. (retro lookup
-  # emite el Precis {count,retros}; incidents list emite el envelope {ok,data}.)
+  # Superficies vacias honestas: exit 0, sin error, sin panic. (retro lookup e
+  # incidents list emiten el envelope {ok,feature?,data}; data porta el Precis
+  # {count,retros} o la lista.)
   r_out="$(cd "$SB_HOME" && env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" retro lookup --feature test-x --json 2>&1)"
   r_rc=$?
   [[ $r_rc -eq 0 ]] || { ko "retro lookup --json (vacio) exit $r_rc != 0"; bad=1; }
-  echo "$r_out" | grep -q '"count":0' || { ko "retro lookup --json: sin count 0"; bad=1; }
+  echo "$r_out" | grep -q '"ok":true'          || { ko "retro lookup --json: sin ok:true"; bad=1; }
+  echo "$r_out" | grep -q '"data":{"count":0'  || { ko "retro lookup --json: data sin count 0"; bad=1; }
   echo "$r_out" | grep -qi '"error"' && { ko "retro lookup --json: error en superficie vacia"; bad=1; }
   i_out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" incidents list --json 2>&1)"
   i_rc=$?
