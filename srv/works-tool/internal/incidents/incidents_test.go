@@ -66,6 +66,51 @@ func TestRepositoryResolve(t *testing.T) {
 	if list[0].FallbackPath == nil {
 		t.Fatal("expected fallback_path")
 	}
+	want := "odd/tasks/test-change.md (## Retros)"
+	if *list[0].FallbackPath != want {
+		t.Fatalf("fallback_path = %q, want %q", *list[0].FallbackPath, want)
+	}
+}
+
+func TestRepositoryListByChange(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+	repo, err := NewRepository(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repo.Close()
+
+	if _, err := repo.Record("change-a", "failure one", "test_failure"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Record("change-b", "failure two", "blocker"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Record("change-a", "failure three", "other"); err != nil {
+		t.Fatal(err)
+	}
+
+	filtered, err := repo.ListByChange("change-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 incidents for change-a, got %d", len(filtered))
+	}
+	for _, inc := range filtered {
+		if inc.ChangeName != "change-a" {
+			t.Fatalf("change = %q, want change-a", inc.ChangeName)
+		}
+	}
+
+	all, err := repo.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("expected 3 incidents, got %d", len(all))
+	}
 }
 
 func TestRepositoryScrub(t *testing.T) {
@@ -96,7 +141,7 @@ func TestRepositoryDefaultPath(t *testing.T) {
 	defer repo.db.Close()
 	// Verify the default file exists
 	home, _ := os.UserHomeDir()
-	expected := filepath.Join(home, ".config", "sdd-own", "srv", "sdd-tool", "incidents.db")
+	expected := filepath.Join(home, ".config", "sdd-own", "srv", "works-tool", "incidents.db")
 	if _, err := os.Stat(expected); err != nil {
 		t.Fatalf("expected db at %s", expected)
 	}
