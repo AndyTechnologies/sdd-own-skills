@@ -18,10 +18,10 @@ func main() {
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "works-tool",
-		Short: "SDD lifecycle helper: worktree, retro, and incidents",
-		Long: `works-tool provides subcommands for the SDD workflow:
+		Short: "ODD lifecycle helper: worktree, retro, and incidents",
+		Long: `works-tool provides subcommands for the ODD workflow:
   worktree list|verify     — enumerate and verify worktrees
-  retro lookup|persist     — retro ledger: durable task-doc appendix + Engram mirror
+  retro lookup|persist     — retro ledger: Engram primary + task-doc appendix secondary
   incidents record|resolve — track and resolve orchestrator-observed failures
   incidents list           — list incidents (optional --feature filter)`,
 		SilenceUsage:  true,
