@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"sdd-tool/internal/scanner"
-	"sdd-tool/internal/worktree"
+	"works-tool/internal/scanner"
+	"works-tool/internal/worktree"
 
 	"github.com/spf13/cobra"
 )

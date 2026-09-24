@@ -11,7 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"sdd-tool/internal/scanner"
+	"works-tool/internal/scanner"
 )
 
 var (

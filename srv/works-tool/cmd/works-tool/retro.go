@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"sdd-tool/internal/retro"
+	"works-tool/internal/retro"
 
 	"github.com/spf13/cobra"
 )

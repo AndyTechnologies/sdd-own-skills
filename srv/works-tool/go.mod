@@ -1,4 +1,4 @@
-module sdd-tool
+module works-tool
 
 go 1.27
 

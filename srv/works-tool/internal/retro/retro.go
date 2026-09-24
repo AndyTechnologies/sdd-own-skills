@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"sdd-tool/internal/engram"
-	"sdd-tool/internal/scrub"
+	"works-tool/internal/engram"
+	"works-tool/internal/scrub"
 )
 
 // Precis holds the structured retro lookup result.

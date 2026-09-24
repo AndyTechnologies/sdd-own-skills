@@ -9,8 +9,8 @@ __pycache__/
 *.pyc
 .venv/
 
-# Go build output (sdd-tool)
-srv/sdd-tool/bin/
+# Go build output (works-tool)
+srv/works-tool/bin/
 
 # Índice local de CodeGraph (base de datos + daemon del proyecto)
 .codegraph/

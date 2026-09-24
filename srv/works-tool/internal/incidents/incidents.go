@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"sdd-tool/internal/scrub"
+	"works-tool/internal/scrub"
 
 	_ "modernc.org/sqlite"
 )

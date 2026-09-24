@@ -3,7 +3,7 @@ package worktree
 import (
 	"testing"
 
-	"sdd-tool/internal/scanner"
+	"works-tool/internal/scanner"
 )
 
 func TestListEmpty(t *testing.T) {

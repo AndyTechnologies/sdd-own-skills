@@ -13,7 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"sdd-tool/internal/scanner"
+	"works-tool/internal/scanner"
 )
 
 // Worktree represents a listed worktree.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"sdd-tool/internal/incidents"
+	"works-tool/internal/incidents"
 
 	"github.com/spf13/cobra"
 )
