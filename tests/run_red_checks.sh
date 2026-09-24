@@ -894,6 +894,12 @@ if [[ $_works_tool_built -eq 1 ]]; then
   bad=0
   init_sandbox
   cp "$_wt_build_tmp/works-tool" "$SB_BIN/works-tool"
+  # Hermetico: bloquear el engram real del host. Con HOME aislado, el engram de
+  # verdad crearia una store propia y aceptaria el save → la 2a invocacion con
+  # la misma key volveria AlreadyRecorded (exit 0) y el bloque FAIL-OPEN nunca
+  # se ejecutaria. El stub falla siempre: "sin engram CLI" de verdad.
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$SB_BIN/engram"
+  chmod +x "$SB_BIN/engram"
   # Dedupe a nivel unit: persistir dos veces el mismo change actualiza el
   # cuerpo en el MISMO ledger entry (HasMarker/AppendToLedger), nunca duplica
   # la entrada. go.mod vive en srv/works-tool/ — correr desde el module root.
