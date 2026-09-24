@@ -1,7 +1,7 @@
 // Package worktree provides worktree listing and verification against
 // convention paths under ~/.agent_worktrees/<repo>/<change>.
 //
-// Verify checks three binding signals: root, branch, and scanner.
+// Verify checks two binding signals: root and branch.
 // Dirty-state disclosure ignores .codegraph/ and .sdd-agent-lock.
 // The tool never auto-clears dirty trees — the human decides.
 package worktree
@@ -12,8 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"works-tool/internal/scanner"
 )
 
 // Worktree represents a listed worktree.
@@ -24,12 +22,11 @@ type Worktree struct {
 
 // VerifyResult holds the outcome of a worktree verify check.
 type VerifyResult struct {
-	Pass    bool   `json:"pass"`
-	Root    Signal `json:"root"`
-	Branch  Signal `json:"branch"`
-	Scanner Signal `json:"scanner"`
-	Dirty   bool   `json:"dirty"`
-	Note    string `json:"note,omitempty"`
+	Pass   bool   `json:"pass"`
+	Root   Signal `json:"root"`
+	Branch Signal `json:"branch"`
+	Dirty  bool   `json:"dirty"`
+	Note   string `json:"note,omitempty"`
 }
 
 // Signal represents one verify signal's status.
@@ -45,7 +42,6 @@ func (r VerifyResult) Text() string {
 	fmt.Fprintf(&b, "Worktree verify: %s\n", passStr(r.Pass))
 	fmt.Fprintf(&b, "  1. Root:    %s  %s\n", passStr(r.Root.Pass), r.Root.Message)
 	fmt.Fprintf(&b, "  2. Branch:  %s  %s\n", passStr(r.Branch.Pass), r.Branch.Message)
-	fmt.Fprintf(&b, "  3. Scanner: %s  %s\n", passStr(r.Scanner.Pass), r.Scanner.Message)
 	if r.Dirty {
 		fmt.Fprintf(&b, "  Dirty: yes (not cleared — human decides)\n")
 	}
@@ -62,26 +58,30 @@ func passStr(ok bool) string {
 	return "[FAIL]"
 }
 
-// List enumerates worktrees under ~/.agent_worktrees/<repo>/<change>
-// by inspecting each scanner change entry for a convention path. The repo
-// namespace is derived dynamically from the current working directory's git
-// root (RepoNameFromGitRoot) — never hardcoded.
-func List(snap *scanner.Status) []Worktree {
+// List enumerates the convention worktree entries under
+// ~/.agent_worktrees/<repo>/ with the repo namespace derived from the current
+// working directory's git root (RepoNameFromGitRoot) — never hardcoded.
+// Only directories are listed; hidden entries are skipped.
+func List() []Worktree {
 	var trees []Worktree
-	if snap == nil {
-		return trees
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return trees
 	}
 	repoName := RepoNameFromGitRoot(cwd())
-	for _, ch := range snap.Changes {
-		path := filepath.Join(home, ".agent_worktrees", repoName, ch.Name)
-		if info, err := os.Stat(path); err == nil && info.IsDir() {
-			branch := "sdd/" + ch.Name
-			trees = append(trees, Worktree{Path: path, Branch: branch})
+	base := filepath.Join(home, ".agent_worktrees", repoName)
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return trees
+	}
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
 		}
+		trees = append(trees, Worktree{
+			Path:   filepath.Join(base, e.Name()),
+			Branch: "sdd/" + e.Name(),
+		})
 	}
 	return trees
 }
@@ -94,10 +94,10 @@ func cwd() string {
 	return cwd
 }
 
-// Verify checks three binding signals for a worktree.
-// changeName: if empty, taken from cwd path convention.
+// Verify checks two binding signals for a worktree.
+// changeName: if empty, the expected branch is "sdd/" (never matches).
 // expectedRoot: if empty, taken from cwd.
-func Verify(snap *scanner.Status, changeName, expectedRoot string) (VerifyResult, error) {
+func Verify(changeName, expectedRoot string) (VerifyResult, error) {
 	cwd, _ := os.Getwd()
 	if expectedRoot == "" {
 		expectedRoot = cwd
@@ -129,12 +129,6 @@ func Verify(snap *scanner.Status, changeName, expectedRoot string) (VerifyResult
 		result.Pass = false
 	} else {
 		expectedBranch := "sdd/" + changeName
-		if changeName == "" {
-			// Try to infer from path or scanner
-			if snap != nil && len(snap.Changes) > 0 {
-				expectedBranch = "sdd/" + snap.Changes[0].Name
-			}
-		}
 		isMain := branch == "main" || branch == "master"
 		match := branch == expectedBranch
 		result.Branch = Signal{
@@ -148,14 +142,6 @@ func Verify(snap *scanner.Status, changeName, expectedRoot string) (VerifyResult
 				result.Note = "no worktree"
 			}
 		}
-	}
-
-	// Signal 3: scanner JSON parses
-	if snap == nil {
-		result.Scanner = Signal{Name: "scanner", Pass: false, Message: "scanner unavailable"}
-		result.Pass = false
-	} else {
-		result.Scanner = Signal{Name: "scanner", Pass: true, Message: "parsed OK"}
 	}
 
 	// Dirty-state disclosure (ignoring .codegraph/ and .sdd-agent-lock)

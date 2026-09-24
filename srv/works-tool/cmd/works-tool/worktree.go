@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"works-tool/internal/scanner"
 	"works-tool/internal/worktree"
 
 	"github.com/spf13/cobra"
@@ -27,13 +26,7 @@ func newWorktreeListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List convention worktrees under ~/.agent_worktrees/<repo>/<change>",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			sc := scanner.New("")
-			snap, err := sc.Snapshot()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "[warn] scanner failed (fail-open): %v\n", err)
-				return nil
-			}
-			trees := worktree.List(snap)
+			trees := worktree.List()
 			if jsonOut {
 				return json.NewEncoder(os.Stdout).Encode(trees)
 			}
@@ -59,16 +52,9 @@ func newWorktreeVerifyCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "verify",
-		Short: "Verify worktree binding signals (root, branch, scanner)",
+		Short: "Verify worktree binding signals (root, branch)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			sc := scanner.New("")
-			snap, err := sc.Snapshot()
-			if err != nil {
-				// D2: signal 3 (scanner) fails → report and exit non-zero
-				fmt.Fprintf(os.Stderr, "FAIL-OPEN: scanner parse failed (signal 3): %v\n", err)
-				os.Exit(1)
-			}
-			result, err := worktree.Verify(snap, changeName, expectedRoot)
+			result, err := worktree.Verify(changeName, expectedRoot)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%v\n", err)
 				os.Exit(1)
@@ -84,7 +70,7 @@ func newWorktreeVerifyCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit structured JSON")
-	cmd.Flags().StringVar(&changeName, "change", "", "change name (default: from scanner)")
+	cmd.Flags().StringVar(&changeName, "change", "", "change name")
 	cmd.Flags().StringVar(&expectedRoot, "root", "", "expected repo root (default: cwd")
 	return cmd
 }
