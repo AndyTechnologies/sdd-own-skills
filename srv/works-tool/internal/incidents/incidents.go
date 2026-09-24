@@ -37,14 +37,14 @@ type Repository struct {
 }
 
 // NewRepository opens (or creates) the incidents database.
-// If dbPath is empty, uses ~/.config/sdd-own/srv/sdd-tool/incidents.db.
+// If dbPath is empty, uses ~/.config/sdd-own/srv/works-tool/incidents.db.
 func NewRepository(dbPath string) (*Repository, error) {
 	if dbPath == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return nil, fmt.Errorf("cannot determine home: %w", err)
 		}
-		dbPath = filepath.Join(home, ".config", "sdd-own", "srv", "sdd-tool", "incidents.db")
+		dbPath = filepath.Join(home, ".config", "sdd-own", "srv", "works-tool", "incidents.db")
 	}
 	os.MkdirAll(filepath.Dir(dbPath), 0o755)
 
@@ -94,12 +94,17 @@ func (r *Repository) Record(changeName, summary, kind string) (int, error) {
 }
 
 // Resolve marks an incident as resolved, binding a fix observation or
-// fallback_path. Engram off → fallback_path, never fabricate.
+// fallback_path. Engram off → fallback_path pointing at the ODD task-doc
+// appendix (odd/tasks/<change>.md ## Retros); never fabricate.
 func (r *Repository) Resolve(id, engramID int) error {
 	now := time.Now().UTC().Format(time.RFC3339)
+	change := r.changeName(id)
+	if change == "" {
+		change = "unknown"
+	}
 	if engramID > 0 {
 		if err := verifyEngramID(engramID); err != nil {
-			fallback := fmt.Sprintf("openspec/changes/*/retrospective.md (engram-id %d not verified)", engramID)
+			fallback := fmt.Sprintf("odd/tasks/%s.md (## Retros) (engram-id %d not verified)", change, engramID)
 			_, err := r.db.Exec(
 				`UPDATE incidents SET status='resolved', fallback_path=?, resolved_at=? WHERE id=?`,
 				fallback, now, id,
@@ -113,18 +118,42 @@ func (r *Repository) Resolve(id, engramID int) error {
 		return err
 	}
 	_, err := r.db.Exec(
-		`UPDATE incidents SET status='resolved', fallback_path='openspec/changes/*/retrospective.md', resolved_at=? WHERE id=?`,
-		now, id,
+		`UPDATE incidents SET status='resolved', fallback_path=?, resolved_at=? WHERE id=?`,
+		fmt.Sprintf("odd/tasks/%s.md (## Retros)", change), now, id,
 	)
 	return err
 }
 
+// changeName returns the incident's change name ("" when the id is absent).
+func (r *Repository) changeName(id int) string {
+	var name string
+	if err := r.db.QueryRow(`SELECT change_name FROM incidents WHERE id=?`, id).Scan(&name); err != nil {
+		return ""
+	}
+	return name
+}
+
+// Close closes the underlying database.
+func (r *Repository) Close() error {
+	return r.db.Close()
+}
+
 // List returns all incidents.
 func (r *Repository) List() ([]Incident, error) {
-	rows, err := r.db.Query(
-		`SELECT id, change_name, kind, summary, status, fallback_path, resolved_engram_id, resolved_at, created_at
-		 FROM incidents ORDER BY id DESC`,
-	)
+	return r.ListByChange("")
+}
+
+// ListByChange returns incidents, optionally filtered to one change/feature
+// ("" returns all).
+func (r *Repository) ListByChange(changeName string) ([]Incident, error) {
+	query := `SELECT id, change_name, kind, summary, status, fallback_path, resolved_engram_id, resolved_at, created_at FROM incidents`
+	var args []any
+	if changeName != "" {
+		query += ` WHERE change_name = ?`
+		args = append(args, changeName)
+	}
+	query += ` ORDER BY id DESC`
+	rows, err := r.db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
