@@ -20,10 +20,10 @@
 #   T32 poda council/gates  T33 fragment wiring v3      T34 OWN_PROMPTS exacto (2)
 #   T35 acta fail-closed    T36 quest gates (2 ramas)   T37 fragment SDD-only
 #   T38 subagent_depth 2    T39 merge ambos motores
-#   T40 one-parse           T41 fallback+dedupe         T42 title retrievability
-#   T42b worktree list      T43 signals+dirty            T44 record→resolve
-#   T45 --json≡scanner      T46 read fail-open           T47 write FAIL-OPEN
-#   T47b 5d-2 warn          T48 poda prompts/skills (2 prompts exactos)
+#   T40 help surface       T41 retro FAIL-OPEN+dedupe  T42 topic retrievability
+#   T42b worktree list     T43 verify signals           T44 incidents lifecycle
+#   T45 --json envelope    T46 read fail-open           T47 write FAIL-OPEN
+#   T47b 5d-2 warn         T48 poda prompts/skills (2 prompts exactos)
 #   T49 rfc-author prompt-defined  T50 quest split 50/20 + 2 gates
 #   T51 routing lean (sin PR/MCP)  T52 machinery podado ausente
 #   T53 Paso 3b en sync (orden+flags)  T54 arch-plan acta + user gate
@@ -83,17 +83,17 @@ trap cleanup EXIT INT TERM
 echo "== RED checks de setup.sh (repo: $REPO)"
 echo
 
-# ---------------- Warm build de sdd-tool (antes de los sandboxes) ----------------
-# El paso 5d-2 de setup.sh compila srv/sdd-tool (`go build`) en CADA modo real.
+# ---------------- Warm build de works-tool (antes de los sandboxes) ----------------
+# El paso 5d-2 de setup.sh compila srv/works-tool (`go build`) en CADA modo real.
 # Construirlo aca, con el entorno del HOST, calienta GOMODCACHE/GOCACHE: los
 # sandboxes reusan ese cache (init_sandbox en helpers/sandbox.sh los inyecta
 # con GOPROXY=off) y el 5d-2 baja de ~90s (descarga de modulos en un HOME
 # vacio, sin red) a ~1-2s. Sin esto, los tests pty (T09/T12-T14/T22/T25)
 # mueren con exit 201 (timeout) y T15 rompe su idempotencia con caches
 # parciales dentro del HOME del sandbox.
-SDD_TOOL_BIN="$REPO/srv/sdd-tool"
-_sdd_tool_built=-1
-if [[ -f "$SDD_TOOL_BIN/cmd/sdd-tool/main.go" ]]; then
+WORKS_TOOL_MOD="$REPO/srv/works-tool"
+_works_tool_built=-1
+if [[ -f "$WORKS_TOOL_MOD/cmd/works-tool/main.go" ]]; then
   # Resolve go binary — try PATH first, then common locations
   _go_bin="$(command -v go 2>/dev/null || true)"
   if [[ -z "$_go_bin" ]]; then
@@ -102,24 +102,24 @@ if [[ -f "$SDD_TOOL_BIN/cmd/sdd-tool/main.go" ]]; then
     done
   fi
   if [[ -n "$_go_bin" ]]; then
-    _sdd_build_tmp="$(mktemp -d)"
-    # Build from the MODULE root (go.mod live en srv/sdd-tool/; el root del
-    # repo no tiene go.mod, asi que construir "$SDD_TOOL_BIN/cmd/sdd-tool/"
+    _wt_build_tmp="$(mktemp -d)"
+    # Build from the MODULE root (go.mod vive en srv/works-tool/; el root del
+    # repo no tiene go.mod, asi que construir $WORKS_TOOL_MOD/cmd/works-tool/
     # desde REPO falla silenciosamente). Un fallo de build aca debe ser LOUD,
     # nunca un skip silencioso de T40-T47.
-    if ( cd "$SDD_TOOL_BIN" && "$_go_bin" build -o "$_sdd_build_tmp/sdd-tool" ./cmd/sdd-tool/ ) 2>"$_sdd_build_tmp/build-err.txt"; then
-      _sdd_tool_built=1
+    if ( cd "$WORKS_TOOL_MOD" && "$_go_bin" build -o "$_wt_build_tmp/works-tool" ./cmd/works-tool/ ) 2>"$_wt_build_tmp/build-err.txt"; then
+      _works_tool_built=1
     else
-      echo "  [ERROR] sdd-tool build fallo (module root: $SDD_TOOL_BIN):" >&2
-      sed 's/^/    /' "$_sdd_build_tmp/build-err.txt" >&2
-      rm -rf "$_sdd_build_tmp"
-      _sdd_build_tmp=""
+      echo "  [ERROR] works-tool build fallo (module root: $WORKS_TOOL_MOD):" >&2
+      sed 's/^/    /' "$_wt_build_tmp/build-err.txt" >&2
+      rm -rf "$_wt_build_tmp"
+      _wt_build_tmp=""
     fi
   else
-    echo "  [ERROR] go no encontrado en PATH ni ubicaciones comunes; no se puede construir sdd-tool" >&2
+    echo "  [ERROR] go no encontrado en PATH ni ubicaciones comunes; no se puede construir works-tool" >&2
   fi
 else
-  echo "  [ERROR] faltan fuentes de sdd-tool ($SDD_TOOL_BIN/cmd/sdd-tool/main.go); bloque T40-T48 roto" >&2
+  echo "  [ERROR] faltan fuentes de works-tool ($WORKS_TOOL_MOD/cmd/works-tool/main.go); bloque T40-T48 roto" >&2
 fi
 
 # ---------------- Grupo 1: sintaxis y contrato declarativo -------------------
@@ -865,179 +865,240 @@ t "T39 merge extendido en ambos motores: --check zero desyncs con jq y con pytho
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-# ---------------- Grupo sdd-tool: T40–T48 ----------------------------------------
-# (El warm build de sdd-tool vive al inicio del suite, antes de los sandboxes:
+# ---------------- Grupo works-tool: T40–T48 ----------------------------------------
+# (El warm build de works-tool vive al inicio del suite, antes de los sandboxes:
 # calienta GOMODCACHE/GOCACHE del host para que el 5d-2 de setup.sh en los
 # sandboxes no descargue modulos ni compile desde cero.)
 
-t "T40 sdd-tool one-parse (scanner lazy)"
-if [[ $_sdd_tool_built -eq 1 ]]; then
+t "T40 works-tool one help surface (worktree/retro/incidents; sin dashboard/bug)"
+if [[ $_works_tool_built -eq 1 ]]; then
   bad=0
   init_sandbox
-  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
-  # --help exits 0 and prints subcommands; verify no panic and no extra output
-  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/sdd-tool" --help 2>&1)"
+  cp "$_wt_build_tmp/works-tool" "$SB_BIN/works-tool"
+  # --help exits 0 y lista los 3 comandos de la superficie works-tool (acta
+  # A6); los restos de la era legacy (bug/dashboard) NO pueden aparecer.
+  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" --help 2>&1)"
   rc=$?
-  [[ $rc -eq 0 ]] || { ko "sdd-tool --help exit $rc != 0"; bad=1; }
-  echo "$out" | grep -q "worktree" || { ko "sdd-tool --help missing worktree subcommand"; bad=1; }
-  echo "$out" | grep -q "retro"   || { ko "sdd-tool --help missing retro subcommand";   bad=1; }
-  echo "$out" | grep -q "bug"     || { ko "sdd-tool --help missing bug subcommand";     bad=1; }
-  echo "$out" | grep -q "dashboard"|| { ko "sdd-tool --help missing dashboard subcommand"; bad=1; }
+  [[ $rc -eq 0 ]] || { ko "works-tool --help exit $rc != 0"; bad=1; }
+  echo "$out" | grep -q "worktree"  || { ko "works-tool --help missing worktree subcommand";  bad=1; }
+  echo "$out" | grep -q "retro"     || { ko "works-tool --help missing retro subcommand";     bad=1; }
+  echo "$out" | grep -q "incidents" || { ko "works-tool --help missing incidents subcommand"; bad=1; }
+  echo "$out" | grep -qi "dashboard\|bug" && { ko "works-tool --help leaked legacy-era subcommand"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 else
-  skip "sdd-tool binario no construido (go ausente o build fallo)"
+  skip "works-tool binario no construido (go ausente o build fallo)"
 fi
 
-t "T41 sdd-tool retro fallback+dedupe (none store)"
-if [[ $_sdd_tool_built -eq 1 ]]; then
+t "T41 works-tool retro persist/lookup (dedupe + FAIL-OPEN, sin engram CLI)"
+if [[ $_works_tool_built -eq 1 ]]; then
   bad=0
   init_sandbox
-  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
-  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/sdd-tool" retro lookup --change test-x 2>&1)"
-  rc=$?
-  [[ $rc -eq 0 ]] || { ko "retro lookup exit $rc != 0"; bad=1; }
-  # none store returns empty precisely, no crash
-  echo "$out" | grep -qi "error\|panic\|exception" && { ko "retro lookup returned error on empty store"; bad=1; }
+  cp "$_wt_build_tmp/works-tool" "$SB_BIN/works-tool"
+  # Hermetico: bloquear el engram real del host. Con HOME aislado, el engram de
+  # verdad crearia una store propia y aceptaria el save → la 2a invocacion con
+  # la misma key volveria AlreadyRecorded (exit 0) y el bloque FAIL-OPEN nunca
+  # se ejecutaria. El stub falla siempre: "sin engram CLI" de verdad.
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$SB_BIN/engram"
+  chmod +x "$SB_BIN/engram"
+  # Dedupe a nivel unit: persistir dos veces el mismo change actualiza el
+  # cuerpo en el MISMO ledger entry (HasMarker/AppendToLedger), nunca duplica
+  # la entrada. go.mod vive en srv/works-tool/ — correr desde el module root.
+  ( cd "$WORKS_TOOL_MOD" && go test ./internal/retro/... 2>/dev/null ) || { ko "retro unit tests (dedupe) failed"; bad=1; }
+  # FAIL-OPEN: sin engram CLI y fuera de un git checkout, el anexo al task doc
+  # es imposible (cwd sin .git → docFail) y la persistencia a Engram tambien
+  # falla; el CLI debe salir 2 con el marcador FAIL-OPEN, jamas exit 0.
+  persist_out="$(cd "$SB_HOME" && env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" retro persist --phase verify --feature test-x --body "line one" --commit-ref deadbeef 2>&1)"
+  persist_rc=$?
+  [[ $persist_rc -eq 2 ]] || { ko "retro persist (sin engram): exit $persist_rc != 2 (FAIL-OPEN esperado)"; bad=1; }
+  echo "$persist_out" | grep -q "FAIL-OPEN" || { ko "retro persist: missing FAIL-OPEN marker"; bad=1; }
+  # Con --json el envelope de error (acta A10) va a stdout: ok:false + code +
+  # fail_open:true, exit 2; la prosa del marcador sigue en stderr.
+  failjson_out="$(cd "$SB_HOME" && env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" retro persist --json --phase verify --feature test-x --body "line one" --commit-ref deadbeef 2>/dev/null)"
+  failjson_rc=$?
+  [[ $failjson_rc -eq 2 ]] || { ko "retro persist --json (sin engram): exit $failjson_rc != 2"; bad=1; }
+  echo "$failjson_out" | grep -q '"ok":false'           || { ko "retro persist --json: sin ok:false"; bad=1; }
+  echo "$failjson_out" | grep -q '"fail_open":true'     || { ko "retro persist --json: sin fail_open:true"; bad=1; }
+  echo "$failjson_out" | grep -q '"code":"write_failed"' || { ko "retro persist --json: sin code write_failed"; bad=1; }
+  # Lectura sin engram CLI: warn-and-continue (exit 0), sin error/panic.
+  look_out="$(cd "$SB_HOME" && env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" retro lookup --feature test-x 2>&1)"
+  look_rc=$?
+  [[ $look_rc -eq 0 ]] || { ko "retro lookup (sin engram) exit $look_rc != 0"; bad=1; }
+  echo "$look_out" | grep -qi "error\|panic\|exception" && { ko "retro lookup errored en store ausente"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 else
-  skip "sdd-tool binario no construido"
+  skip "works-tool binario no construido"
 fi
 
-t "T42 sdd-tool title retrievability (engram title-key filter)"
-if [[ $_sdd_tool_built -eq 1 ]]; then
+t "T42 works-tool title retrievability (engram topic odd/<feature>/retrospective)"
+if [[ $_works_tool_built -eq 1 ]]; then
   bad=0
-  # Unit-level proof: engram title filter only returns sdd/*/retrospective entries.
-  # Build the binary and run retro lookup which exercises the engram search →
-  # title-prefix filter path (even when engram CLI is absent, the adapter
-  # returns gracefully).
-  init_sandbox
-  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
-  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/sdd-tool" retro lookup --mode engram --change test-x 2>&1)"
-  rc=$?
-  # engram CLI absent → lookup returns 0 with empty result (fail-open read)
-  [[ $rc -eq 0 ]] || { ko "retro lookup (engram mode) exit $rc != 0"; bad=1; }
-  # Verify the binary was compiled with the title filter path (integration:
-  # go test covers parseSearchOutput + title prefix logic). go.mod vive en
-  # srv/sdd-tool/ — correr desde el module root, no del root del repo.
-  ( cd "$SDD_TOOL_BIN" && go test ./internal/engram/... 2>/dev/null ) || { ko "engram unit tests (title filter) failed"; bad=1; }
+  # La clave de topic y el filtro de titulo estan unit-covered (parse, prefix,
+  # topic); el string del topic se pine aqui para que el contrato
+  # odd/<feature>/retrospective nunca derive sin que la suite lo note.
+  grep -Fq '"odd/" + feature + "/retrospective"' "$WORKS_TOOL_MOD/internal/retro/retro.go" || { ko "retro topic() prefix no es odd/<feature>/retrospective"; bad=1; }
+  ( cd "$WORKS_TOOL_MOD" && go test ./internal/engram/... ./internal/retro/... 2>/dev/null ) || { ko "engram/retro unit tests (topic) failed"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 else
-  skip "sdd-tool binario no construido"
+  skip "works-tool binario no construido"
 fi
 
-t "T42b sdd-tool worktree list (empty — no agent_worktrees)"
-if [[ $_sdd_tool_built -eq 1 ]]; then
+t "T42b works-tool worktree list (vacio honesto + entry sin task doc)"
+if [[ $_works_tool_built -eq 1 ]]; then
   bad=0
   init_sandbox
-  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
-  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/sdd-tool" worktree list 2>&1)"
+  cp "$_wt_build_tmp/works-tool" "$SB_BIN/works-tool"
+  # Sin ~/.agent_worktrees: lista vacia honesta ("No worktrees found."), exit 0.
+  out="$(cd "$SB_HOME" && env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" worktree list 2>&1)"
   rc=$?
-  [[ $rc -eq 0 ]] || { ko "worktree list exit $rc != 0"; bad=1; }
+  [[ $rc -eq 0 ]] || { ko "worktree list (vacio) exit $rc != 0"; bad=1; }
+  # Con un entry que NO tiene task doc: listado con task_doc_ok=false (senal
+  # honesta), exit 0. Desde SB_HOME (sin .git) el namespace cae a "repo".
+  mkdir -p "$SB_HOME/.agent_worktrees/repo/test-x"
+  jout="$(cd "$SB_HOME" && env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" worktree list --json 2>&1)"
+  rc=$?
+  [[ $rc -eq 0 ]] || { ko "worktree list --json (entry) exit $rc != 0"; bad=1; }
+  echo "$jout" | grep -q '"task_doc_ok":false' || { ko "worktree list: entry sin task doc no marca task_doc_ok=false"; bad=1; }
+  echo "$jout" | grep -q '"repo_root_ok":false' || { ko "worktree list: entry fuera de convencion no marca repo_root_ok=false"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 else
-  skip "sdd-tool binario no construido"
+  skip "works-tool binario no construido"
 fi
 
-t "T43 sdd-tool worktree verify (3 signals — main branch)"
-if [[ $_sdd_tool_built -eq 1 ]]; then
+t "T43 works-tool worktree verify (3 signals; root/task-doc BLOCKING)"
+if [[ $_works_tool_built -eq 1 ]]; then
   bad=0
   init_sandbox
-  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
-  # Stub gentle-ai (scanner signal 3): sin el stub el sandbox no tiene
-  # gentle-ai, el scanner falla y verify aborta en "FAIL-OPEN: scanner parse
-  # failed (signal 3)" sin emitir la linea de branch — el test quedaria
-  # rojo pese a que la senal de branch es la que se quiere ejercitar.
-  printf '#!/usr/bin/env bash\nprintf '\''{"artifactStore":"openspec","changes":[]}'\''\n' > "$SB_BIN/gentle-ai"
-  chmod +x "$SB_BIN/gentle-ai"
-  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/sdd-tool" worktree verify --change test-x 2>&1)"
+  cp "$_wt_build_tmp/works-tool" "$SB_BIN/works-tool"
+  # Fuera de un worktree de convencion las 3 senales se renderizan y la de
+  # root bloquea: verify falla (exit != 0) mostrando Root / Task doc / Branch.
+  out="$(cd "$SB_HOME" && env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" worktree verify --feature test-x 2>&1)"
   rc=$?
-  # On main (not in a worktree), verify should exit non-zero (branch signal fails)
-  [[ $rc -ne 0 ]] || { ko "worktree verify on main: exit 0 expected non-zero (no worktree)"; bad=1; }
-  # Case-insensitive: el binario emite "Branch:" (B mayuscula) — un grep
-  # "branch\|BRANCH" sensible a mayusculas jamas matchea "Branch:".
-  echo "$out" | grep -qi "branch" || { ko "worktree verify: missing branch signal"; bad=1; }
+  [[ $rc -ne 0 ]] || { ko "worktree verify fuera de convencion: exit 0 esperado != 0"; bad=1; }
+  echo "$out" | grep -qi "root"     || { ko "worktree verify: missing root signal";     bad=1; }
+  echo "$out" | grep -qi "task doc" || { ko "worktree verify: missing task doc signal"; bad=1; }
+  echo "$out" | grep -qi "branch"   || { ko "worktree verify: missing branch signal";   bad=1; }
+  # Semantica de gate unit-covered en internal/worktree (task-doc BLOCKING,
+  # branch informativa — nunca gate). Correr los tests lo prueba.
+  ( cd "$WORKS_TOOL_MOD" && go test ./internal/worktree/... 2>/dev/null ) || { ko "worktree unit tests (signals) failed"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 else
-  skip "sdd-tool binario no construido"
+  skip "works-tool binario no construido"
 fi
 
-t "T44 sdd-tool bug record→resolve→list (incidents lifecycle)"
-if [[ $_sdd_tool_built -eq 1 ]]; then
+t "T44 works-tool incidents record→list→resolve (lifecycle + feature filter)"
+if [[ $_works_tool_built -eq 1 ]]; then
   bad=0
   init_sandbox
-  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
+  cp "$_wt_build_tmp/works-tool" "$SB_BIN/works-tool"
   export HOME="$SB_HOME"
   export PATH="$SB_BIN:$PATH"
-  # Record
-  rec_out="$(timeout 10 "$SB_BIN/sdd-tool" bug record --summary "test blocker: failing build" --kind blocker --change test-x 2>&1)"
+  # record exige --feature: sin el → invalid_args, exit != 0.
+  miss_out="$(timeout 10 "$SB_BIN/works-tool" incidents record --summary x 2>&1)"
+  miss_rc=$?
+  [[ $miss_rc -ne 0 ]] || { ko "incidents record sin --feature: exit 0 esperado != 0"; bad=1; }
+  # Ciclo completo: record → list lo muestra → resolve → status resolved.
+  rec_out="$(timeout 10 "$SB_BIN/works-tool" incidents record --feature test-x --summary "test blocker: failing build" --kind blocker 2>&1)"
   rec_rc=$?
-  [[ $rec_rc -eq 0 ]] || { ko "bug record exit $rec_rc != 0"; bad=1; }
-  # List (should show the incident)
-  list_out="$(timeout 10 "$SB_BIN/sdd-tool" bug list 2>&1)"
+  [[ $rec_rc -eq 0 ]] || { ko "incidents record exit $rec_rc != 0"; bad=1; }
+  list_out="$(timeout 10 "$SB_BIN/works-tool" incidents list --feature test-x 2>&1)"
   list_rc=$?
-  [[ $list_rc -eq 0 ]] || { ko "bug list exit $list_rc != 0"; bad=1; }
-  echo "$list_out" | grep -q "test-x\|blocker" || { ko "bug list: incident not found in output"; bad=1; }
+  [[ $list_rc -eq 0 ]] || { ko "incidents list exit $list_rc != 0"; bad=1; }
+  echo "$list_out" | grep -q "blocker" || { ko "incidents list: incident not found"; bad=1; }
+  res_out="$(timeout 10 "$SB_BIN/works-tool" incidents resolve --id 1 2>&1)"
+  res_rc=$?
+  [[ $res_rc -eq 0 ]] || { ko "incidents resolve exit $res_rc != 0"; bad=1; }
+  final_out="$(timeout 10 "$SB_BIN/works-tool" incidents list --json --feature test-x 2>&1)"
+  echo "$final_out" | grep -q '"status":"resolved"' || { ko "incidents list --json: incident not resolved"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 else
-  skip "sdd-tool binario no construido"
+  skip "works-tool binario no construido"
 fi
 
-t "T45 sdd-tool --json (scanner passthrough, no TUI)"
-if [[ $_sdd_tool_built -eq 1 ]]; then
+t "T45 works-tool --json (envelope + FAIL-OPEN shapes, exit 0/1/2)"
+if [[ $_works_tool_built -eq 1 ]]; then
   bad=0
   init_sandbox
-  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
-  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/sdd-tool" dashboard --json 2>&1)"
-  rc=$?
-  # --json should exit non-zero (no gentle-ai binary) but print JSON schema hint, not crash
-  echo "$out" | grep -qi "panic\|exception" && { ko "dashboard --json panicked"; bad=1; }
-  if [[ $bad -eq 0 ]]; then ok; fi
-else
-  skip "sdd-tool binario no construido"
-fi
-
-t "T46 sdd-tool read fail-open (absent scanner, no crash)"
-if [[ $_sdd_tool_built -eq 1 ]]; then
-  bad=0
-  init_sandbox
-  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
-  # Run without gentle-ai in PATH → scanner fails, should exit non-zero but not panic
-  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/sdd-tool" worktree list --json 2>&1)"
-  rc=$?
-  echo "$out" | grep -qi "panic\|exception\|fatal" && { ko "worktree list --json panicked on absent scanner"; bad=1; }
-  if [[ $bad -eq 0 ]]; then ok; fi
-else
-  skip "sdd-tool binario no construido"
-fi
-
-t "T47 sdd-tool write FAIL-OPEN (bug record exits non-zero with marker when DB unusable)"
-if [[ $_sdd_tool_built -eq 1 ]]; then
-  bad=0
-  init_sandbox
-  cp "$_sdd_build_tmp/sdd-tool" "$SB_BIN/sdd-tool"
-  # Make the DB path unusable: put a regular file where the incidents.db
-  # directory tree should be, so MkdirAll fails.
-  unsafedir="$SB_HOME/.config/sdd-own/srv/sdd-tool"
+  cp "$_wt_build_tmp/works-tool" "$SB_BIN/works-tool"
+  # Superficies vacias honestas: exit 0, sin error, sin panic. (retro lookup e
+  # incidents list emiten el envelope {ok,feature?,data}; data porta el Precis
+  # {count,retros} o la lista.)
+  r_out="$(cd "$SB_HOME" && env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" retro lookup --feature test-x --json 2>&1)"
+  r_rc=$?
+  [[ $r_rc -eq 0 ]] || { ko "retro lookup --json (vacio) exit $r_rc != 0"; bad=1; }
+  echo "$r_out" | grep -q '"ok":true'          || { ko "retro lookup --json: sin ok:true"; bad=1; }
+  echo "$r_out" | grep -q '"data":{"count":0'  || { ko "retro lookup --json: data sin count 0"; bad=1; }
+  echo "$r_out" | grep -qi '"error"' && { ko "retro lookup --json: error en superficie vacia"; bad=1; }
+  i_out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" incidents list --json 2>&1)"
+  i_rc=$?
+  [[ $i_rc -eq 0 ]] || { ko "incidents list --json (vacio) exit $i_rc != 0"; bad=1; }
+  echo "$i_out" | grep -q '"ok":true' || { ko "incidents list --json: sin ok true"; bad=1; }
+  # Escritura forzada a fallar: DB inutilizable → envelope fail_open=true, exit 2.
+  unsafedir="$SB_HOME/.config/sdd-own/srv/works-tool"
   mkdir -p "$(dirname "$unsafedir")"
   rm -rf "$unsafedir"
   echo "not-a-directory" > "$unsafedir"
-  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/sdd-tool" bug record --change test-x --summary "should fail" --kind blocker 2>&1)"
-  rc=$?
-  # D2: write failure must be loud FAIL-OPEN, never silent success
-  [[ $rc -ne 0 ]] || { ko "bug record: exit 0 on unusable DB (should fail loudly)"; bad=1; }
-  echo "$out" | grep -qi "FAIL-OPEN" || { ko "bug record: missing FAIL-OPEN marker on write failure"; bad=1; }
+  w_out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" incidents record --json --feature test-x --summary "should fail" 2>/dev/null)"
+  w_rc=$?
+  [[ $w_rc -eq 2 ]] || { ko "incidents record --json (DB inutilizable): exit $w_rc != 2"; bad=1; }
+  echo "$w_out" | grep -q '"ok":false'     || { ko "incidents record --json: sin ok false"; bad=1; }
+  echo "$w_out" | grep -q '"fail_open":true' || { ko "incidents record --json: sin fail_open true"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 else
-  skip "sdd-tool binario no construido"
+  skip "works-tool binario no construido"
 fi
 
-t "T47b setup.sh 5d-2 warn (no Go → warn, no error)"
+t "T46 works-tool read fail-open (DB inutilizable → warn-and-continue, exit 0)"
+if [[ $_works_tool_built -eq 1 ]]; then
+  bad=0
+  init_sandbox
+  cp "$_wt_build_tmp/works-tool" "$SB_BIN/works-tool"
+  unsafedir="$SB_HOME/.config/sdd-own/srv/works-tool"
+  mkdir -p "$(dirname "$unsafedir")"
+  rm -rf "$unsafedir"
+  echo "not-a-directory" > "$unsafedir"
+  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" incidents list 2>&1)"
+  rc=$?
+  # Lectura rota: warn-and-continue (exit 0), jamas panic/crash silencioso.
+  [[ $rc -eq 0 ]] || { ko "incidents list (DB rota): exit $rc != 0 (warn-and-continue)"; bad=1; }
+  echo "$out" | grep -qi "panic\|exception\|fatal" && { ko "incidents list panic on DB rota"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+else
+  skip "works-tool binario no construido"
+fi
+
+t "T47 works-tool write FAIL-OPEN (incidents record exit 2 con marcador, DB inutilizable)"
+if [[ $_works_tool_built -eq 1 ]]; then
+  bad=0
+  init_sandbox
+  cp "$_wt_build_tmp/works-tool" "$SB_BIN/works-tool"
+  unsafedir="$SB_HOME/.config/sdd-own/srv/works-tool"
+  mkdir -p "$(dirname "$unsafedir")"
+  rm -rf "$unsafedir"
+  echo "not-a-directory" > "$unsafedir"
+  out="$(env HOME="$SB_HOME" PATH="$SB_BIN:$PATH" timeout 10 "$SB_BIN/works-tool" incidents record --feature test-x --summary "should fail" --kind blocker 2>&1)"
+  rc=$?
+  # D2: la escritura rota debe ser FAIL-OPEN loud (exit 2 + marcador), nunca
+  # exito silencioso ni exit 1 generico.
+  [[ $rc -eq 2 ]] || { ko "incidents record: exit $rc != 2 (FAIL-OPEN esperado)"; bad=1; }
+  echo "$out" | grep -qi "FAIL-OPEN" || { ko "incidents record: missing FAIL-OPEN marker"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+else
+  skip "works-tool binario no construido"
+fi
+
+t "T47b setup.sh 5d-2 warn (go roto → warn, no error)"
 {
   bad=0
   init_sandbox
-  # Create a minimal fake Go that always fails (used only if real mode reaches 5d-2)
+  # fake go que siempre falla (solo importa si el modo real llega a 5d-2)
   printf '#!/usr/bin/env bash\nexit 1\n' > "$SB_BIN/go"
   chmod +x "$SB_BIN/go"
+  # Stale sdd-tool de la era legacy presente en el sandbox (acta A8): --check
+  # debe reportar su remocion como [pendiente] sin mutar nada (la remocion es
+  # exclusiva del modo real).
+  mkdir -p "$SB_HOME/.config/sdd-own/bin"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$SB_HOME/.config/sdd-own/bin/sdd-tool"
+  chmod +x "$SB_HOME/.config/sdd-own/bin/sdd-tool"
   # Route through the sandbox seam (MCP_DEBUG_SYNC_ARGS, igual que los tests
   # hermanos via run_setup): el sync-skills.sh REAL no debe correr dentro del
   # sandbox vacio (gate F9 → exit 2). Con el seam, 5d-2 se evalua en --check:
@@ -1045,7 +1106,11 @@ t "T47b setup.sh 5d-2 warn (no Go → warn, no error)"
   run_setup --check --skip-gentleai-sync
   rc="$(cat "$SB_TMP/exit")"
   # In --check mode, missing binary → "pendiente" message; warn/error only in real mode
-  grep -qi "sdd-tool\|pendiente\|WARN\|go no encontrado" "$SB_TMP/out.txt" || { ko "setup.sh 5d-2: missing sdd-tool check message"; bad=1; }
+  grep -qi "works-tool\|pendiente\|WARN\|go no encontrado" "$SB_TMP/out.txt" || { ko "setup.sh 5d-2: missing works-tool check message"; bad=1; }
+  # Stale-removal pending (acta A8): el sdd-tool stale aparece como [pendiente]
+  # y NO se remueve en modo check.
+  grep -qi "pendiente.*sdd-tool" "$SB_TMP/out.txt" || { ko "setup.sh 5d-2: stale sdd-tool removal no reportado [pendiente]"; bad=1; }
+  [[ -e "$SB_HOME/.config/sdd-own/bin/sdd-tool" ]] || { ko "setup.sh 5d-2: --check removio el stale sdd-tool (solo modo real)"; bad=1; }
   # --check should not hard-fail due to missing go: 0 = clean, 1 = drift;
   # 2 (gate F9) must never fire from a stub sync.
   if [[ "$rc" -le 1 ]]; then
@@ -1057,7 +1122,7 @@ t "T47b setup.sh 5d-2 warn (no Go → warn, no error)"
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T48 poda prompts/skills: wiring/prompts/sdd con EXACTAMENTE 2 prompts; skills changelog/quest/council ausentes"
+t "T48 poda prompts/skills + works-tool wiring pins: 2 prompts exactos; skill/routing canonical; cero sdd-tool"
 {
   bad=0
   # v3 (poda total): los unicos prompts propios son rfc-author + arch-plan.
@@ -1073,6 +1138,15 @@ t "T48 poda prompts/skills: wiring/prompts/sdd con EXACTAMENTE 2 prompts; skills
   # El cierre de changelog quedo fuera del pipeline v3 (sin orchestrator propio)
   n="$(grep -rilE 'changelog' "$REPO/wiring" 2>/dev/null | wc -l)"
   [[ "$n" == "0" ]] || { ko "wiring con $n referencias a changelog"; bad=1; }
+  # works-tool wiring pins (acta A10/A11, T8 — post-apply lint):
+  # (a) el skill full-install existe y documenta la ruta canonica
+  [[ -f "$REPO/skills/works-tool/SKILL.md" ]] || { ko "skills/works-tool/SKILL.md ausente"; bad=1; }
+  grep -qF -- "~/.local/bin/works-tool" "$REPO/skills/works-tool/SKILL.md" || { ko "works-tool SKILL.md sin ruta canonica ~/.local/bin/works-tool"; bad=1; }
+  # (b) la routing extension referencia la ruta canonica
+  grep -qF -- "~/.local/bin/works-tool" "$REPO/wiring/sdd-own-routing.md" || { ko "routing extension sin ruta canonica ~/.local/bin/works-tool"; bad=1; }
+  # (c) cero sdd-tool en wiring owned + skill (superficie propia)
+  n="$(grep -rl 'sdd-tool' "$REPO/wiring" "$REPO/skills/works-tool" 2>/dev/null | wc -l)"
+  [[ "$n" == "0" ]] || { ko "owned wiring/skill con $n referencias a sdd-tool"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
@@ -1908,8 +1982,8 @@ t "T62e R9: tombstones clase c — [MANUAL], sobreviven sin --purge-manual"
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-# Clean up sdd-tool build temp
-[[ -n "${_sdd_build_tmp:-}" && -d "$_sdd_build_tmp" ]] && rm -rf "$_sdd_build_tmp" 2>/dev/null
+# Clean up works-tool build temp
+[[ -n "${_wt_build_tmp:-}" && -d "$_wt_build_tmp" ]] && rm -rf "$_wt_build_tmp" 2>/dev/null
 
 stop_fake_api
 echo

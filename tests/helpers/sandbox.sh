@@ -34,7 +34,7 @@ init_sandbox() {
     OPENCODE_CONFIG=""
     MCP_DEBUG_SYNC_ARGS="$SB_TMP/sync-seam.txt"
   )
-  # 5d-2 hermetico: setup.sh compila srv/sdd-tool (`go build`) en cada modo
+  # 5d-2 hermetico: setup.sh compila srv/works-tool (`go build`) en cada modo
   # real. Con el HOME del sandbox vacio, GOMODCACHE/GOCACHE apuntan a dirs
   # inexistentes y `go` intenta descargar modulos (~90s sin red) → todos los
   # runs pty mueren con exit 201 (timeout de pty_run.py) y T15 rompe su
@@ -162,14 +162,14 @@ out_contains() {
 }
 
 # snapshot_tree <dir> <outfile> — md5 + mtimes de todos los archivos, salvo
-# artefactos volatiles del paso 5d-2 (go build de sdd-tool): el binario
-# compilado (setup.sh lo recompila en CADA modo real → el mtime cambia por
-# diseño) y cualquier cache/telemetry de go que escapara al HOME del sandbox.
-# Todo lo demas (configs, tokens, env files) debe quedar byte-identico entre
-# runs; eso es lo que aserciona T15.
+# artefactos volatiles del paso 5d-2 (go build de works-tool): el binario
+# compilado en ~/.local/bin/works-tool (setup.sh lo recompila en CADA modo
+# real → el mtime cambia por diseño) y cualquier cache/telemetry de go que
+# escapara al HOME del sandbox. Todo lo demas (configs, tokens, env files)
+# debe quedar byte-identico entre runs; eso es lo que aserciona T15.
 snapshot_tree() {
   ( cd "$1" && find . -type f \
-      -not -path './.config/sdd-own/bin/*' \
+      -not -path './.local/bin/works-tool' \
       -not -path './.config/go/*' \
       -not -path './.cache/go-build/*' \
       -not -path './go/*' \
