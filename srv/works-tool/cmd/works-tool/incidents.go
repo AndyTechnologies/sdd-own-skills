@@ -104,13 +104,22 @@ func newIncidentsListCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repo, err := incidents.NewRepository("")
 			if err != nil {
+				// A3 read-side fail-open: warn on stderr, exit 0 — but the
+				// --json surface must still emit the envelope (empty data: an
+				// unreadable store enumerates nothing), never 0-byte stdout.
 				fmt.Fprintln(os.Stderr, "[warn] incidents list unavailable (fail-open):", err)
+				if jsonOut {
+					return json.NewEncoder(os.Stdout).Encode(envelope.NewSuccess(feature, []incidents.Incident{}))
+				}
 				return nil
 			}
 			defer repo.Close()
 			list, err := repo.ListByChange(feature)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "[warn] incidents list failed (fail-open):", err)
+				if jsonOut {
+					return json.NewEncoder(os.Stdout).Encode(envelope.NewSuccess(feature, []incidents.Incident{}))
+				}
 				return nil
 			}
 			if jsonOut {
