@@ -1,25 +1,31 @@
 // Package retro provides the retrospective ledger for ODD change tasks.
 //
-// Each persist appends ONE ordered ledger entry
+// Each persist saves ONE ordered ledger entry
 //
 //   - [Retro <phase>] <commit-ref>: <summary>
 //     <indented detail lines, when present>
 //
 // to two places, in this order:
 //
-//  1. odd/tasks/<feature>.md under `## Retros` in the walk-up repo root
-//     (append-only) — the DURABLE ledger, always written,
-//  2. the Engram observation `odd/<feature>/retrospective` (title == topic,
-//     type learning, topic-key upsert) — a best-effort MIRROR. The engram
-//     CLI applies a session-ownership write guard (writes must belong to the
-//     ambient runtime session's project); when it rejects a save, the persist
-//     still succeeds with EngramWritten=false and the reason in EngramError.
+//  1. Engram — PRIMARY storage. The observation topic
+//     `odd/<feature>/retrospective` (title == topic, type learning, topic-key
+//     upsert) holds the ordered list of signed entries; re-persisting
+//     (feature, phase, commit-ref) is an in-place update, never a duplicate.
+//  2. odd/tasks/<feature>.md under `## Retros` (created when missing) in the
+//     walk-up repo root — the SECONDARY durable copy of the same entry line.
+//
+// When the task-doc appendix cannot be written (task doc missing, not in a
+// repo, or a read/write failure), Persist returns ErrTaskDocUnavailable and
+// the caller emits the D2 loud FAIL-OPEN marker with exit 2 — the Engram
+// write still stands when it succeeded, and its failure is carried alongside
+// when it did not. Honest environmental note: the standalone CLI `engram
+// save` may be rejected by the v2 session-ownership guard in this
+// environment; the persist then still succeeds with EngramWritten=false and
+// the reason in EngramError — that never re-orders the A6 contract (Engram
+// primary, task-doc appendix secondary).
 //
 // Persists are idempotent by (feature, phase, commit-ref): a re-run whose
-// marker is already recorded is a no-op (AlreadyRecorded). A failed
-// task-doc appendix returns ErrTaskDocUnavailable — with the Engram mirror
-// standing when it wrote, and combined with the mirror failure when it did
-// not; the caller emits the D2 loud FAIL-OPEN marker with exit 2.
+// marker is already recorded is a no-op (AlreadyRecorded).
 //
 // Engram access is subprocess-only (save/search); lookups never touch git.
 // `git rev-parse HEAD` (for the commit ref) is the tool's ONLY sanctioned git
@@ -89,11 +95,11 @@ type PersistResult struct {
 	TaskDocAppended bool   `json:"task_doc_appended"`
 }
 
-// ErrTaskDocUnavailable means the durable task-doc appendix could not be
+// ErrTaskDocUnavailable means the SECONDARY task-doc appendix could not be
 // performed (task doc missing, not in a repo, or a read/write failure).
-// Callers surface the D2 FAIL-OPEN marker and exit 2 — the retro has no
-// durable home (the Engram mirror stands when it wrote, and its failure is
-// carried alongside when it did not).
+// Callers surface the D2 FAIL-OPEN marker and exit 2 — the retro's secondary
+// durable copy is lost (the Engram write stands when it succeeded, and its
+// failure is carried alongside when it did not).
 type ErrTaskDocUnavailable struct{ Reason string }
 
 func (e *ErrTaskDocUnavailable) Error() string { return "task doc appendix unavailable: " + e.Reason }
@@ -212,11 +218,11 @@ func nextH2(s string) int {
 	return -1
 }
 
-// CurrentLedger returns the accumulated ledger body for feature: the durable
-// task-doc `## Retros` section merged with the Engram mirror ("" when none
-// exists in either source). Read failures are fail-open: any source that
-// reads contributes; an unreadable source is skipped rather than aborting a
-// persist.
+// CurrentLedger returns the accumulated ledger body for feature: the Engram
+// topic (primary) merged with the task-doc `## Retros` appendix (secondary
+// durable copy); "" when none exists in either source. Read failures are
+// fail-open: any source that reads contributes; an unreadable source is
+// skipped rather than aborting a persist.
 func CurrentLedger(feature string) string {
 	var bodies []string
 	if root := worktree.RepoRootFromCwd(); root != "" {
@@ -264,12 +270,17 @@ func extractRetrosSection(doc string) (string, bool) {
 }
 
 // Persist records a retro ledger entry for (feature, phase, commitRef).
-// The task-doc appendix (odd/tasks/<feature>.md ## Retros) is the durable
-// ledger and ALWAYS runs: any failure there returns ErrTaskDocUnavailable
-// (with the Engram mirror status attached). Engram is a best-effort mirror:
-// when the engram session-ownership guard or the CLI rejects the write, the
+// Engram is the PRIMARY store and is saved first: the observation topic
+// odd/<feature>/retrospective (type learning) is upserted in place, so a
+// re-persist of (feature, phase, commit-ref) never duplicates. The task-doc
+// appendix (odd/tasks/<feature>.md ## Retros) is the SECONDARY durable copy
+// and runs second: any failure there returns ErrTaskDocUnavailable (with the
+// Engram write status attached), and the caller emits the loud FAIL-OPEN
+// marker with exit 2 while the Engram write stands. When the engram
+// session-ownership guard or the standalone CLI rejects the save, the
 // persist still succeeds with EngramWritten=false and the reason in
-// EngramError. Idempotent by (feature, phase, commit-ref).
+// EngramError — the A6 ordering (Engram primary, appendix secondary) is
+// never re-arranged. Idempotent by (feature, phase, commit-ref).
 func Persist(feature, phase, commitRef, summary, detail string) (*PersistResult, error) {
 	res := &PersistResult{Feature: feature, Phase: phase, CommitRef: commitRef}
 	if HasMarker(CurrentLedger(feature), phase, commitRef) {
@@ -301,18 +312,19 @@ func Persist(feature, phase, commitRef, summary, detail string) (*PersistResult,
 }
 
 // docFail wraps a task-doc appendix failure as ErrTaskDocUnavailable,
-// preserving the Engram mirror status for honest, combined reporting.
+// preserving the Engram write status for honest, combined reporting.
 func docFail(res *PersistResult, reason string) error {
 	if res.EngramError != "" {
-		return fmt.Errorf("%w; engram mirror also failed: %s", &ErrTaskDocUnavailable{Reason: reason}, res.EngramError)
+		return fmt.Errorf("%w; engram write also failed: %s", &ErrTaskDocUnavailable{Reason: reason}, res.EngramError)
 	}
 	return &ErrTaskDocUnavailable{Reason: reason}
 }
 
-// Lookup returns deduped retrospectives from the durable task-doc ledger
-// (odd/tasks/*.md ## Retros) merged with any Engram mirrors, optionally
-// filtered to one feature and/or to the verification domain. An engram
-// search failure is fail-open: the doc ledger still answers.
+// Lookup returns deduped retrospectives from the Engram topics (primary,
+// odd/<feature>/retrospective) merged with the task-doc `## Retros`
+// appendixes (secondary durable copies, odd/tasks/*.md), optionally filtered
+// to one feature and/or to the verification domain. An engram search failure
+// is fail-open: the task-doc appendixes still answer.
 func Lookup(feature string, verifyDomain bool) (*Precis, error) {
 	var entries []retroEntry
 	docEntries, err := lookupDocLedger(feature)
@@ -340,8 +352,9 @@ func Lookup(feature string, verifyDomain bool) (*Precis, error) {
 	return buildPrecis(entries, verifyDomain), nil
 }
 
-// lookupDocLedger reads the durable retros ledger from odd/tasks/*.md under
-// the walk-up repo root. Not inside a checkout yields no doc source (nil).
+// lookupDocLedger reads the secondary durable retros appendix from
+// odd/tasks/*.md under the walk-up repo root. Not inside a checkout yields
+// no doc source (nil).
 func lookupDocLedger(feature string) ([]retroEntry, error) {
 	root := worktree.RepoRootFromCwd()
 	if root == "" {

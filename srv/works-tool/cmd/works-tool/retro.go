@@ -17,7 +17,7 @@ import (
 func newRetroCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "retro",
-		Short: "Retro ledger: task-doc appendix (durable) + Engram mirror (best-effort)",
+		Short: "Retro ledger: Engram primary, task-doc ## Retros appendix secondary",
 	}
 	cmd.AddCommand(newRetroPersistCmd())
 	cmd.AddCommand(newRetroLookupCmd())
@@ -31,7 +31,7 @@ func newRetroPersistCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "persist <phase> <feature>",
-		Short: "Record a retro ledger line in odd/tasks/<feature>.md and mirror to Engram",
+		Short: "Record a retro ledger line: Engram primary, task-doc ## Retros appendix secondary",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			phase, feature := args[0], args[1]
@@ -48,8 +48,8 @@ func newRetroPersistCmd() *cobra.Command {
 			if err != nil {
 				var unavailable *retro.ErrTaskDocUnavailable
 				if errors.As(err, &unavailable) {
-					// Durable ledger lost → loud marker (D2) + exit 2. The
-					// Engram mirror status decides the wording.
+					// Secondary task-doc appendix lost → loud marker (D2) + exit 2.
+					// The Engram write status decides the wording.
 					var msg string
 					if res != nil && res.EngramWritten {
 						msg = fmt.Sprintf("FAIL-OPEN: retro persisted to Engram but task doc appendix lost — %v", err)
@@ -75,7 +75,7 @@ func newRetroPersistCmd() *cobra.Command {
 				return nil
 			}
 			if res.EngramError != "" {
-				fmt.Fprintf(os.Stderr, "[warn] engram mirror skipped: %s (task doc ledger stands)\n", res.EngramError)
+				fmt.Fprintf(os.Stderr, "[warn] engram write rejected: %s (task-doc appendix recorded as secondary; Engram primary missing)\n", res.EngramError)
 			}
 			fmt.Printf("Retro recorded: %s [%s] %s (engram=%t task_doc=%t)\n", feature, phase, ref, res.EngramWritten, res.TaskDocAppended)
 			return nil
@@ -128,7 +128,7 @@ func newRetroLookupCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "lookup",
-		Short: "Lookup retrospectives from the task-doc ledger (and Engram mirrors)",
+		Short: "Lookup retrospectives: Engram primary, task-doc ## Retros appendix secondary",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			precis, err := retro.Lookup(feature, verifyDomain)
 			if err != nil {
