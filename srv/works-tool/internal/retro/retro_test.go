@@ -287,3 +287,29 @@ func TestExtractRetrosSectionHeadingOnly(t *testing.T) {
 		t.Fatalf("expected empty section content, got %q", got)
 	}
 }
+
+// regression: the task doc's own prose mentions "under a `## Retros` section
+// (created if missing)" — an inline mention must NEVER count as the section.
+func TestExtractRetrosSectionIgnoresInlineMention(t *testing.T) {
+	doc := "# Feature\n\n- [ ] **T5**: Appends the same entry under a `## Retros` section (created if missing).\n\n## Authorized Scope\n\n- x\n"
+	if _, ok := extractRetrosSection(doc); ok {
+		t.Fatal("inline ## Retros mention must not be treated as a section")
+	}
+}
+
+func TestAppendLedgerToDocIgnoresInlineMention(t *testing.T) {
+	doc := "# Feature\n\n- [ ] **T5**: under a `## Retros` section (created if missing).\n\n## Authorized Scope\n\n- x\n"
+	got := AppendLedgerToDoc(doc, "- [Retro apply] abc123: done")
+	if !strings.Contains(got, "under a `## Retros` section") {
+		t.Fatalf("inline mention lost: %q", got)
+	}
+	if idx := strings.Index(got, "## Authorized Scope"); idx > strings.Index(got, "Retro apply") {
+		t.Fatalf("new section must come AFTER the existing heading, got: %q", got)
+	}
+	if !strings.HasSuffix(got, "- [Retro apply] abc123: done\n") {
+		t.Fatalf("entry not appended as a fresh section at the end: %q", got)
+	}
+	if strings.Count(got, "\n## Retros") != 1 {
+		t.Fatalf("expected exactly one real line-start heading, got: %q", got)
+	}
+}

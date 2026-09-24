@@ -158,13 +158,33 @@ func AppendToLedger(current, entry string) string {
 	return current + "\n" + entry
 }
 
+// indexHeadingLine returns the index of the first line-start occurrence of
+// heading in doc, or -1. The heading must sit at the start of a line — a
+// substring match (e.g. "## Retros" mentioned inside task-description prose)
+// never counts as a real section.
+func indexHeadingLine(doc, heading string) int {
+	for idx := 0; idx < len(doc); {
+		i := strings.Index(doc[idx:], heading)
+		if i == -1 {
+			return -1
+		}
+		pos := idx + i
+		if pos == 0 || doc[pos-1] == '\n' {
+			return pos
+		}
+		idx = pos + len(heading)
+	}
+	return -1
+}
+
 // AppendLedgerToDoc inserts entry under the doc's `## Retros` section —
-// after the heading when the section exists, or as a new section at the end
-// when absent. Pure string helper; callers do the file IO.
+// after the heading when the section exists (line-start heading only), or as
+// a new section at the end when absent. Pure string helper; callers do the
+// file IO.
 func AppendLedgerToDoc(docContent, entry string) string {
 	entry = strings.TrimSpace(entry)
 	const heading = "## Retros"
-	idx := strings.Index(docContent, heading)
+	idx := indexHeadingLine(docContent, heading)
 	if idx == -1 {
 		base := strings.TrimRight(docContent, "\n")
 		if base == "" {
@@ -223,9 +243,11 @@ func CurrentLedger(feature string) string {
 
 // extractRetrosSection returns the content of the document's `## Retros`
 // section (heading line excluded), ending at the next line-start H2 or EOF.
+// Only a line-start heading counts — an inline "## Retros" mention in prose
+// is not a section.
 func extractRetrosSection(doc string) (string, bool) {
 	const heading = "## Retros"
-	idx := strings.Index(doc, heading)
+	idx := indexHeadingLine(doc, heading)
 	if idx == -1 {
 		return "", false
 	}
