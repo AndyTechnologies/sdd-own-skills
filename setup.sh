@@ -1263,39 +1263,64 @@ else
 fi
 echo
 
-# ---- 5d-2 preflight: build sdd-tool (Go binary) ------------------------------------
-echo "  5d-2 — build sdd-tool (Go binary)"
+# ---- 5d-2 preflight: build works-tool (Go binary) ---------------------------------
+# Canonical install: ~/.local/bin/works-tool (acta A8). El binario vive en el
+# HOME del usuario, nunca en el repo; es gitignored por construccion (fuera del
+# arbol). En modo real SOLO: tras un build exitoso se remueve de forma
+# idempotente el binario stale de la era sdd-tool (~/.config/sdd-own/bin/sdd-tool);
+# --check/--dry-run lo reportan como [pendiente] sin mutar nada.
+echo "  5d-2 — build works-tool (Go binary)"
+WORKS_TOOL_BIN="$HOME/.local/bin/works-tool"
+WORKS_TOOL_SRC="$SCRIPT_DIR/srv/works-tool"
+STALE_SDD_TOOL_BIN="$ENV_DIR/bin/sdd-tool"
 if command -v go >/dev/null 2>&1; then
-  SDD_TOOL_BIN="$ENV_DIR/bin/sdd-tool"
-  SDD_TOOL_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/srv/sdd-tool"
-  if [[ -d "$SDD_TOOL_SRC" ]] && [[ -f "$SDD_TOOL_SRC/cmd/sdd-tool/main.go" ]]; then
+  if [[ -d "$WORKS_TOOL_SRC" ]] && [[ -f "$WORKS_TOOL_SRC/cmd/works-tool/main.go" ]]; then
     if [[ "$MCP_MODE" == "check" ]]; then
-      if [[ -x "$SDD_TOOL_BIN" ]]; then
-        printf '  [up-to-date] %s\n' "${SDD_TOOL_BIN#$HOME/}"
+      if [[ -x "$WORKS_TOOL_BIN" ]]; then
+        printf '  [up-to-date] %s\n' "${WORKS_TOOL_BIN#$HOME/}"
         mcp_report_ok=$((mcp_report_ok + 1))
       else
-        printf '  [pendiente]  sdd-tool no compilado; se construira en modo real\n'
+        printf '  [pendiente]  works-tool no compilado; se construira en modo real\n'
+        mcp_report_pend=$((mcp_report_pend + 1))
+      fi
+      if [[ -e "$STALE_SDD_TOOL_BIN" ]]; then
+        printf '  [pendiente]  remover stale %s en modo real\n' "${STALE_SDD_TOOL_BIN#$HOME/}"
         mcp_report_pend=$((mcp_report_pend + 1))
       fi
     elif [[ "$MCP_MODE" == "dry-run" ]]; then
-      printf '  [pendiente]  compilar %s (dry-run no ejecuta go build)\n' "${SDD_TOOL_BIN#$HOME/}"
+      printf '  [pendiente]  compilar %s (dry-run no ejecuta go build)\n' "${WORKS_TOOL_BIN#$HOME/}"
       mcp_report_pend=$((mcp_report_pend + 1))
+      if [[ -e "$STALE_SDD_TOOL_BIN" ]]; then
+        printf '  [pendiente]  remover stale %s en modo real\n' "${STALE_SDD_TOOL_BIN#$HOME/}"
+        mcp_report_pend=$((mcp_report_pend + 1))
+      fi
     else
-      mkdir -p "$(dirname "$SDD_TOOL_BIN")"
-      if go build -C "$SDD_TOOL_SRC" -o "$SDD_TOOL_BIN" ./cmd/sdd-tool/ 2>&1 && [[ -x "$SDD_TOOL_BIN" ]]; then
-        chmod 755 "$SDD_TOOL_BIN"
-        printf '  [compiled]   %s\n' "${SDD_TOOL_BIN#$HOME/}"
+      mkdir -p "$(dirname "$WORKS_TOOL_BIN")"
+      if go build -C "$WORKS_TOOL_SRC" -o "$WORKS_TOOL_BIN" ./cmd/works-tool/ 2>&1 && [[ -x "$WORKS_TOOL_BIN" ]]; then
+        chmod 755 "$WORKS_TOOL_BIN"
+        printf '  [compiled]   %s\n' "${WORKS_TOOL_BIN#$HOME/}"
         mcp_report_updated=$((mcp_report_updated + 1))
+        # Real mode only: idempotent removal of the stale sdd-tool binary
+        # (acta A8) — solo tras un build exitoso.
+        if [[ -e "$STALE_SDD_TOOL_BIN" ]]; then
+          if rm -f "$STALE_SDD_TOOL_BIN"; then
+            printf '  [removed]    %s (stale sdd-tool binario)\n' "${STALE_SDD_TOOL_BIN#$HOME/}"
+            mcp_report_updated=$((mcp_report_updated + 1))
+          else
+            printf '  [WARN]       no se pudo remover stale %s\n' "${STALE_SDD_TOOL_BIN#$HOME/}" >&2
+            mcp_report_warn=$((mcp_report_warn + 1))
+          fi
+        fi
       else
-        printf '  [WARN]       go build failed; sdd-tool no disponible (no bloqueante)\n' >&2
+        printf '  [WARN]       go build failed; works-tool no disponible (no bloqueante)\n' >&2
         mcp_report_warn=$((mcp_report_warn + 1))
       fi
     fi
   else
-    printf '  [skip]       srv/sdd-tool no encontrado en el repo\n'
+    printf '  [skip]       srv/works-tool no encontrado en el repo\n'
   fi
 else
-  printf '  [WARN]       go no encontrado; sdd-tool no compilado (no bloqueante)\n' >&2
+  printf '  [WARN]       go no encontrado; works-tool no compilado (no bloqueante)\n' >&2
 fi
 echo
 
