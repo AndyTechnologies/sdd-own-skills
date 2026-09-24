@@ -188,5 +188,10 @@ Checklist applied to this change, resolved by path from `skills/_shared/architec
 - Commits: work-unit commits on a feature branch (conventional, no push unless asked).
 - Deliveries: delivery_strategy `ask-on-risk` → user chose chain_strategy `feature-branch-chain` (2026-09-23): feature branch accumulates integration; PRs target the previous PR branch; only the tracker merges to main. Slice boundaries to be recorded per work-unit commit.
 - Plan: `approved` — architecture-plan acta integrated into this task doc (artifact `arch-plan.md`, decisions A1–A13); plan phase gate passed; ready for apply (T1–T10).
+- Slice boundaries (2026-09-24): user chose 3-PR chain (`feature-branch-chain`), real line counts vs origin/main @ 7dbabb7 exceeded estimates (quest ~2900 incl. `37314bc` unpushed, core ~4800, wiring ~1170) → size-exception-worthy slices reported in each PR, one honest slicing pass only, per `chained-pr`.
+  - PR #10 (tracker, draft/no-merge): `feat/works-tool-rewire` @ 779382c → `main`.
+  - PR #11 (quest): `feat/odd-workflow-refactor` @ 6478acf → `main` (includes `37314bc` drop-sdd-prefix, child of `6478acf`, not yet on origin).
+  - PR #12 (core): `feat/works-tool-core` @ 978bb8d → `feat/odd-workflow-refactor` (slice 6478acf..978bb8d).
+  - PR #13 (wiring): `feat/works-tool-rewire` @ 779382c → `feat/works-tool-core` (slice 978bb8d..779382c).
 
 ## Retros
