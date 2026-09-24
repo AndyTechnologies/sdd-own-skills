@@ -27,7 +27,7 @@
 #   overlays/skills/<skill>/   bloques sdd-own sobre el SKILL.md que gentle-ai instala
 #   overlays/shared/<f>.md     bloques sdd-own sobre _shared/<f>
 #   overlays/commands/<f>.md   bloques sdd-own sobre ~/.config/opencode/commands/<f>
-#   wiring/prompts/sdd/*.md    prompts nuestros (sdd-rfc-author.md, sdd-architecture-plan.md)
+#   wiring/prompts/sdd/*.md    prompts nuestros (rfc-author.md, architecture-plan.md)
 #   wiring/sdd-own-routing.md  routing extension (bloque en la sección agent-routing del config)
 #   wiring/opencode.sdd.json   fragmento SDD mergeado sobre el config real de opencode
 #
@@ -107,7 +107,7 @@ SHARED_BOOTSTRAP=(README.md engram-convention.md openspec-convention.md persiste
   research-lifecycle.md sdd-orchestrator-sections.md sdd-status-contract.md skill-resolver.md)
 
 # Prompts propios que desplegamos (Alan no gestiona estos 2 prompts).
-OWN_PROMPTS=(sdd-rfc-author.md sdd-architecture-plan.md)
+OWN_PROMPTS=(rfc-author.md architecture-plan.md)
 
 # --- Opciones --------------------------------------------------------------
 
@@ -652,7 +652,7 @@ fi
 # Prompts propios → original en ~/.config/sdd-own/prompts/sdd/ + symlinks por
 # archivo en ~/.config/opencode/prompts/sdd/ y ~/.claude/prompts/sdd/ (no se
 # symlinkea el directorio completo porque ahí conviven prompts de Alan).
-echo "  prompts propios (sdd-rfc-author.md, sdd-architecture-plan.md)"
+echo "  prompts propios (rfc-author.md, architecture-plan.md)"
 for pf in "${OWN_PROMPTS[@]}"; do
   src_pf="$PROMPTS_SRC_DIR/$pf"
   dest_own_pf="$SDD_OWN_PROMPTS_SDD_DIR/$pf"

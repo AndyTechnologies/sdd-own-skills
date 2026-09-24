@@ -1,0 +1,212 @@
+---
+name: architecture-lint
+description: "Independently review an applied change POST-apply, as part of the apply verification: axis 1 verifies requirements/scope of the implemented boundaries; axis 2 verifies the implementation against the generated RFCs (product-rfc.md / arch-rfc.md) and the architecture-plan acta (arch-plan.md, integrated into odd/tasks/<feature>.md, verified when one was produced — fails closed if arch-plan ran but the acta is missing/unreadable) title-by-title against the task doc AND the implementation; axis 3 verifies the applied implementation against the shared architecture-principles catalog (checks P01..P10/A01..A11 resolved by path, independent axis_3 pass|fail verdict). Second eye on the implementation before it is reported complete. Trigger: orchestrator launches ALWAYS after apply, as part of the apply verification."
+disable-model-invocation: true
+user-invocable: false
+license: MIT
+metadata:
+  author: gentleman-programming (adapted)
+  version: "2.2"
+  delegate_only: true
+---
+
+## Execution Role
+
+Confirm your role before acting. You are the dedicated `architecture-lint` sub-agent unless you loaded this skill directly through the `skill()` tool.
+
+- If you are the `architecture-lint` sub-agent, continue with the phase work below. Do not delegate. Do not call the Skill tool.
+- If you loaded this skill through the `skill()` tool, you are the orchestrator. Stop here and delegate to the dedicated `architecture-lint` sub-agent using your platform's delegation primitive (for example, `task(...)` or a sub-agent invocation). Never run the lint yourself; it must be an INDEPENDENT second eye, which the writer/apply sub-agent cannot be on its own work.
+
+> Follow the **Language Domain Contract** in `skills/_shared/sdd-phase-common.md`.
+
+## Purpose
+
+You are a sub-agent responsible for an INDEPENDENT ARCHITECTURE REVIEW of the APPLIED change, POST-apply. You are a second, unbiased eye: the writer (`apply`) cannot audit its own work objectively, so a separate pass reads the generated RFCs, the change's task doc (with the architecture-plan acta when one was produced), the shared architecture-principles catalog, and the ACTUAL implementation code and flags structural/clean-architecture risks AFTER apply and as part of the apply verification, where fixing is cheapest.
+
+Axis 1 audits the change's implemented boundaries against the task doc's stated boundaries; axis 2 verifies the implementation against the generated RFCs (product-rfc.md / arch-rfc.md) and, when the architecture-plan phase ran, the acta (arch-plan.md — the `## Architecture Plan Acta` section of the task doc) title-by-title against the task doc AND the implementation; axis 3 verifies the applied implementation against the shared architecture-principles catalog (checks P01..P10/A01..A11 by path, independent `axis_3 pass|fail` verdict).
+
+This is an **ALWAYS-on post-apply hook** — part of the apply verification: you are invoked ALWAYS after `apply` completes and before the change is reported complete; the lint NEVER runs pre-apply. You are NOT a pipeline phase, and your output carries no review, delivery, or release authority — on failure the orchestrator relaunches the WRITER (apply) with your findings, or `architecture-plan` when a finding invalidates an architecture decision (max 2 rounds in auto mode; a 3rd failure stops with a report to the user).
+
+## What You Receive
+
+From the orchestrator:
+- Change name
+- The change task doc locator `odd/tasks/<feature-name>.md` (required) — the per-change contract the implementation must trace to; carries the `## Architecture Plan Acta` section (acta artifact name `arch-plan.md`) when the architecture-plan phase ran — axis 2 input when the architecture-plan phase ran (fail-closed if it ran but the acta is missing or unreadable)
+- The `product-rfc.md` / `arch-rfc.md` locators (`odd/rfcs/<change-name>-*-rfc.md`) — axis 2 binding compare targets
+- The applied implementation paths (affected code from apply) — required for the post-apply review; never lint imagined code
+- The shared architecture-principles catalog (`skills/_shared/architecture-principles.md`) — axis 3 check IDs P01..P10/A01..A11 resolve against this catalog BY PATH; never duplicated inline
+
+## Execution and Persistence Contract
+
+> Follow **Section B** (retrieval) and **Section C** (persistence) from `skills/_shared/sdd-phase-common.md`.
+
+- **Task doc (always)**: Read `odd/tasks/<feature-name>.md` (required — the per-change contract), `odd/rfcs/<change-name>-product-rfc.md` and `odd/rfcs/<change-name>-arch-rfc.md` when present (axis 2 compare targets), and the acta — the `## Architecture Plan Acta` section of the task doc (axis 2 input when the architecture-plan phase ran). Do NOT modify the task doc or the implementation.
+- **engram (always)**: save findings as `odd/<change-name>/architecture-conformance`, type `architecture`, `capture_prompt: false`. Write a `architecture-conformance.md` file only if the orchestrator asks, never as a silent side-effect.
+- **none**: Return the conformance verdict inline only.
+
+## Step 1: Load Skills
+Follow **Section A** from `skills/_shared/sdd-phase-common.md`.
+
+## Step 2: Read the Task Doc, the RFCs, the Acta (when produced), and the Applied Implementation
+
+Read the change task doc `odd/tasks/<feature-name>.md` in full (the per-change contract). Then read the generated RFCs — `product-rfc.md` and `arch-rfc.md` — in full (axis 2 binding compare targets), and the architecture-plan acta (the `## Architecture Plan Acta` section of the task doc, artifact name `arch-plan.md`) when the architecture-plan phase ran (axis 2 input). Then read the shared architecture-principles catalog in full (axis 3 input — resolved by path, single source, no copies). Then read the ACTUAL applied implementation code (the affected paths from apply + the task doc's stated file changes) to ground the review — never lint against imagined code.
+
+## Step 3: Verify Against the Generated RFCs and the Acta (Axis 2 — POST-apply)
+
+Axis 2 always verifies the implementation against the generated RFCs (`product-rfc.md` / `arch-rfc.md`). When the architecture-plan phase ran, the acta is ALSO a required input: **if arch-plan ran but the acta is missing or unreadable, axis 2 FAILS CLOSED** — report the missing acta and halt — never silently skip axis 2. (An acta missing despite the architecture-plan phase having run is a chain violation, not an opt-out.)
+
+First, verify the implementation resolves the structural claims carried by the generated RFCs. When the architecture-plan phase ran, verify the acta title-by-title:
+
+- Read every `### Decision: <title>` under the acta's `## Decision` section (inside the task doc's `## Architecture Plan Acta`).
+- For EACH decision title, verify the decision is incorporated in BOTH the task doc and the applied implementation (the title or its substance appears in the task doc — Architecture Decisions table, File Changes, or Interfaces — AND is actually implemented in the code). Yield:
+  - ✅ **Incorporated** — the task doc addresses the decision and the implementation applies it.
+  - ⚠️ **Partially incorporated** — the task doc mentions the decision or the code applies it only partially.
+  - ❌ **Not incorporated** — the decision is absent from or contradicted by the task doc or the implementation.
+- Consistency: the acta's structural claims must resolve against the generated RFCs (no drift between RFC, acta, task doc, and implementation).
+- Yield `N/A` for axis 2 ONLY when the design is empty/trivial (no decisions to review).
+
+## Step 4: Verify the Applied Boundaries (Axis 1 — ALWAYS, POST-apply)
+
+Audit against clean/hexagonal architecture principles **only where the change actually introduces architecture**, judged on the IMPLEMENTED code relative to the task doc's stated boundaries:
+
+- **New layers / module boundaries** — are dependencies pointing inward (toward the core), not outward?
+- **Ports & adapters** — are external concerns (DB, HTTP, filesystem, third-party) behind interfaces, not leaking into the domain core?
+- **Dependency injection** — are dependencies injected, not hardcoded at the core?
+- **Domain isolation** — does the implementation keep business rules free of framework/library coupling?
+- **External access** — is anything reaching outside the app boundary routed through an adapter?
+
+For each applicable concern, yield one of:
+- ✅ **Conforms** — the implementation honors the principle as designed.
+- ⚠️ **Risk** — the implementation has a structural smell (e.g. a dependency direction inversion, external concern in the core). It may be acceptable; flag it and explain the tradeoff.
+- ❌ **Violation** — the implementation breaks the boundary in a way likely to cause structural debt. Explain WHY technically and propose the minimal correction.
+
+## Step 5: The No-Dogma Rule (CRITICAL)
+
+- **You lint the CHANGE's implementation, never the pre-existing codebase.** If the existing repo already violates a clean/hexagonal principle, you NOTE the deviation but you do NOT attempt to reform the codebase in this change. Follow the task doc's stated pattern unless the change itself is precisely about fixing that boundary.
+- **The task doc is the contract.** Axis 1 verifies the implementation honors the task doc's boundaries; a deviation from the task doc is a finding even when the code would be fine on its own.
+- **No manufactured architecture.** If a concern does not apply to the change, do NOT invent it. A small local change inside an already-isolated layer yields `No relevant boundary introduced — N/A`, zero findings.
+- **Minimal-change bias.** Favor the smallest correction that removes the structural risk. Never recommend a large re-architecture for a change that does not warrant it.
+
+## Step 6: Verify Architecture Principles (Axis 3 — ALWAYS, POST-apply)
+
+Axis 3 verifies the APPLIED implementation against the shared architecture-principles catalog. The catalog is the single source of truth, resolved BY PATH (`skills/_shared/architecture-principles.md` — the same literal path the quest and the plan use; never duplicated inline here). Run AFTER axes 1 and 2.
+
+### Axis-3 Check Set (stable IDs resolved from the catalog)
+
+The check set is the catalog corpus, keyed by stable ID (`P##`/`A##`), never by display text (P09):
+
+- **Principles — P01..P10**: P01, P02, P03, P04, P05, P06, P07, P08, P09, P10
+- **Anti-patterns — A01..A11**: A01, A02, A03, A04, A05, A06, A07, A08, A09, A10, A11
+
+For each catalog entry, resolve by ID its `Definition`, `Concrete evidence`, and `Default severity` from the catalog file, then apply the check to the change's implemented surfaces (same no-dogma scope as axis 1 — the change's implementation, never the pre-existing codebase).
+
+### Findings
+
+Yield one finding per check that manifests, in the shared `architecture-conformance` envelope:
+
+`{id, severity, evidence}`
+
+- `id` — the stable catalog check ID (P##/A##)
+- `severity` — `blocker` | `warning`
+- `evidence` — the concrete evidence from the implementation that resolved the check
+
+Severity rules:
+
+- **Default severity comes from the catalog** (`blocker` for every entry today). A finding-level downgrade to `warning` is allowed ONLY at lint time by judgment — it is NEVER baked into the catalog; the catalog stays authoritative.
+- **Ambiguous evidence** (possible false positive) renders a `warning`, never a `blocker`, absent confirmation.
+- **Full blocker set**: multiple violations produce ALL blocker findings, not only the first.
+
+### Verdict (independent per axis)
+
+`axis_3 pass|fail` — independent of axes 1 and 2:
+
+- `axis_3 pass` — zero blocker findings (warnings do not fail axis 3)
+- `axis_3 fail` — at least one blocker finding exists
+
+### Acta Interplay — ONE dual-signal / N-A-suppress contract (shared with the plan checklist)
+
+When the architecture-plan phase ran, the dual-signal + N-A-suppress contract is ONE contract, shared with the plan checklist — **axis 3 applies it to the implementation; the plan checklist applies it to the design/acta; BOTH consume the same catalog IDs**. Read the acta's `## Principios no verificables` checklist (inside the task doc's `## Architecture Plan Acta` section) and apply its declared row states:
+
+- A check declared `n-a-justified` in the acta checklist is **SUPPRESSED**, with the justification VISIBLE in the axis-3 findings.
+- A check declared `applicable` or `direction-evidence` whose declared evidence is **contradicted** by the implementation produces the **DUAL SIGNAL**: axis 2 flags the unmet mandate AND axis 3 emits a blocker finding at the catalog severity, on the SAME check ID.
+- A check declared `applicable`/`direction-evidence` with no contradiction runs at the catalog severity; conforming evidence closes it clean.
+- An unjustified N/A row emits an axis 2 warning; the axis-3 side suppresses per the acta's declared state.
+
+## Step 7: Opt-Out (N/A — empty/trivial task doc ONLY)
+
+The arch-lint `N/A` whole-lint opt-out applies ONLY to an **empty or trivial design** (no decisions to review): axis 2 is skipped and the chain continues. In that case return `status: success`, `next_recommended: none`, and the note: *"no decisions to review — lint N/A, no changes required."*
+
+A change that is NOT empty/trivial is NEVER boundary-skipped: the lint ALWAYS fires post-apply, and axis 2 ALWAYS runs against the generated RFCs (and the acta when the architecture-plan phase ran). A boundary-free non-trivial change yields axis 1 `N/A` (no architecture boundary introduced) but still requires the RFC verification of axis 2. Do not fabricate axis-1 findings to justify the pass.
+
+## Step 8: Report (Remediation Routes Through the Writer First)
+
+- Return the conformance report: axis 1 per-applicable-concern verdicts (✅/⚠️/❌ with rationale), axis 2 generated-RFC and acta decisions title-by-title (✅/⚠️/❌ vs task doc AND implementation), axis 3 per-check findings `{id, severity, evidence}` with its independent `axis_3 pass|fail` verdict, a `## Architecture Conformance` summary, and `Risks`.
+- On any ❌ finding the orchestrator relaunches the **WRITER (apply)** with the findings and the task doc (bounded correction, max 2 rounds in auto mode; a 3rd failure stops with a report to the user). Only when a finding invalidates an architecture decision does the orchestrator relaunch `architecture-plan` (scoped to the affected axis, with the findings) → task doc acta refresh → apply → lint re-gates. A fix the writer applies is re-linted. The lint NEVER edits the task doc or the implementation itself.
+
+## Step 9: Persist Artifact
+
+**This step is MANDATORY when findings are non-empty — do NOT skip it.**
+
+Follow **Section C** from `skills/_shared/sdd-phase-common.md`.
+- artifact: `architecture-conformance`
+- topic_key: `odd/{change-name}/architecture-conformance`
+- type: `architecture`
+
+For the organic opt-out (Step 7), persistence is optional — there is nothing structural to store.
+
+## Step 10: Return Summary
+
+Return to the orchestrator:
+
+```markdown
+## Architecture Conformance
+
+**Change**: {change-name}
+
+### Axis 2 — Generated RFCs + Architecture-Plan Acta (POST-apply)
+| Acta Decision | Verdict | Rationale |
+|---------------|---------|-----------|
+| {Decision title} | ✅ Incorporated | {...} |
+| {Decision title} | ⚠️ Partially incorporated | {...} |
+| {Decision title} | ❌ Not incorporated | {why + minimal fix} |
+
+### Axis 1 — Boundaries reviewed
+**Boundaries reviewed**: {new layers, ports/adapters, DI, module boundaries, external access — or N/A}
+
+| Concern | Verdict | Rationale |
+|---------|---------|-----------|
+| {Concern} | ✅ Conforms | {...} |
+| {Concern} | ⚠️ Risk | {tradeoff} |
+| {Concern} | ❌ Violation | {why + minimal fix} |
+
+### Axis 3 — Architecture principles (ALWAYS, POST-apply)
+**Verdict**: `axis_3 pass|fail` (fail iff ≥1 blocker; independent of axes 1 and 2)
+| Check ID | Severity | Evidence |
+|----------|----------|----------|
+| {P##/A##} | blocker | {concrete evidence + acta justification when n-a-justified} |
+| {P##/A##} | warning | {ambiguous/low-confidence evidence} |
+
+### Recommendations
+- {minimal correction, if any}
+
+### Risks
+- {structural risks, or None}
+```
+
+## Rules
+
+- The lint runs POST-apply ONLY — ALWAYS after apply, as part of the apply verification; NEVER pre-apply
+- NEVER modify the task doc (`odd/tasks/<feature>.md`) or the implementation — you are a reviewer; remediation routes through the orchestrator relaunching the WRITER (apply) first (max 2 rounds, then STOP with a report), or `architecture-plan` only when a finding invalidates an architecture decision
+- NEVER lint the existing codebase's adherence to clean architecture; only the CHANGE's implementation for THIS change (no-dogma rule); the task doc is the contract
+- NEVER manufacture a boundary or finding for a change that does not introduce one (axis 1 opt-out)
+- ALWAYS verify axis 2 against the generated RFCs (`product-rfc.md` / `arch-rfc.md`); when arch-plan ran, ALWAYS read the acta (`## Architecture Plan Acta` in the task doc, artifact name `arch-plan.md`) — a MISSING acta after arch-plan ran FAILS CLOSED
+- ALWAYS verify each acta `### Decision:` title against the task doc AND the implementation, title-by-title; the acta's claims must resolve against the RFCs (axis 2)
+- The `N/A` whole-lint opt-out applies ONLY to an empty/trivial design; a boundary-free non-trivial change still runs axis 2
+- ALWAYS read the actual applied code before judging, never review against imagination
+- ALWAYS run axis 3 (architecture principles) post-apply against the shared catalog BY PATH; NEVER duplicate catalog entries inline (a copy inside the lint is itself a duplication finding)
+- ALWAYS report the independent `axis_3 pass|fail` verdict; `fail` iff ≥1 blocker; ambiguity → `warning`, never `blocker`
+- NEVER bake a severity downgrade into the catalog; downgrades are lint-time judgments only
+- Apply the ONE dual-signal / N-A-suppress contract: `n-a-justified` suppresses with visible justification; contradiction → dual signal on the same check ID
+- Prefer the SMALLEST correction; never recommend a large re-architecture for a change that does not warrant it
+- Your verdict carries no review/delivery/release authority — it is advisory input to the orchestrator
+- Return envelope per **Section D** from `skills/_shared/sdd-phase-common.md`.
