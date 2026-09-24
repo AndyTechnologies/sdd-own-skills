@@ -2,7 +2,7 @@
 
 One contract consumed by the MCP tool handlers (``worktree_mutation.py``,
 ``local_read.py``). Python is authoritative for writes (locks + hint index);
-sdd-tool (Go) reads locks read-only (observer, fail-open).
+works-tool (Go) reads locks read-only (observer, fail-open).
 
 Safety contract:
 - Never silently take over a live claim: ``exists_active_other`` always denies

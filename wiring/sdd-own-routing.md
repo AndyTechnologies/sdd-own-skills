@@ -25,6 +25,14 @@ Unified quest flow (ODD-first):
    verification: it checks the implemented work against the generated RFCs
    and the task doc — including the integrated architecture-plan acta when
    that phase ran — before the change is reported complete.
+6. `works-tool` (canonical `~/.local/bin/works-tool`) supports the ODD
+   work-unit lifecycle: run `worktree verify --feature <feature>` BEFORE
+   starting a work unit (root/task-doc signals are BLOCKING, branch
+   informative); `retro persist <phase> <feature> --body <line>` on change
+   close (Engram primary, task-doc `## Retros` appendix secondary, FAIL-OPEN
+   exit 2 when a write is lost); `incidents record` when a failure blocks a
+   unit (`--kind blocker|test_failure|transport|other`); `incidents list
+   --feature` / `retro lookup --feature` for discovery. See skills/works-tool.
 Automatic pace is delegated review: in auto mode the orchestrator records
 the delegated review result of every gate (quest RFCs, plan, lint); no
 phase EVER self-approves.
