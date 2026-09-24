@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestResolveBodyFromFlag(t *testing.T) {
@@ -37,7 +38,7 @@ func TestResolveBodyMissing(t *testing.T) {
 	}
 }
 
-func TestResolvePersistBodyVerifyDomainFiltersBody(t *testing.T) {
+func TestResolveBodyVerifyDomainFilters(t *testing.T) {
 	body := `## What Worked
 
 - everything
@@ -50,7 +51,7 @@ func TestResolvePersistBodyVerifyDomainFiltersBody(t *testing.T) {
 
 - incident one
 `
-	got, err := ResolvePersistBody("test-change", body, "", true)
+	got, err := ResolveBody(body, "", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,15 +66,15 @@ func TestResolvePersistBodyVerifyDomainFiltersBody(t *testing.T) {
 	}
 }
 
-func TestResolvePersistBodyVerifyDomainNoSections(t *testing.T) {
-	_, err := ResolvePersistBody("test-change", "## What Worked\n\nnothing special\n", "", true)
+func TestResolveBodyVerifyDomainNoSections(t *testing.T) {
+	_, err := ResolveBody("## What Worked\n\nnothing special\n", "", true)
 	if err == nil {
 		t.Fatal("expected error when body has no verification-domain sections")
 	}
 }
 
-func TestResolvePersistBodyNonVerifyDomain(t *testing.T) {
-	got, err := ResolvePersistBody("test-change", "plain body", "", false)
+func TestResolveBodyNonVerifyDomain(t *testing.T) {
+	got, err := ResolveBody("plain body", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,158 +83,102 @@ func TestResolvePersistBodyNonVerifyDomain(t *testing.T) {
 	}
 }
 
-func TestResolvePersistBodyVerifyDomainFromFile(t *testing.T) {
-	dir := t.TempDir()
-	f := filepath.Join(dir, "body.md")
-	os.WriteFile(f, []byte("## Verification Gaps\n\n- from file gap\n"), 0o644)
-	got, err := ResolvePersistBody("test-change", "", f, true)
-	if err != nil {
-		t.Fatal(err)
+func TestSplitBody(t *testing.T) {
+	summary, detail := SplitBody("\n\nFirst line\n\nRest one\nRest two\n")
+	if summary != "First line" {
+		t.Fatalf("summary: got %q", summary)
 	}
-	if !strings.Contains(got, "- from file gap") {
-		t.Fatalf("file body not filtered/persisted: %q", got)
+	if detail != "Rest one\nRest two" {
+		t.Fatalf("detail: got %q", detail)
 	}
-}
-
-func TestResolvePersistBodyVerifyDomainRequiresSource(t *testing.T) {
-	_, err := ResolvePersistBody("test-change", "", "", true)
-	if err == nil {
-		t.Fatal("expected error when verify-domain has no body and no repo verify-report")
+	single, d := SplitBody("only line")
+	if single != "only line" || d != "" {
+		t.Fatalf("single-line: summary=%q detail=%q", single, d)
+	}
+	empty, e := SplitBody("   \n  \n")
+	if empty != "" || e != "" {
+		t.Fatalf("blank body: summary=%q detail=%q", empty, e)
 	}
 }
 
-func TestDeriveVerifyDomainFromReportLiteralSections(t *testing.T) {
-	report := `## Verification Report
-
-## Verification Gaps
-
-- gap from literal
-
-## Verify-Phase Incidents
-
-- incident from literal
-`
-	got := deriveVerifyDomainFromReport(report)
-	if !strings.Contains(got, "- gap from literal") || !strings.Contains(got, "- incident from literal") {
-		t.Fatalf("literal sections not preserved: %q", got)
+func TestBuildLedgerEntry(t *testing.T) {
+	got := BuildLedgerEntry("verify", "abc123", "root and task doc verified", "line two")
+	want := "- [Retro verify] abc123: root and task doc verified\n  line two"
+	if got != want {
+		t.Fatalf("got:\n%q\nwant:\n%q", got, want)
+	}
+	flat := BuildLedgerEntry("verify", "abc123", "summary only", "")
+	if flat != "- [Retro verify] abc123: summary only" {
+		t.Fatalf("flat entry wrong: %q", flat)
 	}
 }
 
-func TestDeriveVerifyDomainFromReportIssuesFound(t *testing.T) {
-	report := `## Verification Report
-
-Some preamble.
-
-### Issues Found
-
-**CRITICAL**: None.
-
-1. **WARNING** — dashboard envelope subset is open.
-2. **SUGGESTION** — add over-cap test.
-
-Prior CRITICAL-1 → CLOSED with evidence.
-
-### Verdict
-
-PASS WITH WARNINGS.
-`
-	got := deriveVerifyDomainFromReport(report)
-	if !strings.Contains(got, "## Verification Gaps") || !strings.Contains(got, "WARNING") || !strings.Contains(got, "SUGGESTION") {
-		t.Fatalf("Issues Found warnings/suggestions not mapped to gaps: %q", got)
+func TestHasMarker(t *testing.T) {
+	ledger := "- [Retro explore] 111: first\n- [Retro verify] abc123: second\n  detail line"
+	if !HasMarker(ledger, "verify", "abc123") {
+		t.Fatal("expected marker present")
 	}
-	if !strings.Contains(got, "## Verify-Phase Incidents") || !strings.Contains(got, "CRITICAL") {
-		t.Fatalf("Issues Found criticals not mapped to incidents: %q", got)
+	if HasMarker(ledger, "verify", "zzz999") {
+		t.Fatal("expected different ref NOT present")
 	}
-	if strings.Contains(got, "Verdict") || strings.Contains(got, "preamble") {
-		t.Fatalf("non-issue content leaked: %q", got)
+	if HasMarker(ledger, "apply", "abc123") {
+		t.Fatal("expected different phase NOT present")
+	}
+	if HasMarker("", "verify", "abc123") {
+		t.Fatal("empty ledger must not contain markers")
 	}
 }
 
-func TestDeriveVerifyDomainFromReportEmpty(t *testing.T) {
-	got := deriveVerifyDomainFromReport("## Verification Report\n\nnothing here\n")
-	if got != "" {
-		t.Fatalf("expected empty derivation, got %q", got)
+func TestAppendToLedger(t *testing.T) {
+	got := AppendToLedger("- [Retro explore] 111: first", "- [Retro verify] abc123: second")
+	want := "- [Retro explore] 111: first\n- [Retro verify] abc123: second"
+	if got != want {
+		t.Fatalf("got:\n%q\nwant:\n%q", got, want)
+	}
+	if first := AppendToLedger("", "- [Retro verify] abc123: first"); first != "- [Retro verify] abc123: first" {
+		t.Fatalf("empty start wrong: %q", first)
 	}
 }
 
-func TestDeriveVerifyDomainFromReportKeywordInTableRow(t *testing.T) {
-	// Keyword substrings inside a table row must NOT activate a section and
-	// must NOT drag the whole document into the derived body.
-	report := `## Verification Report
-
-| Scenario | Result |
-|----------|--------|
-| Retro precis mentions verify-phase incidents inside a row | ⚠️ PARTIAL |
-| Retro precis mentions verification gaps inside a row | ✅ COMPLIANT |
-
-### Issues Found
-
-1. **WARNING** — real gap one.
-2. **SUGGESTION** — real suggestion.
-
-### Verdict
-
-PASS WITH WARNINGS.
-`
-	got := deriveVerifyDomainFromReport(report)
-	if strings.Contains(got, "table row") || strings.Contains(got, "⚠️") {
-		t.Fatalf("table-row keyword leaked into derived body: %q", got)
+func TestAppendLedgerToDocFresh(t *testing.T) {
+	got := AppendLedgerToDoc("# Works-tool Re-wire\n\nSome body.\n", "- [Retro verify] abc123: ok")
+	if !strings.Contains(got, "## Retros") {
+		t.Fatalf("Retros section missing:\n%s", got)
 	}
-	if !strings.Contains(got, "real gap one") || !strings.Contains(got, "real suggestion") {
-		t.Fatalf("Issues Found mapping missing: %q", got)
+	if !strings.HasSuffix(got, "\n- [Retro verify] abc123: ok\n") {
+		t.Fatalf("entry not appended at end:\n%s", got)
+	}
+	if strings.Count(got, "## Retros") != 1 {
+		t.Fatalf("expected exactly one Retros heading:\n%s", got)
 	}
 }
 
-func TestExtractH2SectionsWholeHeadingOnly(t *testing.T) {
-	body := "## Verification Gaps\n\n- gap one\n\n## What Worked\n\n- fine\n\n## Verify-Phase Incidents\n\n- incident one\n"
-	sections := extractH2Sections(body, "Verification Gaps", "Verify-Phase Incidents")
-	if len(sections) != 2 {
-		t.Fatalf("want 2 sections, got %d: %q", len(sections), sections)
-	}
-	if !strings.Contains(sections[0], "- gap one") || strings.Contains(sections[0], "What Worked") {
-		t.Fatalf("first section wrong: %q", sections[0])
-	}
-	if !strings.Contains(sections[1], "- incident one") {
-		t.Fatalf("second section wrong: %q", sections[1])
+func TestAppendLedgerToDocExistingSectionAtEOF(t *testing.T) {
+	doc := "# Title\n\n## What Worked\n\n- x\n\n## Retros\n\n- [Retro explore] 111: first\n"
+	got := AppendLedgerToDoc(doc, "- [Retro verify] abc123: second\n  detail")
+	if !strings.Contains(got, "- [Retro explore] 111: first\n- [Retro verify] abc123: second\n  detail") {
+		t.Fatalf("entry not appended inside Retros section:\n%s", got)
 	}
 }
 
-func TestExtractH2SectionsNoMatch(t *testing.T) {
-	sections := extractH2Sections("## What Worked\n\n- fine\n", "Verification Gaps")
-	if len(sections) != 0 {
-		t.Fatalf("expected no sections, got %d", len(sections))
+func TestAppendLedgerToDocExistingSectionWithNextHeading(t *testing.T) {
+	doc := "# Title\n\n## Retros\n\n- [Retro explore] 111: first\n\n## Risks\n\n- none\n"
+	got := AppendLedgerToDoc(doc, "- [Retro verify] abc123: second\n  detail")
+	// Entry must be inserted BEFORE the Risks heading, still under Retros.
+	risks := strings.Index(got, "## Risks")
+	explore := strings.Index(got, "[Retro explore]")
+	verify := strings.Index(got, "[Retro verify]")
+	if !(explore < verify && verify < risks) {
+		t.Fatalf("entry misplaced (explore=%d verify=%d risks=%d):\n%s", explore, verify, risks, got)
+	}
+	if strings.Contains(got[risks:], "[Retro verify]") {
+		t.Fatalf("entry leaked into Risks section:\n%s", got)
 	}
 }
 
-func TestNoneStorePersist(t *testing.T) {
-	s, err := NewStore("none")
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = s.Persist("test-change", "verify", "body text", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestNoneStoreLookup(t *testing.T) {
-	s, err := NewStore("none")
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, err := s.Lookup("", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if p.Count != 0 {
-		t.Fatalf("expected 0 retros, got %d", p.Count)
-	}
-}
-
-func TestInvalidMode(t *testing.T) {
-	_, err := NewStore("bogus")
-	if err == nil {
-		t.Fatal("expected error for invalid mode")
+func TestTopicChange(t *testing.T) {
+	if got := topicChange("odd/my-change/retrospective"); got != "my-change" {
+		t.Fatalf("got %q, want my-change", got)
 	}
 }
 
@@ -241,7 +186,7 @@ func TestPrecisText(t *testing.T) {
 	p := &Precis{
 		Count: 2,
 		Retros: []RetroEntry{
-			{Change: "foo", Body: "line1\nline2", Lines: 2, Source: "openspec"},
+			{Change: "foo", Body: "line1\nline2", Lines: 2, Source: "engram"},
 			{Change: "bar", Body: "body here", Lines: 1, Source: "engram"},
 		},
 	}
@@ -254,113 +199,91 @@ func TestPrecisText(t *testing.T) {
 	}
 }
 
-func TestExtractChangeFromTopic(t *testing.T) {
-	got := extractChangeFromTopic("sdd/my-change/retrospective")
-	if got != "my-change" {
-		t.Fatalf("got %q, want %q", got, "my-change")
+func TestBuildPrecisDedupesByChangeNewestWins(t *testing.T) {
+	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	newer := old.Add(24 * time.Hour)
+	entries := []retroEntry{
+		{change: "feat-x", body: "old body", source: "engram", ftime: old},
+		{change: "feat-x", body: "new body", source: "engram", ftime: newer},
+	}
+	p := buildPrecis(entries, false)
+	if p.Count != 1 {
+		t.Fatalf("dedupe failed: count %d", p.Count)
+	}
+	if !strings.Contains(p.Retros[0].Body, "new body") {
+		t.Fatalf("newest entry not kept: %+v", p.Retros[0])
 	}
 }
 
-func TestStripDatePrefix(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"2026-09-09-test-x", "test-x"},
-		{"test-x", "test-x"},
-		{"2026-01-01-foo", "foo"},
-		{"my-change-name", "my-change-name"},
-		{"x", "x"},
+func TestExtractVerifyDomain(t *testing.T) {
+	body := `## What Worked
+
+- fine
+
+## Verification Gaps
+
+- gap one
+
+## Verify-Phase Incidents
+
+- incident one
+
+## Risks
+
+- none
+`
+	got := ExtractVerifyDomain(body)
+	if !strings.Contains(got, "## Verification Gaps") || !strings.Contains(got, "- gap one") {
+		t.Fatalf("gaps missing: %q", got)
 	}
-	for _, c := range cases {
-		if got := stripDatePrefix(c.in); got != c.want {
-			t.Errorf("stripDatePrefix(%q) = %q, want %q", c.in, got, c.want)
-		}
+	if !strings.Contains(got, "## Verify-Phase Incidents") || !strings.Contains(got, "- incident one") {
+		t.Fatalf("incidents missing: %q", got)
+	}
+	if strings.Contains(got, "Risks") || strings.Contains(got, "What Worked") {
+		t.Fatalf("non-verification content leaked: %q", got)
 	}
 }
 
-func TestExtractChangeFromPathActive(t *testing.T) {
-	base := filepath.Join("openspec", "changes")
-	path := filepath.Join(base, "test-x", "retrospective.md")
-	if got := extractChangeFromPath(path, base); got != "test-x" {
-		t.Fatalf("active path: got %q, want %q", got, "test-x")
+func TestExtractRetrosSection(t *testing.T) {
+	doc := "# Feature\n\n## Retros\n\n- [Retro apply] abc123: Applied\n  detail line\n\n## Risk Mitigation\n\n- none\n"
+	got, ok := extractRetrosSection(doc)
+	if !ok {
+		t.Fatal("section not found")
+	}
+	if !strings.Contains(got, "- [Retro apply] abc123: Applied") {
+		t.Fatalf("entry missing: %q", got)
+	}
+	if !strings.Contains(got, "detail line") {
+		t.Fatalf("detail line missing: %q", got)
+	}
+	if strings.Contains(got, "Risk Mitigation") {
+		t.Fatalf("next section leaked: %q", got)
 	}
 }
 
-func TestExtractChangeFromPathArchiveSinglePart(t *testing.T) {
-	// Archive scan: baseDir = openspec/changes/archive, rel = 1 part
-	// ("2026-09-09-test-x") — must normalize to "test-x".
-	base := filepath.Join("openspec", "changes", "archive")
-	path := filepath.Join(base, "2026-09-09-test-x", "retrospective.md")
-	if got := extractChangeFromPath(path, base); got != "test-x" {
-		t.Fatalf("archive 1-part path: got %q, want %q", got, "test-x")
+func TestExtractRetrosSectionAtEOF(t *testing.T) {
+	doc := "# Feature\n\n## Retros\n\n- [Retro verify] def456: Verified\n"
+	got, ok := extractRetrosSection(doc)
+	if !ok {
+		t.Fatal("section not found")
+	}
+	if !strings.Contains(got, "def456") {
+		t.Fatalf("entry missing: %q", got)
 	}
 }
 
-func TestExtractChangeFromPathArchiveTwoPart(t *testing.T) {
-	// Active scan walking into archive: baseDir = openspec/changes, rel = 2
-	// parts ("archive/2026-09-09-test-x") — must normalize to "test-x".
-	base := filepath.Join("openspec", "changes")
-	path := filepath.Join(base, "archive", "2026-09-09-test-x", "retrospective.md")
-	if got := extractChangeFromPath(path, base); got != "test-x" {
-		t.Fatalf("archive 2-part path: got %q, want %q", got, "test-x")
+func TestExtractRetrosSectionAbsent(t *testing.T) {
+	if _, ok := extractRetrosSection("# Feature\n\nNothing here.\n"); ok {
+		t.Fatal("expected no section")
 	}
 }
 
-func TestScanDirSkipsArchiveSubdirAndDedupes(t *testing.T) {
-	root := t.TempDir()
-	changes := filepath.Join(root, "openspec", "changes")
-	archive := filepath.Join(changes, "archive")
-	if err := os.MkdirAll(filepath.Join(changes, "my-change"), 0o755); err != nil {
-		t.Fatal(err)
+func TestExtractRetrosSectionHeadingOnly(t *testing.T) {
+	got, ok := extractRetrosSection("# Feature\n\n## Retros")
+	if !ok {
+		t.Fatal("section not found")
 	}
-	if err := os.MkdirAll(filepath.Join(archive, "2026-09-09-my-change"), 0o755); err != nil {
-		t.Fatal(err)
+	if strings.TrimSpace(got) != "" {
+		t.Fatalf("expected empty section content, got %q", got)
 	}
-	body := []byte("## What Worked\n\nAll good.\n")
-	if err := os.WriteFile(filepath.Join(changes, "my-change", "retrospective.md"), body, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(archive, "2026-09-09-my-change", "retrospective.md"), body, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	// Active scan must NOT see the archived retro (no double match).
-	active := scanDir(changes, "", "openspec")
-	if len(active) != 1 {
-		t.Fatalf("active scan: got %d entries, want 1 (archive subdir must be skipped)", len(active))
-	}
-	if active[0].change != "my-change" {
-		t.Fatalf("active scan: change %q, want %q", active[0].change, "my-change")
-	}
-
-	// Archive scan finds the archived retro with the date prefix stripped.
-	archived := scanDir(archive, "", "openspec")
-	if len(archived) != 1 {
-		t.Fatalf("archive scan: got %d entries, want 1", len(archived))
-	}
-	if archived[0].change != "my-change" {
-		t.Fatalf("archive scan: change %q, want %q", archived[0].change, "my-change")
-	}
-
-	// Change-filtered lookup resolves the archived retro.
-	filtered := scanDir(archive, "my-change", "openspec")
-	if len(filtered) != 1 || filtered[0].change != "my-change" {
-		t.Fatalf("archive change-filtered: got %d entries %+v, want exactly my-change", len(filtered), filtered)
-	}
-
-	// Combined precis: active + archived retros for the same change dedupe to ONE.
-	precis := buildPrecis(append(active, archived...), false)
-	if precis.Count != 1 {
-		t.Fatalf("dedupe: precis count %d, want 1", precis.Count)
-	}
-	if precis.Retros[0].Change != "my-change" {
-		t.Fatalf("dedupe: change %q, want %q", precis.Retros[0].Change, "my-change")
-	}
-}
-
-func containsSubstr(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }

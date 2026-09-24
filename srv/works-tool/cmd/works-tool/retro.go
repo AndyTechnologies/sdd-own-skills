@@ -2,10 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 
 	"works-tool/internal/retro"
+	"works-tool/internal/worktree"
 
 	"github.com/spf13/cobra"
 )
@@ -13,33 +17,120 @@ import (
 func newRetroCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "retro",
-		Short: "Store-aware retrospective persistence and lookup",
+		Short: "Retro ledger: task-doc appendix (durable) + Engram mirror (best-effort)",
 	}
-	cmd.AddCommand(newRetroLookupCmd())
 	cmd.AddCommand(newRetroPersistCmd())
+	cmd.AddCommand(newRetroLookupCmd())
 	return cmd
+}
+
+func newRetroPersistCmd() *cobra.Command {
+	var (
+		body, bodyFile, commitRef string
+		verifyDomain, jsonOut     bool
+	)
+	cmd := &cobra.Command{
+		Use:   "persist <phase> <feature>",
+		Short: "Record a retro ledger line in odd/tasks/<feature>.md and mirror to Engram",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			phase, feature := args[0], args[1]
+			resolved, err := retro.ResolveBody(body, bodyFile, verifyDomain)
+			if err != nil {
+				return retroFailOpen(err)
+			}
+			ref, err := resolveCommitRef(commitRef)
+			if err != nil {
+				return retroFailOpen(err)
+			}
+			summary, detail := retro.SplitBody(resolved)
+			res, err := retro.Persist(feature, phase, ref, summary, detail)
+			if err != nil {
+				var unavailable *retro.ErrTaskDocUnavailable
+				if errors.As(err, &unavailable) {
+					// Durable ledger lost → loud marker (D2) + exit 2. The
+					// Engram mirror status decides the wording.
+					var msg string
+					if res != nil && res.EngramWritten {
+						msg = fmt.Sprintf("FAIL-OPEN: retro persisted to Engram but task doc appendix lost — %v", err)
+					} else {
+						msg = fmt.Sprintf("FAIL-OPEN: retro write lost — task doc appendix lost: %v", err)
+					}
+					fmt.Fprintln(os.Stderr, msg)
+					if jsonOut {
+						_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
+							"ok":      false,
+							"message": msg,
+						})
+					}
+					os.Exit(2)
+				}
+				return retroFailOpen(err)
+			}
+			if jsonOut {
+				return json.NewEncoder(os.Stdout).Encode(res)
+			}
+			if res.AlreadyRecorded {
+				fmt.Printf("Retro already recorded: %s [%s] %s (no-op)\n", feature, phase, ref)
+				return nil
+			}
+			if res.EngramError != "" {
+				fmt.Fprintf(os.Stderr, "[warn] engram mirror skipped: %s (task doc ledger stands)\n", res.EngramError)
+			}
+			fmt.Printf("Retro recorded: %s [%s] %s (engram=%t task_doc=%t)\n", feature, phase, ref, res.EngramWritten, res.TaskDocAppended)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&body, "body", "", "retro body text")
+	cmd.Flags().StringVar(&bodyFile, "body-file", "", "path to retro body file")
+	cmd.Flags().BoolVar(&verifyDomain, "verify-domain", false, "persist verification domain only (Verification Gaps + Verify-Phase Incidents)")
+	cmd.Flags().StringVar(&commitRef, "commit-ref", "", "commit ref to record (defaults to git rev-parse HEAD at the repo root; required when not inside a repo)")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit structured JSON result")
+	return cmd
+}
+
+// retroFailOpen surfaces a D2 loud FAIL-OPEN marker for a lost retro write
+// and exits 2 (the write path failed; the orchestrator must notice).
+func retroFailOpen(err error) error {
+	fmt.Fprintf(os.Stderr, "FAIL-OPEN: retro lost write — %v\n", err)
+	os.Exit(2)
+	return nil
+}
+
+// resolveCommitRef resolves the commit ref to record: an explicit
+// --commit-ref, or `git rev-parse HEAD` at the filesystem walk-up repo root.
+// This is the tool's ONLY sanctioned git subprocess (retro contract). A repo
+// root failure with no explicit ref is an error (exit 2 path).
+func resolveCommitRef(explicit string) (string, error) {
+	if explicit != "" {
+		return explicit, nil
+	}
+	root := worktree.RepoRootFromCwd()
+	if root == "" {
+		return "", fmt.Errorf("cannot resolve commit ref: not inside a git checkout and no --commit-ref given")
+	}
+	out, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse HEAD failed: %s", strings.TrimSpace(string(out)))
+	}
+	ref := strings.TrimSpace(string(out))
+	if ref == "" {
+		return "", fmt.Errorf("git rev-parse HEAD returned empty")
+	}
+	return ref, nil
 }
 
 func newRetroLookupCmd() *cobra.Command {
 	var (
-		jsonOut      bool
-		changeName   string
-		mode         string
+		feature      string
 		verifyDomain bool
+		jsonOut      bool
 	)
 	cmd := &cobra.Command{
 		Use:   "lookup",
-		Short: "Lookup retrospectives (store-first, cross-store fallback, dedupe)",
+		Short: "Lookup retrospectives from the task-doc ledger (and Engram mirrors)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if mode == "" {
-				mode = "both"
-			}
-			s, err := retro.NewStore(mode)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "FAIL-OPEN: retro store init failed: %v\n", err)
-				return nil
-			}
-			precis, err := s.Lookup(changeName, verifyDomain)
+			precis, err := retro.Lookup(feature, verifyDomain)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "[warn] retro lookup failed (fail-open): %v\n", err)
 				return nil
@@ -55,60 +146,8 @@ func newRetroLookupCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit structured JSON")
-	cmd.Flags().StringVar(&changeName, "change", "", "filter by change name")
-	cmd.Flags().StringVar(&mode, "mode", "both", "store mode: both|openspec|engram|none")
+	cmd.Flags().StringVar(&feature, "feature", "", "filter by feature/change name")
 	cmd.Flags().BoolVar(&verifyDomain, "verify-domain", false, "extract only verification gaps and incidents")
-	return cmd
-}
-
-func newRetroPersistCmd() *cobra.Command {
-	var (
-		changeName   string
-		mode         string
-		phase        string
-		body         string
-		bodyFile     string
-		verifyDomain bool
-	)
-	cmd := &cobra.Command{
-		Use:   "persist",
-		Short: "Persist a retrospective (openspec file pre-archive + engram observation)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if changeName == "" {
-				return fmt.Errorf("--change is required")
-			}
-			if phase == "" {
-				phase = "verify"
-			}
-			if mode == "" {
-				mode = "both"
-			}
-			resolved, err := retro.ResolvePersistBody(changeName, body, bodyFile, verifyDomain)
-			if err != nil {
-				// D2: write failure → loud FAIL-OPEN marker
-				fmt.Fprintf(os.Stderr, "FAIL-OPEN: retro persist lost write — %v\n", err)
-				os.Exit(1)
-			}
-			s, err := retro.NewStore(mode)
-			if err != nil {
-				// D2: write failure → loud FAIL-OPEN marker
-				fmt.Fprintf(os.Stderr, "FAIL-OPEN: retro persist lost write — store init failed: %v\n", err)
-				os.Exit(1)
-			}
-			if err := s.Persist(changeName, phase, resolved, ""); err != nil {
-				fmt.Fprintf(os.Stderr, "FAIL-OPEN: retro persist lost write to %s store: %v\n", mode, err)
-				os.Exit(1)
-			}
-			fmt.Printf("Retrospective persisted for %s (mode: %s)\n", changeName, mode)
-			return nil
-		},
-	}
-	cmd.Flags().StringVar(&changeName, "change", "", "change name (required)")
-	cmd.Flags().StringVar(&mode, "mode", "both", "store mode: both|openspec|engram|none")
-	cmd.Flags().StringVar(&phase, "phase", "verify", "phase name")
-	cmd.Flags().StringVar(&body, "body", "", "retro body text")
-	cmd.Flags().StringVar(&bodyFile, "body-file", "", "path to retro body file")
-	cmd.Flags().BoolVar(&verifyDomain, "verify-domain", false, "persist verify-domain only: extract verification gaps and verify-phase incidents (from explicit body or the change's verify-report)")
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit structured JSON")
 	return cmd
 }

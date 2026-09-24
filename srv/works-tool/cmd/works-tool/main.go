@@ -20,7 +20,7 @@ func newRootCmd() *cobra.Command {
 		Short: "SDD lifecycle helper: worktree and retro",
 		Long: `works-tool provides subcommands for the SDD workflow:
   worktree list|verify   — enumerate and verify worktrees
-  retro lookup|persist   — store-aware retrospective persistence and lookup`,
+  retro lookup|persist   — Engram-first retrospective ledger (Engram + task-doc appendix)`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

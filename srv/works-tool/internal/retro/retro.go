@@ -1,9 +1,29 @@
-// Package retro provides store-aware retrospective persistence and lookup.
+// Package retro provides the retrospective ledger for ODD change tasks.
 //
-// Store-first on the declared mode, cross-store fallback only on zero domain
-// results, dedupe by change name, precis capped at 3–5 retros of ≤15 lines.
-// Engram access via subprocess only (save/search/timeline).
-// Write failures exit non-zero with a loud FAIL-OPEN marker (D2).
+// Each persist appends ONE ordered ledger entry
+//
+//   - [Retro <phase>] <commit-ref>: <summary>
+//     <indented detail lines, when present>
+//
+// to two places, in this order:
+//
+//  1. odd/tasks/<feature>.md under `## Retros` in the walk-up repo root
+//     (append-only) — the DURABLE ledger, always written,
+//  2. the Engram observation `odd/<feature>/retrospective` (title == topic,
+//     type learning, topic-key upsert) — a best-effort MIRROR. The engram
+//     CLI applies a session-ownership write guard (writes must belong to the
+//     ambient runtime session's project); when it rejects a save, the persist
+//     still succeeds with EngramWritten=false and the reason in EngramError.
+//
+// Persists are idempotent by (feature, phase, commit-ref): a re-run whose
+// marker is already recorded is a no-op (AlreadyRecorded). A failed
+// task-doc appendix returns ErrTaskDocUnavailable — with the Engram mirror
+// standing when it wrote, and combined with the mirror failure when it did
+// not; the caller emits the D2 loud FAIL-OPEN marker with exit 2.
+//
+// Engram access is subprocess-only (save/search); lookups never touch git.
+// `git rev-parse HEAD` (for the commit ref) is the tool's ONLY sanctioned git
+// subprocess and lives in the retro command layer, not here.
 package retro
 
 import (
@@ -16,6 +36,7 @@ import (
 
 	"works-tool/internal/engram"
 	"works-tool/internal/scrub"
+	"works-tool/internal/worktree"
 )
 
 // Precis holds the structured retro lookup result.
@@ -30,7 +51,7 @@ type RetroEntry struct {
 	Change string `json:"change"`
 	Body   string `json:"body"`
 	Lines  int    `json:"lines"`
-	Source string `json:"source"` // "openspec" or "engram"
+	Source string `json:"source"` // always "engram" (Engram-first)
 }
 
 // Text returns the human-readable precis.
@@ -56,124 +77,303 @@ func (p *Precis) Text() string {
 	return p.Text_
 }
 
-// Store is the interface for retro persistence backends.
-type Store interface {
-	Lookup(changeName string, verifyDomain bool) (*Precis, error)
-	Persist(changeName, phase, body, bodyFile string) error
+// PersistResult reports the outcome of one retro persist.
+type PersistResult struct {
+	Feature         string `json:"feature"`
+	Phase           string `json:"phase"`
+	CommitRef       string `json:"commit_ref"`
+	AlreadyRecorded bool   `json:"already_recorded"`
+	EngramWritten   bool   `json:"engram_written"`
+	EngramError     string `json:"engram_error,omitempty"`
+	TaskDocPath     string `json:"task_doc_path,omitempty"`
+	TaskDocAppended bool   `json:"task_doc_appended"`
 }
 
-// NewStore creates a store for the given mode.
-func NewStore(mode string) (Store, error) {
-	switch mode {
-	case "both":
-		return &compositeStore{primary: newOpenspecStore(), fallback: newEngramStore(), mode: mode}, nil
-	case "openspec":
-		return newOpenspecStore(), nil
-	case "engram":
-		return newEngramStore(), nil
-	case "none":
-		return &noneStore{}, nil
-	default:
-		return nil, fmt.Errorf("unknown mode %q: must be both|openspec|engram|none", mode)
+// ErrTaskDocUnavailable means the durable task-doc appendix could not be
+// performed (task doc missing, not in a repo, or a read/write failure).
+// Callers surface the D2 FAIL-OPEN marker and exit 2 — the retro has no
+// durable home (the Engram mirror stands when it wrote, and its failure is
+// carried alongside when it did not).
+type ErrTaskDocUnavailable struct{ Reason string }
+
+func (e *ErrTaskDocUnavailable) Error() string { return "task doc appendix unavailable: " + e.Reason }
+
+// topic returns the engram topic key for a feature's ledger.
+func topic(feature string) string { return "odd/" + feature + "/retrospective" }
+
+// SplitBody splits a resolved retro body into its one-line summary (the
+// first non-empty line) and the remaining detail (trimmed), for the ledger
+// entry bullet.
+func SplitBody(body string) (summary, detail string) {
+	lines := strings.Split(strings.TrimSpace(body), "\n")
+	start := -1
+	for i, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			start = i
+			break
+		}
 	}
+	if start == -1 {
+		return "", ""
+	}
+	summary = strings.TrimSpace(lines[start])
+	rest := lines[start+1:]
+	for len(rest) > 0 && strings.TrimSpace(rest[0]) == "" {
+		rest = rest[1:]
+	}
+	return summary, strings.TrimSpace(strings.Join(rest, "\n"))
 }
 
-// compositeStore implements cross-store fallback.
-type compositeStore struct {
-	primary  Store
-	fallback Store
-	mode     string
+// BuildLedgerEntry renders one ordered ledger entry from a phase, commit ref,
+// summary line and optional detail (indented two spaces under the bullet).
+func BuildLedgerEntry(phase, commitRef, summary, detail string) string {
+	var b strings.Builder
+	b.WriteString("- [Retro " + phase + "] " + commitRef + ": " + summary)
+	if d := strings.TrimSpace(detail); d != "" {
+		for _, l := range strings.Split(d, "\n") {
+			b.WriteString("\n  " + l)
+		}
+	}
+	return b.String()
 }
 
-func (c *compositeStore) Lookup(changeName string, verifyDomain bool) (*Precis, error) {
-	p, err := c.primary.Lookup(changeName, verifyDomain)
+// HasMarker reports whether the ledger already records (phase, commitRef).
+func HasMarker(ledger, phase, commitRef string) bool {
+	marker := "[Retro " + phase + "] " + commitRef
+	for _, l := range strings.Split(ledger, "\n") {
+		if strings.Contains(l, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// AppendToLedger appends entry to the ordered ledger, preserving order.
+func AppendToLedger(current, entry string) string {
+	current = strings.TrimSpace(current)
+	entry = strings.TrimSpace(entry)
+	if current == "" {
+		return entry
+	}
+	return current + "\n" + entry
+}
+
+// AppendLedgerToDoc inserts entry under the doc's `## Retros` section —
+// after the heading when the section exists, or as a new section at the end
+// when absent. Pure string helper; callers do the file IO.
+func AppendLedgerToDoc(docContent, entry string) string {
+	entry = strings.TrimSpace(entry)
+	const heading = "## Retros"
+	idx := strings.Index(docContent, heading)
+	if idx == -1 {
+		base := strings.TrimRight(docContent, "\n")
+		if base == "" {
+			return heading + "\n\n" + entry + "\n"
+		}
+		return base + "\n\n" + heading + "\n\n" + entry + "\n"
+	}
+	// Insert at the end of the existing section: right before the next H2
+	// heading after "## Retros" (line-start), or at EOF.
+	after := docContent[idx+len(heading):]
+	if n := nextH2(after); n >= 0 {
+		pos := idx + len(heading) + n
+		return docContent[:pos] + "\n" + entry + docContent[pos:]
+	}
+	return strings.TrimRight(docContent, "\n") + "\n" + entry + "\n"
+}
+
+// nextH2 returns the index of the next line-start "## " heading in s, or -1.
+func nextH2(s string) int {
+	for i := 0; i+3 < len(s); i++ {
+		if s[i] == '\n' && s[i+1] == '#' && s[i+2] == '#' && s[i+3] == ' ' {
+			return i
+		}
+	}
+	return -1
+}
+
+// CurrentLedger returns the accumulated ledger body for feature: the durable
+// task-doc `## Retros` section merged with the Engram mirror ("" when none
+// exists in either source). Read failures are fail-open: any source that
+// reads contributes; an unreadable source is skipped rather than aborting a
+// persist.
+func CurrentLedger(feature string) string {
+	var bodies []string
+	if root := worktree.RepoRootFromCwd(); root != "" {
+		if data, err := os.ReadFile(filepath.Join(root, "odd", "tasks", feature+".md")); err == nil {
+			if s, ok := extractRetrosSection(string(data)); ok {
+				if s = strings.TrimSpace(s); s != "" {
+					bodies = append(bodies, s)
+				}
+			}
+		}
+	}
+	if results, err := engram.Search(topic(feature), 5); err == nil {
+		for _, r := range results {
+			if r.Title == topic(feature) {
+				if s := strings.TrimSpace(r.Content); s != "" {
+					bodies = append(bodies, s)
+				}
+				break
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Join(bodies, "\n"))
+}
+
+// extractRetrosSection returns the content of the document's `## Retros`
+// section (heading line excluded), ending at the next line-start H2 or EOF.
+func extractRetrosSection(doc string) (string, bool) {
+	const heading = "## Retros"
+	idx := strings.Index(doc, heading)
+	if idx == -1 {
+		return "", false
+	}
+	after := doc[idx+len(heading):]
+	if nl := strings.IndexByte(after, '\n'); nl >= 0 {
+		after = after[nl+1:]
+	} else {
+		return "", true // heading is the last line: empty section
+	}
+	if n := nextH2(after); n >= 0 {
+		after = after[:n]
+	}
+	return strings.TrimSpace(after), true
+}
+
+// Persist records a retro ledger entry for (feature, phase, commitRef).
+// The task-doc appendix (odd/tasks/<feature>.md ## Retros) is the durable
+// ledger and ALWAYS runs: any failure there returns ErrTaskDocUnavailable
+// (with the Engram mirror status attached). Engram is a best-effort mirror:
+// when the engram session-ownership guard or the CLI rejects the write, the
+// persist still succeeds with EngramWritten=false and the reason in
+// EngramError. Idempotent by (feature, phase, commit-ref).
+func Persist(feature, phase, commitRef, summary, detail string) (*PersistResult, error) {
+	res := &PersistResult{Feature: feature, Phase: phase, CommitRef: commitRef}
+	if HasMarker(CurrentLedger(feature), phase, commitRef) {
+		res.AlreadyRecorded = true
+		return res, nil
+	}
+	entry := BuildLedgerEntry(phase, commitRef, summary, detail)
+	next := AppendToLedger(CurrentLedger(feature), entry)
+	if err := engram.Save(topic(feature), scrub.Scrub(next), "learning"); err != nil {
+		res.EngramError = err.Error()
+	} else {
+		res.EngramWritten = true
+	}
+
+	root := worktree.RepoRootFromCwd()
+	if root == "" {
+		return res, docFail(res, "cwd is not inside any git checkout")
+	}
+	res.TaskDocPath = filepath.Join(root, "odd", "tasks", feature+".md")
+	data, err := os.ReadFile(res.TaskDocPath)
+	if err != nil {
+		return res, docFail(res, "cannot read "+res.TaskDocPath+": "+err.Error())
+	}
+	if err := os.WriteFile(res.TaskDocPath, []byte(AppendLedgerToDoc(string(data), entry)), 0o644); err != nil {
+		return res, docFail(res, "cannot write "+res.TaskDocPath+": "+err.Error())
+	}
+	res.TaskDocAppended = true
+	return res, nil
+}
+
+// docFail wraps a task-doc appendix failure as ErrTaskDocUnavailable,
+// preserving the Engram mirror status for honest, combined reporting.
+func docFail(res *PersistResult, reason string) error {
+	if res.EngramError != "" {
+		return fmt.Errorf("%w; engram mirror also failed: %s", &ErrTaskDocUnavailable{Reason: reason}, res.EngramError)
+	}
+	return &ErrTaskDocUnavailable{Reason: reason}
+}
+
+// Lookup returns deduped retrospectives from the durable task-doc ledger
+// (odd/tasks/*.md ## Retros) merged with any Engram mirrors, optionally
+// filtered to one feature and/or to the verification domain. An engram
+// search failure is fail-open: the doc ledger still answers.
+func Lookup(feature string, verifyDomain bool) (*Precis, error) {
+	var entries []retroEntry
+	docEntries, err := lookupDocLedger(feature)
 	if err != nil {
 		return nil, err
 	}
-	if p.Count > 0 {
-		return p, nil
-	}
-	// Fallback on zero results
-	return c.fallback.Lookup(changeName, verifyDomain)
-}
+	entries = append(entries, docEntries...)
 
-func (c *compositeStore) Persist(changeName, phase, body, bodyFile string) error {
-	b, err := resolveBody(body, bodyFile)
-	if err != nil {
-		return err
-	}
-	b = scrub.Scrub(b)
-	err1 := c.primary.Persist(changeName, phase, b, "")
-	err2 := c.fallback.Persist(changeName, phase, b, "")
-	if err1 != nil {
-		return err1
-	}
-	return err2
-}
-
-// noneStore emits a hint only.
-type noneStore struct{}
-
-func (n *noneStore) Lookup(string, bool) (*Precis, error) {
-	return &Precis{}, nil
-}
-
-func (n *noneStore) Persist(changeName, _, _, _ string) error {
-	fmt.Fprintf(os.Stderr, "Hint: mode=none — no retrospective persisted for %s\n", changeName)
-	return nil
-}
-
-// openspecStore persists to openspec/changes/{change}/retrospective.md.
-type openspecStore struct{}
-
-func newOpenspecStore() *openspecStore { return &openspecStore{} }
-
-func (o *openspecStore) Lookup(changeName string, verifyDomain bool) (*Precis, error) {
-	entries, err := o.listRetros(changeName)
-	if err != nil {
-		return nil, err
+	if results, serr := engram.Search("retrospective", 20); serr == nil {
+		for _, r := range results {
+			if !strings.HasPrefix(r.Title, "odd/") || !strings.HasSuffix(r.Title, "/retrospective") {
+				continue
+			}
+			change := topicChange(r.Title)
+			if feature != "" && change != feature {
+				continue
+			}
+			body := r.Content
+			if verifyDomain {
+				body = ExtractVerifyDomain(body)
+			}
+			entries = append(entries, retroEntry{change: change, body: body, source: "engram", ftime: r.Time})
+		}
 	}
 	return buildPrecis(entries, verifyDomain), nil
 }
 
-func (o *openspecStore) Persist(changeName, phase, body, bodyFile string) error {
-	b, err := resolveBody(body, bodyFile)
-	if err != nil {
-		return err
-	}
-	b = scrub.Scrub(b)
-
-	// Find the openspec changes dir
-	repoRoot := findRepoRoot()
-	if repoRoot == "" {
-		return fmt.Errorf("cannot locate repo root for openspec persist")
-	}
-	dir := filepath.Join(repoRoot, "openspec", "changes", changeName)
-	os.MkdirAll(dir, 0o755)
-
-	file := filepath.Join(dir, "retrospective.md")
-	frontmatter := fmt.Sprintf("---\nchange: %s\nphase: %s\nstore-mode: openspec\n---\n\n", changeName, phase)
-	content := frontmatter + formatRetroSections(b)
-
-	return os.WriteFile(file, []byte(content), 0o644)
-}
-
-func (o *openspecStore) listRetros(changeName string) ([]retroEntry, error) {
-	repoRoot := findRepoRoot()
-	if repoRoot == "" {
+// lookupDocLedger reads the durable retros ledger from odd/tasks/*.md under
+// the walk-up repo root. Not inside a checkout yields no doc source (nil).
+func lookupDocLedger(feature string) ([]retroEntry, error) {
+	root := worktree.RepoRootFromCwd()
+	if root == "" {
 		return nil, nil
 	}
+	files, err := filepath.Glob(filepath.Join(root, "odd", "tasks", "*.md"))
+	if err != nil {
+		return nil, err
+	}
 	var entries []retroEntry
-
-	// Active changes
-	activeDir := filepath.Join(repoRoot, "openspec", "changes")
-	entries = append(entries, scanDir(activeDir, changeName, "openspec")...)
-
-	// Archived changes
-	archiveDir := filepath.Join(repoRoot, "openspec", "changes", "archive")
-	entries = append(entries, scanDir(archiveDir, changeName, "openspec")...)
-
+	for _, f := range files {
+		change := strings.TrimSuffix(filepath.Base(f), ".md")
+		if feature != "" && change != feature {
+			continue
+		}
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue // unreadable task doc: skip (fail-open)
+		}
+		section, ok := extractRetrosSection(string(data))
+		if !ok || strings.TrimSpace(section) == "" {
+			continue
+		}
+		var ftime time.Time
+		if st, err := os.Stat(f); err == nil {
+			ftime = st.ModTime()
+		}
+		entries = append(entries, retroEntry{change: change, body: section, source: "task_doc", ftime: ftime})
+	}
 	return entries, nil
+}
+
+// topicChange extracts the feature name from an "odd/<feature>/retrospective"
+// topic title.
+func topicChange(title string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(title, "odd/"), "/retrospective")
+}
+
+// ResolveBody resolves the retro body to persist from explicit body/body-file,
+// optionally extracting ONLY the verification domain (Verification Gaps +
+// Verify-Phase Incidents). Returns an error when nothing would persist.
+func ResolveBody(body, bodyFile string, verifyDomain bool) (string, error) {
+	b, err := resolveBody(body, bodyFile)
+	if err != nil {
+		return "", err
+	}
+	if !verifyDomain {
+		return b, nil
+	}
+	filtered := ExtractVerifyDomain(b)
+	if strings.TrimSpace(filtered) == "" {
+		return "", fmt.Errorf("--verify-domain found no Verification Gaps / Verify-Phase Incidents in body")
+	}
+	return filtered, nil
 }
 
 type retroEntry struct {
@@ -181,63 +381,6 @@ type retroEntry struct {
 	body   string
 	source string
 	ftime  time.Time
-}
-
-func scanDir(dir, changeFilter, source string) []retroEntry {
-	var entries []retroEntry
-	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info == nil {
-			return nil
-		}
-		// The active scan walks openspec/changes recursively, which INCLUDES
-		// archive/. Skipping it (unless archive/ is the walk root itself, i.e.
-		// the dedicated archive scan) prevents the same retrospective.md from
-		// being matched twice and breaking dedupe-by-change-name.
-		if info.IsDir() && info.Name() == "archive" && path != dir {
-			return filepath.SkipDir
-		}
-		if info.IsDir() || info.Name() != "retrospective.md" {
-			return nil
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		change := extractChangeFromPath(path, dir)
-		if changeFilter != "" && change != changeFilter {
-			return nil
-		}
-		body := string(data)
-		entries = append(entries, retroEntry{change: change, body: body, source: source, ftime: info.ModTime()})
-		return nil
-	})
-	return entries
-}
-
-// stripDatePrefix strips a leading YYYY-MM-DD- archive prefix from a change
-// directory name: "2026-09-09-test-x" → "test-x"; "test-x" stays "test-x".
-func stripDatePrefix(name string) string {
-	// len("2026-09-09-") == 11
-	if len(name) >= 11 && name[4] == '-' && name[7] == '-' && name[10] == '-' {
-		return name[11:]
-	}
-	return name
-}
-
-func extractChangeFromPath(path, baseDir string) string {
-	rel, err := filepath.Rel(baseDir, filepath.Dir(path))
-	if err != nil {
-		return filepath.Base(filepath.Dir(path))
-	}
-	parts := strings.SplitN(rel, string(filepath.Separator), 2)
-	if len(parts) > 1 {
-		// Deep path (e.g. archive/2026-09-09-test-x from the active scan): the
-		// change name is the deepest segment with any date prefix stripped.
-		return stripDatePrefix(parts[len(parts)-1])
-	}
-	// Single segment (e.g. 2026-09-09-test-x from the archive scan): strip the
-	// archive date prefix so the canonical name is "test-x", not the raw dir.
-	return stripDatePrefix(parts[0])
 }
 
 func buildPrecis(entries []retroEntry, verifyDomain bool) *Precis {
@@ -263,7 +406,7 @@ func buildPrecis(entries []retroEntry, verifyDomain bool) *Precis {
 		sorted = sorted[:5]
 	}
 
-	var entries_out []RetroEntry
+	var entriesOut []RetroEntry
 	for _, e := range sorted {
 		body := e.body
 		if verifyDomain {
@@ -271,14 +414,14 @@ func buildPrecis(entries []retroEntry, verifyDomain bool) *Precis {
 		}
 		body = scrub.Scrub(body)
 		lines := strings.Count(body, "\n") + 1
-		entries_out = append(entries_out, RetroEntry{
+		entriesOut = append(entriesOut, RetroEntry{
 			Change: e.change,
 			Body:   body,
 			Lines:  lines,
 			Source: e.source,
 		})
 	}
-	return &Precis{Count: len(entries_out), Retros: entries_out}
+	return &Precis{Count: len(entriesOut), Retros: entriesOut}
 }
 
 // ExtractVerifyDomain filters a retro/verify-report body down to its
@@ -306,41 +449,6 @@ func ExtractVerifyDomain(body string) string {
 	return strings.TrimSpace(out.String())
 }
 
-func formatRetroSections(body string) string {
-	// Ensure the body has the 4 required sections
-	sections := []string{"What Worked", "What Didn't", "Verification Gaps", "Verify-Phase Incidents"}
-	hasSection := func(s string) bool {
-		return strings.Contains(body, "## "+s) || strings.Contains(body, "# "+s)
-	}
-	var out strings.Builder
-	for _, s := range sections {
-		if hasSection(s) {
-			// Section exists in the body, find and include it
-			idx := strings.Index(body, "## "+s)
-			if idx < 0 {
-				idx = strings.Index(body, "# "+s)
-			}
-			if idx >= 0 {
-				nextSection := len(body)
-				for _, ns := range sections {
-					nIdx := strings.Index(body[idx+len(s)+4:], "## "+ns)
-					if nIdx > 0 {
-						candidate := idx + len(s) + 4 + nIdx
-						if candidate < nextSection {
-							nextSection = candidate
-						}
-					}
-				}
-				out.WriteString(body[idx:nextSection])
-				out.WriteString("\n")
-				continue
-			}
-		}
-		out.WriteString(fmt.Sprintf("## %s\n\n(none)\n\n", s))
-	}
-	return out.String()
-}
-
 func resolveBody(body, bodyFile string) (string, error) {
 	if bodyFile != "" {
 		data, err := os.ReadFile(bodyFile)
@@ -353,223 +461,4 @@ func resolveBody(body, bodyFile string) (string, error) {
 		return body, nil
 	}
 	return "", fmt.Errorf("either --body or --body-file is required")
-}
-
-// ResolvePersistBody resolves the retro body to persist. With verifyDomain it
-// extracts ONLY the verification domain (Verification Gaps + Verify-Phase
-// Incidents) from an explicit body/body-file; without an explicit body it
-// derives the body from the change's openspec verify-report. It ALWAYS returns
-// a non-empty body for a real persist (never silently persists nothing).
-func ResolvePersistBody(changeName, body, bodyFile string, verifyDomain bool) (string, error) {
-	if body != "" || bodyFile != "" {
-		b, err := resolveBody(body, bodyFile)
-		if err != nil {
-			return "", err
-		}
-		if !verifyDomain {
-			return b, nil
-		}
-		filtered := ExtractVerifyDomain(b)
-		if strings.TrimSpace(filtered) == "" {
-			return "", fmt.Errorf("--verify-domain found no Verification Gaps / Verify-Phase Incidents in body")
-		}
-		return filtered, nil
-	}
-	if verifyDomain {
-		repoRoot := findRepoRoot()
-		if repoRoot == "" {
-			return "", fmt.Errorf("cannot locate repo root (no openspec/ dir found)")
-		}
-		reportPath := filepath.Join(repoRoot, "openspec", "changes", changeName, "verify-report.md")
-		data, err := os.ReadFile(reportPath)
-		if err != nil {
-			return "", fmt.Errorf("--verify-domain requires --body/--body-file or an existing verify-report at %s: %w", reportPath, err)
-		}
-		derived := deriveVerifyDomainFromReport(string(data))
-		if derived == "" {
-			return "", fmt.Errorf("--verify-domain could not derive Verification Gaps / Verify-Phase Incidents from verify-report %s", reportPath)
-		}
-		return derived, nil
-	}
-	return "", fmt.Errorf("either --body or --body-file is required")
-}
-
-// deriveVerifyDomainFromReport builds the verification-domain body from an
-// openspec verify-report. It first looks for literal "## Verification Gaps" /
-// "## Verify-Phase Incidents" H2 sections; failing that, it maps the standard
-// verify-report "### Issues Found" section: CRITICAL findings become
-// Verify-Phase Incidents, WARNING/SUGGESTION findings become Verification
-// Gaps. Returns "" when nothing verification-domain is found.
-func deriveVerifyDomainFromReport(report string) string {
-	var out strings.Builder
-	if sections := extractH2Sections(report, "Verification Gaps", "Verify-Phase Incidents"); len(sections) > 0 {
-		for _, s := range sections {
-			out.WriteString(s + "\n")
-		}
-		return strings.TrimSpace(out.String())
-	}
-	var gaps, incidents []string
-	inIssues := false
-	block := ""
-	for _, line := range strings.Split(report, "\n") {
-		lower := strings.ToLower(line)
-		if strings.Contains(lower, "issues found") {
-			inIssues = true
-			continue
-		}
-		if inIssues && strings.HasPrefix(strings.TrimSpace(line), "### ") && !strings.Contains(lower, "issues") {
-			break // next H3 outside Issues Found
-		}
-		if !inIssues {
-			continue
-		}
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "|") || strings.HasPrefix(trimmed, "---") {
-			continue
-		}
-		switch {
-		case strings.Contains(trimmed, "**CRITICAL**") || strings.HasPrefix(trimmed, "CRITICAL"):
-			block = "incidents"
-			incidents = append(incidents, trimmed)
-		case strings.Contains(trimmed, "**WARNING**") || strings.HasPrefix(trimmed, "WARNING") ||
-			strings.Contains(trimmed, "**SUGGESTION**") || strings.HasPrefix(trimmed, "SUGGESTION"):
-			block = "gaps"
-			gaps = append(gaps, trimmed)
-		default:
-			// Continuation lines (numbered items under the marker) belong to
-			// the current block until the next marker or heading.
-			switch block {
-			case "gaps":
-				gaps = append(gaps, trimmed)
-			case "incidents":
-				incidents = append(incidents, trimmed)
-			}
-		}
-	}
-	if len(gaps) > 0 {
-		out.WriteString("## Verification Gaps\n\n")
-		for _, g := range gaps {
-			out.WriteString("- " + g + "\n")
-		}
-		out.WriteString("\n")
-	}
-	if len(incidents) > 0 {
-		out.WriteString("## Verify-Phase Incidents\n\n")
-		for _, i := range incidents {
-			out.WriteString("- " + i + "\n")
-		}
-		out.WriteString("\n")
-	}
-	return strings.TrimSpace(out.String())
-}
-
-// extractH2Sections returns the body slices of the named H2 sections, each
-// starting at its "## <name>" heading (case-insensitive, whole-heading match)
-// and ending at the next H2. Only sections whose heading exactly names one of
-// the requested sections are captured; keyword substrings inside table rows
-// never activate a section. Returns nil when none of the sections are present.
-func extractH2Sections(body string, names ...string) []string {
-	lines := strings.Split(body, "\n")
-	want := make(map[string]bool, len(names))
-	for _, n := range names {
-		want[strings.ToLower(n)] = true
-	}
-	var sections []string
-	var current *strings.Builder
-	flush := func() {
-		if current != nil && strings.TrimSpace(current.String()) != "" {
-			sections = append(sections, strings.TrimSpace(current.String()))
-		}
-		current = nil
-	}
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "## ") {
-			name := strings.TrimSpace(strings.TrimPrefix(trimmed, "## "))
-			if want[strings.ToLower(name)] {
-				flush()
-				current = &strings.Builder{}
-				current.WriteString(line + "\n")
-			} else {
-				flush()
-			}
-			continue
-		}
-		if current != nil {
-			current.WriteString(line + "\n")
-		}
-	}
-	flush()
-	return sections
-}
-
-func findRepoRoot() string {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	// Walk up looking for openspec/ dir
-	dir := cwd
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "openspec")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
-}
-
-// engramStore persists to Engram via subprocess only.
-type engramStore struct{}
-
-func newEngramStore() *engramStore { return &engramStore{} }
-
-func (e *engramStore) Lookup(changeName string, verifyDomain bool) (*Precis, error) {
-	results, err := engram.Search("retrospective", 20)
-	if err != nil {
-		return nil, err
-	}
-	var entries []retroEntry
-	for _, r := range results {
-		if !strings.HasPrefix(r.Title, "sdd/") || !strings.HasSuffix(r.Title, "/retrospective") {
-			continue
-		}
-		change := extractChangeFromTopic(r.Title)
-		if changeName != "" && change != changeName {
-			continue
-		}
-		body := r.Content
-		if verifyDomain {
-			body = ExtractVerifyDomain(body)
-		}
-		entries = append(entries, retroEntry{
-			change: change,
-			body:   body,
-			source: "engram",
-			ftime:  r.Time,
-		})
-	}
-	return buildPrecis(entries, verifyDomain), nil
-}
-
-func (e *engramStore) Persist(changeName, phase, body, bodyFile string) error {
-	b, err := resolveBody(body, bodyFile)
-	if err != nil {
-		return err
-	}
-	b = scrub.Scrub(b)
-	topicKey := fmt.Sprintf("sdd/%s/retrospective", changeName)
-	return engram.Save(topicKey, b, "learning")
-}
-
-func extractChangeFromTopic(title string) string {
-	// sdd/{change}/retrospective
-	parts := strings.Split(title, "/")
-	if len(parts) >= 2 {
-		return parts[1]
-	}
-	return title
 }
