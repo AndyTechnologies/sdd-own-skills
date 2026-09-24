@@ -1087,6 +1087,12 @@ t "T47b setup.sh 5d-2 warn (go roto → warn, no error)"
   # fake go que siempre falla (solo importa si el modo real llega a 5d-2)
   printf '#!/usr/bin/env bash\nexit 1\n' > "$SB_BIN/go"
   chmod +x "$SB_BIN/go"
+  # Stale sdd-tool de la era legacy presente en el sandbox (acta A8): --check
+  # debe reportar su remocion como [pendiente] sin mutar nada (la remocion es
+  # exclusiva del modo real).
+  mkdir -p "$SB_HOME/.config/sdd-own/bin"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$SB_HOME/.config/sdd-own/bin/sdd-tool"
+  chmod +x "$SB_HOME/.config/sdd-own/bin/sdd-tool"
   # Route through the sandbox seam (MCP_DEBUG_SYNC_ARGS, igual que los tests
   # hermanos via run_setup): el sync-skills.sh REAL no debe correr dentro del
   # sandbox vacio (gate F9 → exit 2). Con el seam, 5d-2 se evalua en --check:
@@ -1095,6 +1101,10 @@ t "T47b setup.sh 5d-2 warn (go roto → warn, no error)"
   rc="$(cat "$SB_TMP/exit")"
   # In --check mode, missing binary → "pendiente" message; warn/error only in real mode
   grep -qi "works-tool\|pendiente\|WARN\|go no encontrado" "$SB_TMP/out.txt" || { ko "setup.sh 5d-2: missing works-tool check message"; bad=1; }
+  # Stale-removal pending (acta A8): el sdd-tool stale aparece como [pendiente]
+  # y NO se remueve en modo check.
+  grep -qi "pendiente.*sdd-tool" "$SB_TMP/out.txt" || { ko "setup.sh 5d-2: stale sdd-tool removal no reportado [pendiente]"; bad=1; }
+  [[ -e "$SB_HOME/.config/sdd-own/bin/sdd-tool" ]] || { ko "setup.sh 5d-2: --check removio el stale sdd-tool (solo modo real)"; bad=1; }
   # --check should not hard-fail due to missing go: 0 = clean, 1 = drift;
   # 2 (gate F9) must never fire from a stub sync.
   if [[ "$rc" -le 1 ]]; then
@@ -1106,7 +1116,7 @@ t "T47b setup.sh 5d-2 warn (go roto → warn, no error)"
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
-t "T48 poda prompts/skills: wiring/prompts/sdd con EXACTAMENTE 2 prompts; skills changelog/quest/council ausentes"
+t "T48 poda prompts/skills + works-tool wiring pins: 2 prompts exactos; skill/routing canonical; cero sdd-tool"
 {
   bad=0
   # v3 (poda total): los unicos prompts propios son rfc-author + arch-plan.
@@ -1122,6 +1132,15 @@ t "T48 poda prompts/skills: wiring/prompts/sdd con EXACTAMENTE 2 prompts; skills
   # El cierre de changelog quedo fuera del pipeline v3 (sin orchestrator propio)
   n="$(grep -rilE 'changelog' "$REPO/wiring" 2>/dev/null | wc -l)"
   [[ "$n" == "0" ]] || { ko "wiring con $n referencias a changelog"; bad=1; }
+  # works-tool wiring pins (acta A10/A11, T8 — post-apply lint):
+  # (a) el skill full-install existe y documenta la ruta canonica
+  [[ -f "$REPO/skills/works-tool/SKILL.md" ]] || { ko "skills/works-tool/SKILL.md ausente"; bad=1; }
+  grep -qF -- "~/.local/bin/works-tool" "$REPO/skills/works-tool/SKILL.md" || { ko "works-tool SKILL.md sin ruta canonica ~/.local/bin/works-tool"; bad=1; }
+  # (b) la routing extension referencia la ruta canonica
+  grep -qF -- "~/.local/bin/works-tool" "$REPO/wiring/sdd-own-routing.md" || { ko "routing extension sin ruta canonica ~/.local/bin/works-tool"; bad=1; }
+  # (c) cero sdd-tool en wiring owned + skill (superficie propia)
+  n="$(grep -rl 'sdd-tool' "$REPO/wiring" "$REPO/skills/works-tool" 2>/dev/null | wc -l)"
+  [[ "$n" == "0" ]] || { ko "owned wiring/skill con $n referencias a sdd-tool"; bad=1; }
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
