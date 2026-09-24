@@ -20,10 +20,10 @@ by hand; `go build ./...` inside `srv/works-tool/` is for the module only).
   Exit 1 when the gate fails. Run BEFORE starting any work unit.
 - `works-tool worktree list [--json]` — enumerate worktrees (entry JSON has
   `repo_root_ok`, `task_doc_ok`). Empty is honest ("No worktrees found.").
-- `works-tool retro persist <phase> <feature> --body <line> [--commit-ref <ref>]`
+- `works-tool retro persist --phase <phase> --feature <feature> --body <line> [--commit-ref <ref>]`
   — append one retro line. Engram primary (topic `odd/<feature>/retrospective`,
-  deduped by change) + task-doc `## Retros` appendix secondary. Missing/unresolvable
-  commit ref or a lost appendix → FAIL-OPEN exit 2 with the marker. Run on change close.
+  deduped by (feature, phase, ref)) + task-doc `## Retros` appendix secondary.
+  Missing/unresolvable commit ref or a lost appendix → FAIL-OPEN exit 2 with the marker. Run on change close.
 - `works-tool retro lookup --feature <feature> [--json]` — read the ledger;
   absent store → warn-and-continue (exit 0).
 - `works-tool incidents record --feature <feature> --summary <text> [--kind blocker|test_failure|transport|other]`
