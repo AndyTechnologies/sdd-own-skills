@@ -4,14 +4,21 @@ Local FastMCP server exposing typed `gh_*`/`git_*` tools over the `gh` and `git`
 
 ## Tool Surface
 
-23 tools across 4 families:
+The tool surface is NOT enumerated here. The single machine-readable source of
+truth is [`tools.json`](tools.json): 29 tools in 5 families, grouped by family.
+The per-family lists are the source of the counts — nothing writes a total by
+hand, so the list cannot drift away from its own arithmetic.
 
-| Family | Tools | Count |
-|--------|-------|-------|
-| Remote read | `gh_get_me`, `gh_get_repo`, `gh_list_repositories`, `gh_list_issues`, `gh_get_issue`, `gh_list_pull_requests`, `gh_get_pull_request`, `gh_get_pr_checks`, `gh_get_pr_diff`, `gh_list_commits`, `gh_list_workflow_runs`, `gh_get_workflow_run`, `gh_get_run_logs`, `gh_search_code` | 14 |
-| Remote mutation | `gh_merge_pull_request`, `gh_delete_branch`, `gh_rerun_workflow` | 3 |
-| Local read | `git_status`, `git_diff`, `git_log`, `git_branch` | 4 |
-| Local mutation | `git_commit`, `git_delete_branch` | 2 |
+This README previously carried its own table and its own count, which had gone
+stale (it claimed 23 tools in 4 families while the server registered 29 in 5).
+Duplicating the inventory in prose is how that happened, so the prose now points
+at the file instead of restating it. Check T67 of `tests/run_red_checks.sh`
+requires set equality between the `@server.tool()` registrations in
+`src/tool_handlers/` and `tools.json`, in both directions, and requires every
+tool to be named in the spec requirement.
+
+Note that `git_delete_branch` (local) and `gh_delete_branch` (remote) are
+different tools in different families.
 
 `git_commit` accepts an optional `paths` list: when provided, only those
 paths are staged and committed (dry-run and confirm both scoped); without

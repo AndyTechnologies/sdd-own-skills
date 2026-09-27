@@ -98,14 +98,43 @@ Read tools SHALL be idempotent; mutations SHALL be explicit, single-shot, with n
 
 ### Requirement: Tool surface completeness
 
-The server SHALL expose 26 tools in 5 families: remote read (14), remote mutation (3), local read (5: 4 existing + `git_worktree_list`), local mutation (4: 2 existing + `git_worktree_add`, `git_worktree_remove`).
+The server SHALL expose exactly the tools enumerated below, grouped by family. The
+enumeration IS the requirement: the per-family counts and the total are derived
+from the lists, never asserted as a bare number, because a count cannot detect
+drift (it does not say WHICH tools, so it cannot notice one disappearing or a new
+one appearing). The machine-readable source of truth is
+`srv/gh-mcp-server/tools.json`, and check T67 of `tests/run_red_checks.sh` derives
+the real surface from the `@server.tool()` registrations and requires set
+equality against that file in both directions.
+
+- **remote read** (14): `gh_get_me`, `gh_get_repo`, `gh_list_repositories`,
+  `gh_list_issues`, `gh_get_issue`, `gh_list_pull_requests`, `gh_get_pull_request`,
+  `gh_get_pr_checks`, `gh_get_pr_diff`, `gh_list_commits`, `gh_list_workflow_runs`,
+  `gh_get_workflow_run`, `gh_get_run_logs`, `gh_search_code`
+- **remote mutation** (3): `gh_merge_pull_request`, `gh_delete_branch`,
+  `gh_rerun_workflow`
+- **local read** (5): `git_status`, `git_diff`, `git_log`, `git_branch`,
+  `git_worktree_list`
+- **local mutation** (3): `git_commit`, `git_delete_branch`, `git_push`
+- **worktree mutation** (4): `git_worktree_acquire`, `git_worktree_release`,
+  `git_worktree_add`, `git_worktree_remove`
+
+The total is 29, obtained by adding the five family lists above. Note that
+`git_worktree_add` and `git_worktree_remove` belong to the `worktree_mutation`
+family, not to local mutation; local mutation has 3 tools. The names
+`git_delete_branch` (local) and `gh_delete_branch` (remote) are distinct tools in
+distinct families and MUST NOT be conflated.
 
 #### Scenario: Full surface advertised (AC7)
 
 - GIVEN the server starts
 - WHEN an MCP `tools/list` probe runs
-- THEN it lists 26 tools including 3 worktree tools
-- AND `error.type` covers: `auth_required`, `repo_not_found`, `network_error`, `not_found`, `not_a_repo`, `dirty_worktree`, `not_safe`, `commit_failed`, `invalid_parameter`, `worktree_exists`, `active_agents`, `owned_by_other`
+- THEN it lists every tool named in the five families above, and no others
+- AND the families in `tools.json` match the registered families, tool by tool
+- AND `error.type` covers: `auth_required`, `repo_not_found`, `network_error`,
+  `not_found`, `not_a_repo`, `dirty_worktree`, `not_safe`, `commit_failed`,
+  `invalid_parameter`, `worktree_exists`, `active_agents`, `owned_by_other`,
+  `locked_unreadable`, `corrupt_worktree`
 - AND `confirm_required` is a summary marker on `ok()` envelopes, never an `error.type`
 
 #### Scenario: Git commit dry-run

@@ -45,6 +45,7 @@
 #       tombstones clase c (--purge-manual)
 #   T63 gate C2 aditivo (no gatea)  T64 gate C2 conflicto real (preserva)
 #   T65 gate C2 --force (sobrescribe)  T66 gate C2 TOML (paridad con json)
+#   T67 inventario de tools (igualdad de conjunto source <-> tools.json <-> spec)
 #
 # Exit: 0 = todo verde (skips permitidos), 1 = fallos.
 # =============================================================================
@@ -520,6 +521,38 @@ t "T66 gate C2 TOML (C2): clave extra no gatea, conflicto real preserva config m
     grep -q "requiere --force o TTY" "$SB_TMP/out.txt" || { ko "conflicto: sin aviso de config manual"; bad=1; }
     grep -q "manual.example.invalid" "$cfg" || { ko "conflicto: url manual pisada por el bloque declarado"; bad=1; }
     ls "$cfg".bak.* >/dev/null 2>&1 && { ko "conflicto: .bak creado sin escritura"; bad=1; }
+  fi
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+# T67: la superficie de tools se verifica como CONJUNTO, no como conteo. El spec
+# afirmaba "26 tools in 5 families": un numero no puede detectar drift, porque no
+# dice QUE tools son, ni avisa si una desaparecio o si aparecio otra. El total
+# real es 29 y el spec nunca nombro 21 de ellas.
+# La regla nueva deriva el set real desde el source (ast sobre los decoradores
+# @server.tool()) y exige igualdad de conjunto en AMBAS direcciones contra
+# tools.json, que es la fuente unica legible por maquina. Cada problema se
+# reporta POR NOMBRE: "faltan 2" es tan inaccionable como el conteo que reemplaza.
+t "T67 inventario de tools: igualdad de conjunto source <-> tools.json <-> spec [actualizado]"
+{
+  bad=0
+  srv="$REPO/srv/gh-mcp-server"
+  if [[ ! -f "$srv/tools.json" ]]; then
+    ko "sin inventario legible por maquina: $srv/tools.json (un conteo en prosa no es un inventario)"
+    bad=1
+  fi
+  if [[ ! -f "$srv/src/tool_inventory.py" ]]; then
+    ko "sin derivacion compartida de la superficie: $srv/src/tool_inventory.py"
+    bad=1
+  fi
+  if [[ $bad -eq 0 ]]; then
+    # Todo el razonamiento vive en src/tool_inventory.py, no en el check. El check
+    # y el test pytest comparten ESA logica: un guard que deriva distinto de como
+    # deriva el test vuelve a ser dos verdades que pueden divergir.
+    while IFS= read -r prob; do
+      if [[ -n "$prob" ]]; then ko "inventario: $prob"; bad=1; fi
+    done < <(python3 "$srv/src/tool_inventory.py" --problems \
+                --spec "$REPO/openspec/specs/gh-git-mcp-server/spec.md" 2>&1)
   fi
   if [[ $bad -eq 0 ]]; then ok; fi
 }

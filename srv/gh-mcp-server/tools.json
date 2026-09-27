@@ -1,0 +1,43 @@
+{
+  "families": {
+    "remote_read": [
+      "gh_get_me",
+      "gh_get_repo",
+      "gh_list_repositories",
+      "gh_list_issues",
+      "gh_get_issue",
+      "gh_list_pull_requests",
+      "gh_get_pull_request",
+      "gh_get_pr_checks",
+      "gh_get_pr_diff",
+      "gh_list_commits",
+      "gh_list_workflow_runs",
+      "gh_get_workflow_run",
+      "gh_get_run_logs",
+      "gh_search_code"
+    ],
+    "remote_mutation": [
+      "gh_merge_pull_request",
+      "gh_delete_branch",
+      "gh_rerun_workflow"
+    ],
+    "local_read": [
+      "git_status",
+      "git_diff",
+      "git_log",
+      "git_branch",
+      "git_worktree_list"
+    ],
+    "local_mutation": [
+      "git_commit",
+      "git_delete_branch",
+      "git_push"
+    ],
+    "worktree_mutation": [
+      "git_worktree_acquire",
+      "git_worktree_release",
+      "git_worktree_add",
+      "git_worktree_remove"
+    ]
+  }
+}
