@@ -61,8 +61,19 @@
 - **`jq index` no matchea sub-arrays**: `[["a"],["b"]] | index(["a"])` → `null`. La existencia de la ruta se resuelve con un set de paths serializados (`map(tostring) | join(".")`), indexado en paralelo a los paths reales usados por `getpath`.
 - **T66 no puede comparar md5**: con codex presente el paso 5g agrega `sandbox_mode` y `[sandbox_workspace_write]` al **mismo** `config.toml`, así que el byte-comparado da falso positivo. La aserción mira la entrada administrada, no el archivo entero.
 - **Follow-up (NO arreglado, mismo commenting-mintiendo)**: en modo `--check`/`--dry-run` el mensaje `[aviso] <target> difiere de la definicion declarada; config manual preservada` usa el mismo `diff` Whole-file, así que un merge puramente aditivo se reporta como "config manual". Es superficie de reporte, no de escritura; queda anotado en Follow-ups.
-- [ ] **T2 — L1 spec**: requirement "Tool surface completeness" enumera 29 tools por familia, totales derivados.
-- [ ] **T2 — L2 inventario**: `srv/gh-mcp-server/tools.json` como fuente unica; guard RED de igualdad de conjunto en ambas direcciones; test pytest in-process.
+- [x] **T2 — L1 spec**: requirement "Tool surface completeness" enumera 29 tools por familia, totales derivados. Commit `aa1bfee`.
+- [x] **T2 — L2 inventario**: `srv/gh-mcp-server/tools.json` como fuente unica; guard RED de igualdad de conjunto en ambas direcciones; test pytest in-process. Commit `aa1bfee`.
+
+### T2 — notas de implementacion (evidencia)
+
+- **La hipotesis de 29 se confirmo** contra el codigo: `ast` sobre los decoradores `@server.tool()` de `src/tool_handlers/*.py` da 14+3+5+3+4 = 29, y ninguna tool registrada fuera de esos 5 modulos. El spec decia 26 y el README 23.
+- **El spec estaba mal hasta en la aritmetica**: atribuia `git_worktree_add`/`git_worktree_remove` a local mutation (que tiene 3) cuando viven en su propia familia `worktree_mutation`, y no nombraba `git_worktree_acquire`/`git_worktree_release`.
+- **Se corrigio tambien el catalogo de `error.type`** del mismo requirement: listaba 12, T26 asserta 14 (le faltaban `locked_unreadable` y `corrupt_worktree`). T26 NO se toco. T3 va a agregar `timeout` -> 15.
+- **El derive vive en el modulo, no en el check**: `src/tool_inventory.py` es la logica compartida por el guard RED y el test pytest. Un guard que deriva distinto de como deriva el test vuelve a tener dos verdades que pueden divergir, que es el defecto que este change elimina.
+- **`tools.json` no lleva `total` escrito**: el total se deriva de la lista. Escribirlo a mano reintroduce la desincronizacion que el inventario viene a evitar.
+- **T67 discrimina, verificado en 5 modos**: tool faltante en el inventario; tool fantasma; tool movida de familia (nombre presente, familia mal); tool quitada del spec; y —el importante— una tool movida de familia **con el total intacto en 29**, que un check por conteo no veria jamas. Ademas se vio rojo in-suite con el inventario roto, no solo por CLI.
+- **Se cambio de harness a mitad de camino**: el writer delegado no pudo arrancar (el validador de surfaces rechaza paths de archivos nuevos, y `gentle_review` no esta expuesta en las subagentes). T2 se implemento inline. El sondeo dejo una linea de comentario en el header que se revirtio.
+
 - [ ] **T3 — clasificacion**: excepcion partida; timeout/ENOENT/generico clasificados; `timeout` en el catalogo; `GH_GIT_MCP_TIMEOUT_S` configurable con default 30s; docstring de `server.py` corregido; 4 tests nuevos + pin RED.
 - [ ] **T4 — verde**: `tests/run_red_checks.sh` 100% verde y `uv run pytest` del server verde.
 
