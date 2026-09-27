@@ -43,6 +43,8 @@
 #   T62 cleanup-sdd-own R9: agents obsoletos del config opencode (derivados),
 #       splice byte-a-byte (orchestrator intacto), respaldo .bak.sdd-own,
 #       tombstones clase c (--purge-manual)
+#   T63 gate C2 aditivo (no gatea)  T64 gate C2 conflicto real (preserva)
+#   T65 gate C2 --force (sobrescribe)  T66 gate C2 TOML (paridad con json)
 #
 # Exit: 0 = todo verde (skips permitidos), 1 = fallos.
 # =============================================================================
@@ -393,6 +395,132 @@ exec /usr/bin/python3 "$@"'
   grep -q "tomli-w" "$SB_TMP/out.txt" || { ko "sin error de tomli-w"; bad=1; }
   after="$(md5sum "$SB_HOME/.codex/config.toml" | cut -d' ' -f1)"
   [[ "$before" == "$after" ]] || { ko "config.toml tocado con tomli-w ausente"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+# T63: el gate C2 NO debe dispararse ante un cambio puramente aditivo. El target
+# ya trae la entrada administrada identica a la declarada y le FALTA una entrada
+# nueva que el bloque agrega: no hay nada manual que pisar, asi que el merge debe
+# escribir sin --force y sin TTY (el gate viejo preguntaba "¿merged != target?" y
+# rechazaba; el fix gatea solo ante conflictos de valor en rutas compartidas).
+t "T63 gate C2 (C2): merge aditivo sin --force ni TTY escribe, respalda y reporta [actualizado]"
+{
+  bad=0
+  init_sandbox; start_fake_api 200
+  seed_env_file "ghp_ADITIVO1"
+  pif="$SB_HOME/.pi/agent/mcp.json"
+  printf '%s\n' '{"mcpServers":{"github":{"auth":"bearer","url":"https://api.githubcopilot.com/mcp/","bearerTokenEnv":"GITHUB_PERSONAL_ACCESS_TOKEN"}}}' > "$pif"
+  run_setup </dev/null
+  [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
+  grep -q "requiere --force o TTY" "$SB_TMP/out.txt" && { ko "gate C2 disparo sobre un merge aditivo (falso positivo)"; bad=1; }
+  grep -q "\[actualizado\] .pi/agent/mcp.json" "$SB_TMP/out.txt" || { ko "merge aditivo no reportado [actualizado]"; bad=1; }
+  jq -e '.mcpServers.donsetch.command == "donsetch"' "$pif" >/dev/null 2>&1 || { ko "entrada nueva declarada (donsetch) no mergeada"; bad=1; }
+  jq -e '.mcpServers.github.url == "https://api.githubcopilot.com/mcp/"' "$pif" >/dev/null 2>&1 || { ko "entrada administrada github alterada"; bad=1; }
+  ls "$pif".bak.* >/dev/null 2>&1 || { ko "sin .bak.<ts> sobre target pre-existente"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+# T64: un conflicto de valor REAL (url editada a mano en una entrada administrada)
+# debe seguir gateando: sin TTY se avisa y se preserva byte-a-byte el archivo
+# (sin .bak, porque no hubo escritura), y con TTY la pregunta se hace y una
+# respuesta distinta de y/Y preserva la config manual ("no sobrescrito").
+t "T64 gate C2 (C2): conflicto real preserva config manual sin TTY y con TTY SayN"
+{
+  bad=0
+  manual='{"mcpServers":{"github":{"auth":"bearer","url":"https://manual.example.invalid/mcp/","bearerTokenEnv":"GITHUB_PERSONAL_ACCESS_TOKEN"}}}'
+  init_sandbox; start_fake_api 200
+  seed_env_file "ghp_CONFLICTO1"
+  pif="$SB_HOME/.pi/agent/mcp.json"
+  printf '%s\n' "$manual" > "$pif"
+  before="$(md5sum "$pif" | cut -d' ' -f1)"
+  run_setup </dev/null
+  [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "leg sin TTY: exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
+  after="$(md5sum "$pif" | cut -d' ' -f1)"
+  [[ "$before" == "$after" ]] || { ko "leg sin TTY: config manual sobrescrita sin --force"; bad=1; }
+  grep -q "requiere --force o TTY" "$SB_TMP/out.txt" || { ko "leg sin TTY: sin aviso de config manual"; bad=1; }
+  jq -e '.mcpServers.github.url == "https://manual.example.invalid/mcp/"' "$pif" >/dev/null 2>&1 || { ko "leg sin TTY: url manual perdida"; bad=1; }
+  ls "$pif".bak.* >/dev/null 2>&1 && { ko "leg sin TTY: .bak creado sin escritura"; bad=1; }
+
+  init_sandbox; start_fake_api 200
+  seed_env_file "ghp_CONFLICTO2"
+  pif="$SB_HOME/.pi/agent/mcp.json"
+  printf '%s\n' "$manual" > "$pif"
+  before="$(md5sum "$pif" | cut -d' ' -f1)"
+  run_setup_pty 45 'Conservar el token existente? [k/R] =k\n;Runtimes a configurar=\n;Sobrescribir config manual =n\n'
+  [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "leg TTY: exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
+  after="$(md5sum "$pif" | cut -d' ' -f1)"
+  [[ "$before" == "$after" ]] || { ko "leg TTY: config manual sobrescrita tras responder N"; bad=1; }
+  grep -q "no sobrescrito" "$SB_TMP/out.txt" || { ko "leg TTY: sin aviso 'no sobrescrito'"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+# T65: --force sigue siendo la via para pisar config manual: con el mismo conflicto
+# de T64 el archivo se sobrescribe con el bloque declarado y se deja el respaldo
+# .bak.<ts> del contenido manual.
+t "T65 gate C2 (C2): --force sobrescribe config manual conflictiva y deja .bak"
+{
+  bad=0
+  init_sandbox; start_fake_api 200
+  seed_env_file "ghp_FORCE001"
+  pif="$SB_HOME/.pi/agent/mcp.json"
+  printf '%s\n' '{"mcpServers":{"github":{"auth":"bearer","url":"https://manual.example.invalid/mcp/","bearerTokenEnv":"GITHUB_PERSONAL_ACCESS_TOKEN"}}}' > "$pif"
+  run_setup --force </dev/null
+  [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
+  jq -e '.mcpServers.github.url == "https://api.githubcopilot.com/mcp/"' "$pif" >/dev/null 2>&1 || { ko "--force no aplico el bloque declarado"; bad=1; }
+  jq -e '.mcpServers.donsetch.command == "donsetch"' "$pif" >/dev/null 2>&1 || { ko "--force no completo el merge aditivo"; bad=1; }
+  grep -q "\[actualizado\] .pi/agent/mcp.json" "$SB_TMP/out.txt" || { ko "--force no reportado [actualizado]"; bad=1; }
+  bak="$(ls "$pif".bak.* 2>/dev/null | head -1)"
+  [[ -n "$bak" ]] || { ko "--force sin .bak.<ts>"; bad=1; }
+  [[ -n "$bak" ]] && { grep -q "manual.example.invalid" "$bak" || { ko "el .bak no conserva la config manual previa"; bad=1; }; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+# T66: el gate C2 de TOML (codex) discrimina con la MISMA regla que el de json.
+# El comentario del gate afirma "misma regla que json", asi que la paridad tiene
+# que estar probada y no solo afirmada.
+#   (a) clave EXTRA en la entrada administrada (todos los valores declarados
+#       coinciden) → NO es edicion manual → no gatea. Esta es la pierna
+#       DISCRIMINANTE: el gate viejo comparaba `diff merged target`, veia la
+#       diferencia y gateaba igual (falso positivo).
+#   (b) conflicto de valor real → gatea, avisa y preserva la entrada.
+t "T66 gate C2 TOML (C2): clave extra no gatea, conflicto real preserva config manual"
+{
+  bad=0
+  if ! python3 -c 'import tomli_w' >/dev/null 2>&1; then
+    skip "tomli_w no importable en el host; el gate C2 de TOML no es ejecutable"
+  else
+    pypath="$(python3 -c 'import site; print(site.getusersitepackages())' 2>/dev/null || true)"
+
+    # (a) clave propia del usuario junto a la entrada administrada, sin ningun
+    # valor en conflicto. El gate viejo rechazaba esto; el discriminator por
+    # conflicto de valor lo tiene que dejar pasar y escribir.
+    init_sandbox; start_fake_api 200
+    add_bin codex
+    add_env PYTHONPATH="$pypath"
+    seed_env_file "ghp_TOMLEXTRA"
+    cfg="$SB_HOME/.codex/config.toml"
+    printf '[mcp_servers.github]\nurl = "https://api.githubcopilot.com/mcp/"\nbearer_token_env_var = "GITHUB_PERSONAL_ACCESS_TOKEN"\nmi_clave = "x"\n' > "$cfg"
+    run_setup </dev/null
+    [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "clave extra: exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
+    grep -q "requiere --force o TTY" "$SB_TMP/out.txt" && { ko "clave extra: gate C2 TOML disparo sin conflicto de valor (gate viejo)"; bad=1; }
+    grep -q "\[actualizado\] .codex/config.toml" "$SB_TMP/out.txt" || { ko "clave extra: no escribio (gateado sin conflicto)"; bad=1; }
+
+    # (b) conflicto de valor real en la entrada administrada. No se compara
+    # md5 del archivo: con codex presente el paso 5g agrega sus claves de
+    # sandbox al MISMO config.toml, asi que el byte-comparado daria falso
+    # positivo. Lo que se prueba es que la entrada administrada no se piso.
+    init_sandbox; start_fake_api 200
+    add_bin codex
+    add_env PYTHONPATH="$pypath"
+    seed_env_file "ghp_TOMLCONF1"
+    cfg="$SB_HOME/.codex/config.toml"
+    printf '[mcp_servers.github]\nurl = "https://manual.example.invalid/mcp/"\nbearer_token_env_var = "GITHUB_PERSONAL_ACCESS_TOKEN"\n' > "$cfg"
+    run_setup </dev/null
+    [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "conflicto: exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
+    grep -q "requiere --force o TTY" "$SB_TMP/out.txt" || { ko "conflicto: sin aviso de config manual"; bad=1; }
+    grep -q "manual.example.invalid" "$cfg" || { ko "conflicto: url manual pisada por el bloque declarado"; bad=1; }
+    ls "$cfg".bak.* >/dev/null 2>&1 && { ko "conflicto: .bak creado sin escritura"; bad=1; }
+  fi
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 

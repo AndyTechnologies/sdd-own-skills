@@ -474,11 +474,36 @@ PYEOF
     return 0
   fi
 
-  # C2 gate: config manual con la entrada YA presente no se pisa sin --force o
-  # confirmacion TTY (la creacion aditiva — entrada ausente — nunca se gatea).
-  if [[ $flag_created -eq 0 ]] && \
-     jq -e --arg k "$root_key" --arg s "$server_key" '.[$k]? // empty | has($s)' "$target" >/dev/null 2>&1 && \
-     ! printf '%s\n' "$merged" | diff -q - "$target" >/dev/null 2>&1; then
+  # C2 gate: la pregunta NO es "¿el resultado difiere del archivo?" sino "¿el
+  # usuario edito a mano un valor que este envelope administra?". Un cambio
+  # puramente aditivo (una clave que el target aun no tiene) no tiene nada
+  # manual que pisar, asi que NUNCA gatea — ni porque falte la clave, ni
+  # porque falte el archivo: se discrimina por conflicto de VALOR en una ruta
+  # que el target ya tiene. Un fallo de lectura se gatea (fail-closed).
+  local conflict_rc=1
+  if [[ $flag_created -eq 0 ]] && command -v jq >/dev/null 2>&1; then
+    local jq_rc=0
+    jq -n -e --arg k "$root_key" --arg s "$server_key" \
+          --slurpfile tgt "$target" \
+          --slurpfile blk <(printf '%s\n' "$block") '
+      ($blk[0][$s] // {}) as $declared
+      | ($tgt[0][$k][$s] // {}) as $current
+      | ($declared | [paths(scalars)]) as $dp
+      | ($declared | [paths(scalars) | map(tostring) | join(".")]) as $dk
+      | ($current  | [paths | map(tostring) | join(".")]) as $ck
+      | any(range(0; $dp | length);
+            . as $i
+            | $dp[$i] as $p
+            | (($ck | index($dk[$i])) != null)
+              and (($current | getpath($p)) != ($declared | getpath($p))))
+    ' >/dev/null 2>&1 || jq_rc=$?
+    case $jq_rc in
+      0) conflict_rc=0 ;;  # conflicto real de valor
+      1) conflict_rc=1 ;;  # sin conflicto: aditivo o identico
+      *) conflict_rc=2 ;;  # no se pudo discriminar → fail-closed
+    esac
+  fi
+  if [[ $flag_created -eq 0 ]] && { [[ $conflict_rc -eq 0 ]] || [[ $conflict_rc -eq 2 ]]; }; then
     if [[ $FORCE -eq 1 ]]; then
       : # --force: sobrescribir config manual
     elif [[ ! -t 0 ]]; then
@@ -566,19 +591,66 @@ PYEOF
     return 0
   fi
   # C2 gate (TOML): misma regla que json — no pisar config manual sin --force/TTY.
-  if [[ $flag_created -eq 0 ]] && \
-     ! printf '%s\n' "$merged" | diff -q - "$target" >/dev/null 2>&1 && \
-     python3 - "$target" "$root_key" "$server_key" <<'PYEOF' 2>/dev/null
-import sys, tomllib
+  # Discrimina por conflicto de VALOR en una ruta que el target ya tiene; una
+  # clave ausente es aditiva y nunca gatea. No se puede discriminar → fail-closed.
+  local toml_conflict_rc=1
+  if [[ $flag_created -eq 0 ]]; then
+    local toml_rc=0
+    MERGED_BLOCK="$block" python3 - "$target" "$root_key" "$server_key" <<'PYEOF' 2>/dev/null || toml_rc=$?
+import json, os, sys, tomllib
+
+MISSING = object()
+
+def getpath(node, path):
+    for k in path:
+        if isinstance(node, dict) and k in node:
+            node = node[k]
+        elif isinstance(node, list) and isinstance(k, int) and 0 <= k < len(node):
+            node = node[k]
+        else:
+            return MISSING
+    return node
+
+def scalars(node, prefix=()):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            yield from scalars(v, prefix + (k,))
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from scalars(v, prefix + (i,))
+    else:
+        yield prefix
+
 try:
     with open(sys.argv[1], "rb") as f:
         d = tomllib.load(f)
+except FileNotFoundError:
+    d = {}
 except Exception:
-    sys.exit(1)
-root = d.get(sys.argv[2])
-sys.exit(0 if isinstance(root, dict) and sys.argv[3] in root else 1)
+    sys.exit(2)  # no se pudo leer el target → fail-closed (gatea)
+
+declared = json.loads(os.environ["MERGED_BLOCK"])
+current = (d.get(sys.argv[2]) or {}).get(sys.argv[3])
+if not isinstance(current, dict):
+    current = {}
+
+for p in scalars(declared):
+    if not p:
+        continue
+    have = getpath(current, p)
+    if have is MISSING:
+        continue  # clave ausente del target → creacion aditiva, no gatea
+    if have != getpath(declared, p):
+        sys.exit(0)  # conflicto real de valor
+sys.exit(1)  # sin conflicto
 PYEOF
-  then
+    case $toml_rc in
+      0) toml_conflict_rc=0 ;;
+      1) toml_conflict_rc=1 ;;
+      *) toml_conflict_rc=2 ;;
+    esac
+  fi
+  if [[ $flag_created -eq 0 ]] && { [[ $toml_conflict_rc -eq 0 ]] || [[ $toml_conflict_rc -eq 2 ]]; }; then
     if [[ $FORCE -eq 1 ]]; then
       : # --force: sobrescribir config manual
     elif [[ ! -t 0 ]]; then
