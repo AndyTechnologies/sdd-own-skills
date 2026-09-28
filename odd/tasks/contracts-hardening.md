@@ -74,8 +74,19 @@
 - **T67 discrimina, verificado en 5 modos**: tool faltante en el inventario; tool fantasma; tool movida de familia (nombre presente, familia mal); tool quitada del spec; y —el importante— una tool movida de familia **con el total intacto en 29**, que un check por conteo no veria jamas. Ademas se vio rojo in-suite con el inventario roto, no solo por CLI.
 - **Se cambio de harness a mitad de camino**: el writer delegado no pudo arrancar (el validador de surfaces rechaza paths de archivos nuevos, y `gentle_review` no esta expuesta en las subagentes). T2 se implemento inline. El sondeo dejo una linea de comentario en el header que se revirtio.
 
-- [ ] **T3 — clasificacion**: excepcion partida; timeout/ENOENT/generico clasificados; `timeout` en el catalogo; `GH_GIT_MCP_TIMEOUT_S` configurable con default 30s; docstring de `server.py` corregido; 4 tests nuevos + pin RED.
+- [x] **T3 — clasificacion**: excepcion partida; timeout/ENOENT/generico clasificados; `timeout` en el catalogo; `GH_GIT_MCP_TIMEOUT_S` configurable con default 30s; docstring de `server.py` corregido; 4 tests nuevos + pin RED. Commit `8070738`.
 - [ ] **T4 — verde**: `tests/run_red_checks.sh` 100% verde y `uv run pytest` del server verde.
+
+### T3 — notas de implementacion (evidencia)
+
+- **Tres excepciones, no dos.** El doc pedia partir en `SubprocessTimeout` vs `SubprocessError`, pero `not_found` con hint que nombre el binario requiere distinguir ENOENT de un OSError generico. Se agrego una tercera: `SubprocessBinaryMissing(binary=...)`. Sin ella, el hint tendria que parsear el texto del `OSError`.
+- **Las dos especificas heredan de `SubprocessError`**: `gh_auth.py:34` y `worktree_state.py:454` catchean la base y no se tocaron. El orden de los `except` en la safety net es load-bearing: la base va ultima.
+- **El default de 30 s no se toco.** Se hizo configurable con `GH_GIT_MCP_TIMEOUT_S`, leido en cada llamada (no al importar) para que un test lo pueda cambiar. Valor invalido o no positivo vuelve al default: una env var mal puesta no debe dejar comandos sin deadline. Los overrides por tool preexistentes (`gh_get_run_logs` 120 s, `codegraph init` 60 s) siguen mandando sobre la env var, y esa precedencia tiene test.
+- **Doc que mentia**: el docstring de `server.py` decia que `SubprocessError` se re-lanza porque cada handler clasifica su propio fallo de subprocess. El codigo lo ATRAPA y devuelve `network_error`. Corregido.
+- **T68 se escribio antes del fix**: rojo con 9 aserciones. Ademas T26 paso a assertar `timeout`, asi que el catalogo/documento/spec van en la misma direccion (14 -> 15 tipos).
+- **Los greps de mapeo de T68 colapsan whitespace con `tr -d '[:space:]'`**: la primera version buscaba el literal `err("timeout"` y fallaba porque el `err(` estaba partido en dos lineas. Un pin que falla por formato empuja a un fix que no arregla nada.
+- **pytest tambien discrimina, y eso es lo que importa** (el pin estatico es weak por naturaleza): degradando SOLO el mapeo a `network_error` con los `except` intactos, fallan 3 tests de borde de `server.py`; volviendo al tipo unico en `executor.py`, fallan 3 de executor. La suite pytest no tenia NINGUNA cobertura de clasificacion antes de esto.
+- **Trampa de evidencia**: el primer sabotaje de A metio placeholders `_P1`/`_P2` inexistentes, y 2 de los 5 fallos vinieron por `NameError` del arm, no por el mapeo. Hubo que repetirlo degradando solo el mapeo para tener evidencia honesta. Un rojo que falla por la razon equivocada es peor que no tener rojo: te hace creer que el check cubre algo que no cubre.
 
 ## Follow-ups (NO en este change)
 
