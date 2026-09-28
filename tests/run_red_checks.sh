@@ -43,6 +43,10 @@
 #   T62 cleanup-sdd-own R9: agents obsoletos del config opencode (derivados),
 #       splice byte-a-byte (orchestrator intacto), respaldo .bak.sdd-own,
 #       tombstones clase c (--purge-manual)
+#   T63 gate C2 aditivo (no gatea)  T64 gate C2 conflicto real (preserva)
+#   T65 gate C2 --force (sobrescribe)  T66 gate C2 TOML (paridad con json)
+#   T67 inventario de tools (igualdad de conjunto source <-> tools.json <-> spec)
+#   T68 clasificacion de subprocess (timeout / binario ausente / OSError)
 #
 # Exit: 0 = todo verde (skips permitidos), 1 = fallos.
 # =============================================================================
@@ -396,6 +400,216 @@ exec /usr/bin/python3 "$@"'
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
+# T63: el gate C2 NO debe dispararse ante un cambio puramente aditivo. El target
+# ya trae la entrada administrada identica a la declarada y le FALTA una entrada
+# nueva que el bloque agrega: no hay nada manual que pisar, asi que el merge debe
+# escribir sin --force y sin TTY (el gate viejo preguntaba "¿merged != target?" y
+# rechazaba; el fix gatea solo ante conflictos de valor en rutas compartidas).
+t "T63 gate C2 (C2): merge aditivo sin --force ni TTY escribe, respalda y reporta [actualizado]"
+{
+  bad=0
+  init_sandbox; start_fake_api 200
+  seed_env_file "ghp_ADITIVO1"
+  pif="$SB_HOME/.pi/agent/mcp.json"
+  printf '%s\n' '{"mcpServers":{"github":{"auth":"bearer","url":"https://api.githubcopilot.com/mcp/","bearerTokenEnv":"GITHUB_PERSONAL_ACCESS_TOKEN"}}}' > "$pif"
+  run_setup </dev/null
+  [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
+  grep -q "requiere --force o TTY" "$SB_TMP/out.txt" && { ko "gate C2 disparo sobre un merge aditivo (falso positivo)"; bad=1; }
+  grep -q "\[actualizado\] .pi/agent/mcp.json" "$SB_TMP/out.txt" || { ko "merge aditivo no reportado [actualizado]"; bad=1; }
+  jq -e '.mcpServers.donsetch.command == "donsetch"' "$pif" >/dev/null 2>&1 || { ko "entrada nueva declarada (donsetch) no mergeada"; bad=1; }
+  jq -e '.mcpServers.github.url == "https://api.githubcopilot.com/mcp/"' "$pif" >/dev/null 2>&1 || { ko "entrada administrada github alterada"; bad=1; }
+  ls "$pif".bak.* >/dev/null 2>&1 || { ko "sin .bak.<ts> sobre target pre-existente"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+# T64: un conflicto de valor REAL (url editada a mano en una entrada administrada)
+# debe seguir gateando: sin TTY se avisa y se preserva byte-a-byte el archivo
+# (sin .bak, porque no hubo escritura), y con TTY la pregunta se hace y una
+# respuesta distinta de y/Y preserva la config manual ("no sobrescrito").
+t "T64 gate C2 (C2): conflicto real preserva config manual sin TTY y con TTY SayN"
+{
+  bad=0
+  manual='{"mcpServers":{"github":{"auth":"bearer","url":"https://manual.example.invalid/mcp/","bearerTokenEnv":"GITHUB_PERSONAL_ACCESS_TOKEN"}}}'
+  init_sandbox; start_fake_api 200
+  seed_env_file "ghp_CONFLICTO1"
+  pif="$SB_HOME/.pi/agent/mcp.json"
+  printf '%s\n' "$manual" > "$pif"
+  before="$(md5sum "$pif" | cut -d' ' -f1)"
+  run_setup </dev/null
+  [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "leg sin TTY: exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
+  after="$(md5sum "$pif" | cut -d' ' -f1)"
+  [[ "$before" == "$after" ]] || { ko "leg sin TTY: config manual sobrescrita sin --force"; bad=1; }
+  grep -q "requiere --force o TTY" "$SB_TMP/out.txt" || { ko "leg sin TTY: sin aviso de config manual"; bad=1; }
+  jq -e '.mcpServers.github.url == "https://manual.example.invalid/mcp/"' "$pif" >/dev/null 2>&1 || { ko "leg sin TTY: url manual perdida"; bad=1; }
+  ls "$pif".bak.* >/dev/null 2>&1 && { ko "leg sin TTY: .bak creado sin escritura"; bad=1; }
+
+  init_sandbox; start_fake_api 200
+  seed_env_file "ghp_CONFLICTO2"
+  pif="$SB_HOME/.pi/agent/mcp.json"
+  printf '%s\n' "$manual" > "$pif"
+  before="$(md5sum "$pif" | cut -d' ' -f1)"
+  run_setup_pty 45 'Conservar el token existente? [k/R] =k\n;Runtimes a configurar=\n;Sobrescribir config manual =n\n'
+  [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "leg TTY: exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
+  after="$(md5sum "$pif" | cut -d' ' -f1)"
+  [[ "$before" == "$after" ]] || { ko "leg TTY: config manual sobrescrita tras responder N"; bad=1; }
+  grep -q "no sobrescrito" "$SB_TMP/out.txt" || { ko "leg TTY: sin aviso 'no sobrescrito'"; bad=1; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+# T65: --force sigue siendo la via para pisar config manual: con el mismo conflicto
+# de T64 el archivo se sobrescribe con el bloque declarado y se deja el respaldo
+# .bak.<ts> del contenido manual.
+t "T65 gate C2 (C2): --force sobrescribe config manual conflictiva y deja .bak"
+{
+  bad=0
+  init_sandbox; start_fake_api 200
+  seed_env_file "ghp_FORCE001"
+  pif="$SB_HOME/.pi/agent/mcp.json"
+  printf '%s\n' '{"mcpServers":{"github":{"auth":"bearer","url":"https://manual.example.invalid/mcp/","bearerTokenEnv":"GITHUB_PERSONAL_ACCESS_TOKEN"}}}' > "$pif"
+  run_setup --force </dev/null
+  [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
+  jq -e '.mcpServers.github.url == "https://api.githubcopilot.com/mcp/"' "$pif" >/dev/null 2>&1 || { ko "--force no aplico el bloque declarado"; bad=1; }
+  jq -e '.mcpServers.donsetch.command == "donsetch"' "$pif" >/dev/null 2>&1 || { ko "--force no completo el merge aditivo"; bad=1; }
+  grep -q "\[actualizado\] .pi/agent/mcp.json" "$SB_TMP/out.txt" || { ko "--force no reportado [actualizado]"; bad=1; }
+  bak="$(ls "$pif".bak.* 2>/dev/null | head -1)"
+  [[ -n "$bak" ]] || { ko "--force sin .bak.<ts>"; bad=1; }
+  [[ -n "$bak" ]] && { grep -q "manual.example.invalid" "$bak" || { ko "el .bak no conserva la config manual previa"; bad=1; }; }
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+# T66: el gate C2 de TOML (codex) discrimina con la MISMA regla que el de json.
+# El comentario del gate afirma "misma regla que json", asi que la paridad tiene
+# que estar probada y no solo afirmada.
+#   (a) clave EXTRA en la entrada administrada (todos los valores declarados
+#       coinciden) → NO es edicion manual → no gatea. Esta es la pierna
+#       DISCRIMINANTE: el gate viejo comparaba `diff merged target`, veia la
+#       diferencia y gateaba igual (falso positivo).
+#   (b) conflicto de valor real → gatea, avisa y preserva la entrada.
+t "T66 gate C2 TOML (C2): clave extra no gatea, conflicto real preserva config manual"
+{
+  bad=0
+  if ! python3 -c 'import tomli_w' >/dev/null 2>&1; then
+    skip "tomli_w no importable en el host; el gate C2 de TOML no es ejecutable"
+  else
+    pypath="$(python3 -c 'import site; print(site.getusersitepackages())' 2>/dev/null || true)"
+
+    # (a) clave propia del usuario junto a la entrada administrada, sin ningun
+    # valor en conflicto. El gate viejo rechazaba esto; el discriminator por
+    # conflicto de valor lo tiene que dejar pasar y escribir.
+    init_sandbox; start_fake_api 200
+    add_bin codex
+    add_env PYTHONPATH="$pypath"
+    seed_env_file "ghp_TOMLEXTRA"
+    cfg="$SB_HOME/.codex/config.toml"
+    printf '[mcp_servers.github]\nurl = "https://api.githubcopilot.com/mcp/"\nbearer_token_env_var = "GITHUB_PERSONAL_ACCESS_TOKEN"\nmi_clave = "x"\n' > "$cfg"
+    run_setup </dev/null
+    [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "clave extra: exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
+    grep -q "requiere --force o TTY" "$SB_TMP/out.txt" && { ko "clave extra: gate C2 TOML disparo sin conflicto de valor (gate viejo)"; bad=1; }
+    grep -q "\[actualizado\] .codex/config.toml" "$SB_TMP/out.txt" || { ko "clave extra: no escribio (gateado sin conflicto)"; bad=1; }
+
+    # (b) conflicto de valor real en la entrada administrada. No se compara
+    # md5 del archivo: con codex presente el paso 5g agrega sus claves de
+    # sandbox al MISMO config.toml, asi que el byte-comparado daria falso
+    # positivo. Lo que se prueba es que la entrada administrada no se piso.
+    init_sandbox; start_fake_api 200
+    add_bin codex
+    add_env PYTHONPATH="$pypath"
+    seed_env_file "ghp_TOMLCONF1"
+    cfg="$SB_HOME/.codex/config.toml"
+    printf '[mcp_servers.github]\nurl = "https://manual.example.invalid/mcp/"\nbearer_token_env_var = "GITHUB_PERSONAL_ACCESS_TOKEN"\n' > "$cfg"
+    run_setup </dev/null
+    [[ "$(cat "$SB_TMP/exit")" == "0" ]] || { ko "conflicto: exit $(cat "$SB_TMP/exit") != 0"; bad=1; }
+    grep -q "requiere --force o TTY" "$SB_TMP/out.txt" || { ko "conflicto: sin aviso de config manual"; bad=1; }
+    grep -q "manual.example.invalid" "$cfg" || { ko "conflicto: url manual pisada por el bloque declarado"; bad=1; }
+    ls "$cfg".bak.* >/dev/null 2>&1 && { ko "conflicto: .bak creado sin escritura"; bad=1; }
+  fi
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+# T67: la superficie de tools se verifica como CONJUNTO, no como conteo. El spec
+# afirmaba "26 tools in 5 families": un numero no puede detectar drift, porque no
+# dice QUE tools son, ni avisa si una desaparecio o si aparecio otra. El total
+# real es 29 y el spec nunca nombro 21 de ellas.
+# La regla nueva deriva el set real desde el source (ast sobre los decoradores
+# @server.tool()) y exige igualdad de conjunto en AMBAS direcciones contra
+# tools.json, que es la fuente unica legible por maquina. Cada problema se
+# reporta POR NOMBRE: "faltan 2" es tan inaccionable como el conteo que reemplaza.
+t "T67 inventario de tools: igualdad de conjunto source <-> tools.json <-> spec [actualizado]"
+{
+  bad=0
+  srv="$REPO/srv/gh-mcp-server"
+  if [[ ! -f "$srv/tools.json" ]]; then
+    ko "sin inventario legible por maquina: $srv/tools.json (un conteo en prosa no es un inventario)"
+    bad=1
+  fi
+  if [[ ! -f "$srv/src/tool_inventory.py" ]]; then
+    ko "sin derivacion compartida de la superficie: $srv/src/tool_inventory.py"
+    bad=1
+  fi
+  if [[ $bad -eq 0 ]]; then
+    # Todo el razonamiento vive en src/tool_inventory.py, no en el check. El check
+    # y el test pytest comparten ESA logica: un guard que deriva distinto de como
+    # deriva el test vuelve a ser dos verdades que pueden divergir.
+    while IFS= read -r prob; do
+      if [[ -n "$prob" ]]; then ko "inventario: $prob"; bad=1; fi
+    done < <(python3 "$srv/src/tool_inventory.py" --problems \
+                --spec "$REPO/openspec/specs/gh-git-mcp-server/spec.md" 2>&1)
+  fi
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
+# T68: la clasificacion de fallos de subprocess. El executor lanzaba UN SOLO
+# tipo (SubprocessError) para tres fallos que son cosas distintas, y la safety net
+# mapeaba ese tipo unico a `network_error`. El resultado: un link lento Reporta
+# "fallo de red" (manda a debuggear la red) y, peor, un `gh` o `uv` ausentes
+# (ENOENT) tambien reporta "fallo de red" — actively misleading. Un unico tipo
+# para tres fallos hace que la clasificacion no pueda existir.
+# Este check es un pin ESTATICO (grep sobre el source); el comportamiento real lo
+# cubren los tests pytest, que no tienen enforcement automatico (sin CI, y el
+# sandbox RED no tiene uv). Pin y tests biblican la misma regla.
+t "T68 clasificacion de subprocess: timeout / binario ausente / OSError, timeout configurable"
+{
+  bad=0
+  src="$REPO/srv/gh-mcp-server/src"
+  grep -q "class SubprocessTimeout" "$src/executor.py" || { ko "executor no distingue el timeout (SubprocessTimeout ausente)"; bad=1; }
+  grep -q "class SubprocessBinaryMissing" "$src/executor.py" || { ko "executor no distingue el binario ausente (SubprocessBinaryMissing ausente)"; bad=1; }
+  grep -q "except subprocess.TimeoutExpired" "$src/executor.py" || { ko "TimeoutExpired sin rama propia"; bad=1; }
+  grep -q "FileNotFoundError" "$src/executor.py" || { ko "ENOENT sin rama propia (FileNotFoundError)"; bad=1; }
+  grep -q "GH_GIT_MCP_TIMEOUT_S" "$src/executor.py" || { ko "timeout no configurable (GH_GIT_MCP_TIMEOUT_S ausente)"; bad=1; }
+  # la safety net clasifica las tres ramas, y NO collapses todo en network_error.
+  # Los tres grep de mapeo colapsan el whitespace antes de comparar: el pin
+  # verifica la TRADUCCION, no el formato con que el autor la escribio. Un
+  # `err(` partido en dos lineas no cambia el contrato, pero hacia fallar el
+  # check y empujar a un fix que no arregla nada.
+  _src_flat="$(tr -d '[:space:]' < "$src/server.py")"
+  for pair in "timeout:SubprocessTimeout" "not_found:SubprocessBinaryMissing" "network_error:SubprocessError"; do
+    et="${pair%%:*}"; exc="${pair##*:}"
+    printf '%s' "$_src_flat" | grep -q "except${exc}" || { ko "safety net no clasifica $exc"; bad=1; }
+    printf '%s' "$_src_flat" | grep -q "err(\"$et\"," || { ko "$exc no mapea a error.type \"$et\""; bad=1; }
+  done
+  grep -q "network_error" "$src/envelope.py" || { ko "catalogo sin network_error"; bad=1; }
+  grep -q "timeout" "$src/envelope.py" || { ko 'el catalogo documentado no incluye "timeout"'; bad=1; }
+  # las subexcepciones heredan de SubprocessError: gh_auth y worktree_state las
+  # catchean por la base y deben seguir compilando y clasificando igual
+  python3 - "$src" <<'PY'
+import ast, sys
+from pathlib import Path
+src = Path(sys.argv[1])
+tree = ast.parse((src / "executor.py").read_text(encoding="utf-8"))
+bases = {
+    node.name: [b.id for b in node.bases if isinstance(b, ast.Name)]
+    for node in tree.body
+    if isinstance(node, ast.ClassDef)
+}
+for name in ("SubprocessTimeout", "SubprocessBinaryMissing"):
+    if "SubprocessError" not in bases.get(name, []):
+        print(f"KO  {name} no hereda de SubprocessError: rompe gh_auth y worktree_state")
+        sys.exit(1)
+PY
+  [[ $? -eq 0 ]] || bad=1
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
 t "T17 hard deps (F4): curl ausente y docker ausente con TRANSPORT=docker → exit 2 pre-delegacion"
 {
   bad=0
@@ -568,7 +782,7 @@ t "T26 worktree MCP contrato: 4 tools, Path.home(), destructive_flow, catalogo c
   grep -q "git_worktree_list" "$src/tool_handlers/local_read.py" || { ko "git_worktree_list ausente en local_read"; bad=1; }
   grep -q "Path.home()" "$src/worktree_state.py" || { ko "resolucion HOME-relative ausente (Path.home() en worktree_state)"; bad=1; }
   grep -q "destructive_flow" "$src/tool_handlers/worktree_mutation.py" || { ko "two-phase destructive_flow no usado en worktree"; bad=1; }
-  for et in auth_required repo_not_found network_error not_found not_a_repo dirty_worktree not_safe commit_failed invalid_parameter worktree_exists active_agents owned_by_other locked_unreadable corrupt_worktree; do
+  for et in auth_required repo_not_found network_error not_found not_a_repo dirty_worktree not_safe commit_failed invalid_parameter worktree_exists active_agents owned_by_other locked_unreadable corrupt_worktree timeout; do
     grep -q "$et" "$src/envelope.py" || { ko "catalogo cerrado sin $et"; bad=1; }
   done
   if [[ $bad -eq 0 ]]; then ok; fi
