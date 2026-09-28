@@ -46,6 +46,7 @@
 #   T63 gate C2 aditivo (no gatea)  T64 gate C2 conflicto real (preserva)
 #   T65 gate C2 --force (sobrescribe)  T66 gate C2 TOML (paridad con json)
 #   T67 inventario de tools (igualdad de conjunto source <-> tools.json <-> spec)
+#   T68 clasificacion de subprocess (timeout / binario ausente / OSError)
 #
 # Exit: 0 = todo verde (skips permitidos), 1 = fallos.
 # =============================================================================
@@ -557,6 +558,58 @@ t "T67 inventario de tools: igualdad de conjunto source <-> tools.json <-> spec 
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
+# T68: la clasificacion de fallos de subprocess. El executor lanzaba UN SOLO
+# tipo (SubprocessError) para tres fallos que son cosas distintas, y la safety net
+# mapeaba ese tipo unico a `network_error`. El resultado: un link lento Reporta
+# "fallo de red" (manda a debuggear la red) y, peor, un `gh` o `uv` ausentes
+# (ENOENT) tambien reporta "fallo de red" — actively misleading. Un unico tipo
+# para tres fallos hace que la clasificacion no pueda existir.
+# Este check es un pin ESTATICO (grep sobre el source); el comportamiento real lo
+# cubren los tests pytest, que no tienen enforcement automatico (sin CI, y el
+# sandbox RED no tiene uv). Pin y tests biblican la misma regla.
+t "T68 clasificacion de subprocess: timeout / binario ausente / OSError, timeout configurable"
+{
+  bad=0
+  src="$REPO/srv/gh-mcp-server/src"
+  grep -q "class SubprocessTimeout" "$src/executor.py" || { ko "executor no distingue el timeout (SubprocessTimeout ausente)"; bad=1; }
+  grep -q "class SubprocessBinaryMissing" "$src/executor.py" || { ko "executor no distingue el binario ausente (SubprocessBinaryMissing ausente)"; bad=1; }
+  grep -q "except subprocess.TimeoutExpired" "$src/executor.py" || { ko "TimeoutExpired sin rama propia"; bad=1; }
+  grep -q "FileNotFoundError" "$src/executor.py" || { ko "ENOENT sin rama propia (FileNotFoundError)"; bad=1; }
+  grep -q "GH_GIT_MCP_TIMEOUT_S" "$src/executor.py" || { ko "timeout no configurable (GH_GIT_MCP_TIMEOUT_S ausente)"; bad=1; }
+  # la safety net clasifica las tres ramas, y NO collapses todo en network_error.
+  # Los tres grep de mapeo colapsan el whitespace antes de comparar: el pin
+  # verifica la TRADUCCION, no el formato con que el autor la escribio. Un
+  # `err(` partido en dos lineas no cambia el contrato, pero hacia fallar el
+  # check y empujar a un fix que no arregla nada.
+  _src_flat="$(tr -d '[:space:]' < "$src/server.py")"
+  for pair in "timeout:SubprocessTimeout" "not_found:SubprocessBinaryMissing" "network_error:SubprocessError"; do
+    et="${pair%%:*}"; exc="${pair##*:}"
+    printf '%s' "$_src_flat" | grep -q "except${exc}" || { ko "safety net no clasifica $exc"; bad=1; }
+    printf '%s' "$_src_flat" | grep -q "err(\"$et\"," || { ko "$exc no mapea a error.type \"$et\""; bad=1; }
+  done
+  grep -q "network_error" "$src/envelope.py" || { ko "catalogo sin network_error"; bad=1; }
+  grep -q "timeout" "$src/envelope.py" || { ko 'el catalogo documentado no incluye "timeout"'; bad=1; }
+  # las subexcepciones heredan de SubprocessError: gh_auth y worktree_state las
+  # catchean por la base y deben seguir compilando y clasificando igual
+  python3 - "$src" <<'PY'
+import ast, sys
+from pathlib import Path
+src = Path(sys.argv[1])
+tree = ast.parse((src / "executor.py").read_text(encoding="utf-8"))
+bases = {
+    node.name: [b.id for b in node.bases if isinstance(b, ast.Name)]
+    for node in tree.body
+    if isinstance(node, ast.ClassDef)
+}
+for name in ("SubprocessTimeout", "SubprocessBinaryMissing"):
+    if "SubprocessError" not in bases.get(name, []):
+        print(f"KO  {name} no hereda de SubprocessError: rompe gh_auth y worktree_state")
+        sys.exit(1)
+PY
+  [[ $? -eq 0 ]] || bad=1
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
 t "T17 hard deps (F4): curl ausente y docker ausente con TRANSPORT=docker → exit 2 pre-delegacion"
 {
   bad=0
@@ -729,7 +782,7 @@ t "T26 worktree MCP contrato: 4 tools, Path.home(), destructive_flow, catalogo c
   grep -q "git_worktree_list" "$src/tool_handlers/local_read.py" || { ko "git_worktree_list ausente en local_read"; bad=1; }
   grep -q "Path.home()" "$src/worktree_state.py" || { ko "resolucion HOME-relative ausente (Path.home() en worktree_state)"; bad=1; }
   grep -q "destructive_flow" "$src/tool_handlers/worktree_mutation.py" || { ko "two-phase destructive_flow no usado en worktree"; bad=1; }
-  for et in auth_required repo_not_found network_error not_found not_a_repo dirty_worktree not_safe commit_failed invalid_parameter worktree_exists active_agents owned_by_other locked_unreadable corrupt_worktree; do
+  for et in auth_required repo_not_found network_error not_found not_a_repo dirty_worktree not_safe commit_failed invalid_parameter worktree_exists active_agents owned_by_other locked_unreadable corrupt_worktree timeout; do
     grep -q "$et" "$src/envelope.py" || { ko "catalogo cerrado sin $et"; bad=1; }
   done
   if [[ $bad -eq 0 ]]; then ok; fi

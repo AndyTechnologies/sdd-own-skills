@@ -8,7 +8,13 @@ Error catalog (closed set, RFC §4.1):
     auth_required, repo_not_found, network_error, not_found,
     not_a_repo, dirty_worktree, not_safe, commit_failed,
     invalid_parameter, worktree_exists, active_agents, owned_by_other,
-    locked_unreadable, corrupt_worktree
+    locked_unreadable, corrupt_worktree, timeout
+
+``timeout`` is the classification of a command that exceeded its deadline
+(``SubprocessTimeout``), as opposed to ``network_error``, which is a real
+OS-level failure. A missing binary is ``not_found`` with a hint naming the
+executable — it is not a network problem. See ``executor.py`` and the safety
+net in ``server.py``.
 
 Note: ``confirm_required`` is a summary marker on ``ok()`` envelopes (see
 ``dryrun.destructive_flow``), NEVER an ``error.type``. ``not_safe`` (from the
