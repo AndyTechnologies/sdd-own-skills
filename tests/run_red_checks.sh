@@ -71,15 +71,34 @@ PASS=0; FAIL=0; SKIP=0
 declare -a FAILURES=()
 TEST_NAME=""
 TEST_START=0
+# Contador de ocurrencias por id de check. Los ids NO son unicos: T49..T54
+# aparecen dos veces y T55 tres veces (grupos distintos que compartieron
+# numeracion historicamente). Con ok/ko registrando solo el nombre, un fallo en
+# cualquiera de las copias era INDISTINGUIBLE: "[FAIL] T49" no decia cual de los
+# dos T49 fallo, y el resumen final tampoco.
+#
+# El bloque se deriva SOLO (id + numero de ocurrencia), no con un sufijo escrito a
+# mano: un sufijo manual es una convencion que se pierde en el primer copy-paste de
+# un bloque, y devolveria el defecto en silencio. El sufijo aparece unicamente
+# cuando el id se repite, asi que en el caso comun —la mayoria de los checks— el
+# formato de salida queda exactamente igual.
+declare -A _ID_SEEN=()
+TEST_LABEL=""
 START_EPOCH="$(date +%s)"
-TEST_EPOCH="$START_EPOCH"
 
 _t_elapsed() { echo "$(( $(date +%s) - TEST_START ))s"; }
 
-t()   { TEST_NAME="$1"; TEST_START="$(date +%s)"; }
-ok()  { PASS=$((PASS + 1)); printf '  [PASS] %-9s %s\n' "($(_t_elapsed))" "$TEST_NAME"; }
-ko()  { FAIL=$((FAIL + 1)); FAILURES+=("$TEST_NAME"); printf '  [FAIL] %-9s %s: %s\n' "($(_t_elapsed))" "$TEST_NAME" "$1"; }
-skip(){ SKIP=$((SKIP + 1)); printf '  [SKIP] %-9s %s: %s\n' "($(_t_elapsed))" "$TEST_NAME" "$1"; }
+t() {
+  TEST_NAME="$1"
+  TEST_START="$(date +%s)"
+  TEST_ID="${TEST_NAME%% *}"
+  _id_n=$(( ${_ID_SEEN[$TEST_ID]:-0} + 1 ))
+  _ID_SEEN[$TEST_ID]=$_id_n
+  if [[ $_id_n -gt 1 ]]; then TEST_LABEL=" [bloque $_id_n]"; else TEST_LABEL=""; fi
+}
+ok()  { PASS=$((PASS + 1)); printf '  [PASS] %-9s %s%s\n' "($(_t_elapsed))" "$TEST_NAME" "$TEST_LABEL"; }
+ko()  { FAIL=$((FAIL + 1)); FAILURES+=("$TEST_NAME$TEST_LABEL"); printf '  [FAIL] %-9s %s%s: %s\n' "($(_t_elapsed))" "$TEST_NAME" "$TEST_LABEL" "$1"; }
+skip(){ SKIP=$((SKIP + 1)); printf '  [SKIP] %-9s %s%s: %s\n' "($(_t_elapsed))" "$TEST_NAME" "$TEST_LABEL" "$1"; }
 
 cleanup() { stop_fake_api; cleanup_sandboxes; }
 trap cleanup EXIT INT TERM
