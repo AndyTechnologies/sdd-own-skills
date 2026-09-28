@@ -610,6 +610,55 @@ PY
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
+# T69: la suite pytest del server (110 tests) no tenia NADIE que la corriera.
+# Es la misma enfermedad de T27/T67, pero en la dimension mas grave: un check que
+# no puede fallar porque no existe. Evidencia del defecto: con un test pytest roto
+# inyectado, T26/T27/T67/T68 pasaban todos — ningun check de la suite menciona
+# pytest; las dos unicas apariciones de la palabra eran comentarios.
+#
+# Por que `skip` y no `ko` cuando falta `uv`: el exit code de esta suite ya declara
+# "0 = todo verde (skips permitidos)" (cabecera) y el helper skip() ya existe. Un
+# paso opcional que se exige no es opcional. `uv` no esta en el PATH de todos los
+# entornos, y un `ko` por su ausencia dejaria la suite roja en la maquina del
+# developer de al lado. El contraste con `jq` es correcto y deliberado: `jq` es
+# load-bearing para los checks de merge, `uv` solo lo es para este paso.
+#
+# El pin afirma que el paso CORRE la suite, no que el binario este en el PATH: un
+# check que solo comprueba `command -v uv` seria otra vez un check que no puede
+# fallar. Por eso la asercion mira la salida real de pytest.
+t "T69 enforcement: la suite pytest del server se corre desde la suite RED"
+{
+  bad=0
+  srv="$REPO/srv/gh-mcp-server"
+  if ! command -v uv >/dev/null 2>&1; then
+    skip "uv no disponible en este entorno; la suite pytest no es ejecutable aqui"
+  elif [[ ! -d "$srv/tests" ]]; then
+    ko "no existe $srv/tests: nada que enforcing"
+    bad=1
+  else
+    # Se corre FUERA del sandbox SB_HOME a proposito: uv resuelve su cache y su
+    # home en el HOME real, y meterlo dentro del sandbox lo haria depender de un
+    # HOME falso con una cache vacia (resolucion de red en cada corrida).
+    out="$(cd "$srv" && timeout 300 uv run --quiet pytest -q 2>&1)"
+    rc=$?
+    if [[ $rc -ne 0 ]]; then
+      ko "suite pytest del server en rojo (exit $rc):"
+      # Se imprimen las lineas de fallo, no un conteo: "faltan 2" es tan
+      # inaccionable como el conteo que este check reemplaza.
+      printf '%s\n' "$out" | grep -E "^(FAILED|ERROR|[0-9]+ (failed|error))" | head -10 | while IFS= read -r l; do ko "  $l"; done
+      [[ $rc -eq 127 ]] && ko "uv presente pero no ejecutable (exit 127)"
+      bad=1
+    elif [[ "$out" != *"passed"* && "$out" != *"no tests ran"* ]]; then
+      # pytest puede salir 0 sin haber-corribo nada (p.ej. filtro vacio). Un
+      # enforcement que no ejecuto tests y reporta verde es el defecto original
+      # con otro disfraz.
+      ko "pytest salio 0 pero la salida no reporta tests pasados: '$out'"
+      bad=1
+    fi
+  fi
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
 t "T17 hard deps (F4): curl ausente y docker ausente con TRANSPORT=docker → exit 2 pre-delegacion"
 {
   bad=0

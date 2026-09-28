@@ -41,3 +41,15 @@ before any API call.
 ```bash
 uv run --directory <repo>/srv/gh-mcp-server python -m src.server
 ```
+
+## Tests
+
+```bash
+uv run --directory <repo>/srv/gh-mcp-server pytest
+```
+
+The pytest suite is also run automatically by the repo's RED suite (check **T69**), so
+a broken test here cannot reach a green run unnoticed. If `uv` is absent from the
+environment, that check reports `SKIP` rather than failing — a missing optional tool
+must not paint the suite red on a machine that never intended to run it.
+
