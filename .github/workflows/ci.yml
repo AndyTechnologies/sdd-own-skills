@@ -1,0 +1,76 @@
+name: ci
+
+# =============================================================================
+# CI del repo. Nacio con el change `verification-enforcement`.
+#
+# Por que existe: los 110 tests de srv/gh-mcp-server se correban solo a mano.
+# Un test roto no rompia nada porque nadie lo corria. Ese es un check que no
+# puede fallar, que es la misma enfermedad que el resto de este change.
+#
+# Estado de la leg RED: PROVISIONAL, no bloquea.
+# La suite RED usa un shim de `gh`, sandboxes, un servidor de API falso y
+# construye works-tool con Go. No esta verificada en un runner de CI, y un
+# workflow que se pone rojo el primer dia y nadie arregla es PEOR que no tener
+# CI: entrena a ignorar el rojo. Cuando la leg corra verde en CI de forma
+# sostenida, quitar `continue-on-error` — es el unico cambio que hace falta, y
+# el unico que queda pendiente.
+# =============================================================================
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # ------------------------------------------------------------------ pytest
+  # BLOQUEANTE. Es el mismo comando que corre un developer, asi que su
+  # comportamiento en CI es verificable antes de confiar en el.
+  pytest:
+    name: pytest (gh-mcp-server)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # --frozen: respeta uv.lock. Sin esto, CI resolveria dependencias en cada
+      # corrida y un cambio del lock pasaria inadvertido.
+      - name: Suite de tests del server
+        working-directory: srv/gh-mcp-server
+        run: uv run --frozen pytest
+
+  # --------------------------------------------------------------- RED suite
+  # PROVISIONAL: no bloquea (ver cabecera).
+  red-suite:
+    name: RED suite (provisional, no bloquea)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      # La suite busca Go en /usr/sbin/go, /usr/local/go/bin/go y ~/go/bin/go.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: RED checks
+        run: |
+          set -o pipefail
+          bash tests/run_red_checks.sh 2>&1 | tee "$RUNNER_TEMP/red.log"
+          rc=${PIPESTATUS[0]}
+
+          # Un exit 0 sin checks NO es un suite verde: es un suite que no corrio.
+          # Sin este guard, perder una dependencia (jq, go, python) haria que la
+          # leg pase sin verificar nada — y con `continue-on-error` nadie lo
+          # notaria. Es el mismo defecto que T69 evita del lado de pytest:
+          # un enforcement que no ejecuto tests y reporta verde.
+          if ! grep -qE '^ *PASS: [1-9]' "$RUNNER_TEMP/red.log"; then
+            echo "::error::la suite RED no ejecuto ningun check (falta una dependencia?)"
+            exit 1
+          fi
+          exit "$rc"
