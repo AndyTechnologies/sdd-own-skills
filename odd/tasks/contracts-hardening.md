@@ -75,7 +75,7 @@
 - **Se cambio de harness a mitad de camino**: el writer delegado no pudo arrancar (el validador de surfaces rechaza paths de archivos nuevos, y `gentle_review` no esta expuesta en las subagentes). T2 se implemento inline. El sondeo dejo una linea de comentario en el header que se revirtio.
 
 - [x] **T3 — clasificacion**: excepcion partida; timeout/ENOENT/generico clasificados; `timeout` en el catalogo; `GH_GIT_MCP_TIMEOUT_S` configurable con default 30s; docstring de `server.py` corregido; 4 tests nuevos + pin RED. Commit `8070738`.
-- [ ] **T4 — verde**: `tests/run_red_checks.sh` 100% verde y `uv run pytest` del server verde.
+- [x] **T4 — verde**: `tests/run_red_checks.sh` 100% verde y `uv run pytest` del server verde. Commit final.
 
 ### T3 — notas de implementacion (evidencia)
 
@@ -99,4 +99,64 @@
 
 ## Retros
 
-(pendiente de completar en el close del change)
+### Que era este change, en una frase
+
+Tres "checks que no podían fallar": tres gates o afirmaciones que parecian proteger
+algo y no protegian nada. La raiz comun no era que faltara logica — era que cada
+uno hacia la pregunta equivocada.
+
+### Lecciones que se llevan
+
+**1. Un conteo no es un inventario.** El defecto de fondo de T2. "26 tools en 5
+familias" no puede detectar drift porque no dice QUE tools son. La forma correcta
+es igualdad de conjunto en ambas direcciones, y la forma que revela el defecto mas
+fuerte es el caso que un conteo SIEMPRE deja pasar: una tool movida de familia con
+el total intacto en 29. Ese caso se uso como la prueba de que T67 discrimina.
+
+**2. Un unico tipo de excepcion hace imposible clasificar.** El defecto de fondo
+de T3. No era un bug de mapeo: era que la safety net no tenia con que decidir.
+Partir el tipo NO fue agregar precision, fue habilitar la decision.
+
+**3. La pregunta equivocada no se arregla cambiandola de nombre.** El defecto de
+fondo de T1. `diff merged target` respondia "¿cambio algo?" cuando la pregunta era
+"¿el usuario edito un valor que este envelope administra?". Gatear por la pregunta
+equivocada no es un gate conservador: es un gate que bloquea lo legitimo y deja
+pasar lo que deberia bloquear.
+
+**4. Un pin que falla por el motivo equivocado es peor que no tener pin.** T68
+tenia `grep 'err("timeout"'` y fallaba porque el `err(` estaba partido en dos
+lineas. Un rojo que no significa lo que dice empuja a un fix que no arregla nada,
+y entrena a desconfiar del check. Los pins Estaticos tienen que colapsar
+whitespace y afirmar el CONTRATO, no el formato.
+
+**5. El sabotage con placeholders da evidencia falsa.** Al verificar T3 meti
+`_P1`/`_P2` inexistentes; 2 de 5 fallos vinieron por `NameError` del `except`, no
+por el mapeo degradado. Un rojo que falla por la razon equivocada convence de que
+el check cubre algo que no cubre. Verificar un check es un trabajo con su propio
+esfuerzo: hay que degradar UNA variable, no reescribir el mecanismo.
+
+### Lo que quedo sin resolver (honestamente)
+
+- **El gap de fondo no se toco**: los tests pytest del server siguen sin
+  enforcement automatico (no hay CI, y el sandbox RED no tiene `uv`). T3 agrego 18
+  tests de clasificacion que se van a romper en silencio la proxima vez que se
+  rompa el clasificador. Es el follow-up mas importante y es el unico que no es
+  cosmico.
+- **La superficie de reporte de `--check`/`--dry-run` de `setup.sh` sigue con el
+  `diff` whole-file** (anotado en Follow-ups). Misma enfermedad que T1 pero en
+  una superficie que no escribe, asi que no se toco.
+- **T27 y el resto de la suite RED tienen la enfermedad del conteo** (`n == "10"`).
+  T2 la corrigio en el spec; la suite queda para otro change.
+- **`err()` sigue aceptando cualquier string**: el catalogo cerrado de `error.type`
+  es documental, no codigo. Anotado como follow-up desde el inicio, sigue igual.
+
+### Sobre el proceso
+
+El harness cambio a mitad de camino: el writer delegado no arranco (el validador de
+surfaces rechaza paths de archivos nuevos, y las subagentes no tienen la facade
+`gentle_review`), asi que T2 y T3 se implementaron inline. El sondeo dejo una linea
+de comentario en el header que se revirtio. Ademas el primer commit de T2 llevo
+3 de 6 archivos por un `git add` incompleto — detectado revisando
+`git show --stat`, no por el test. Ninguno de los dos errores cambio el resultado
+final, pero los dos son la clase de cosa que aparece si nadie mira el diff.
+
