@@ -134,7 +134,7 @@ distinct families and MUST NOT be conflated.
 - AND `error.type` covers: `auth_required`, `repo_not_found`, `network_error`,
   `not_found`, `not_a_repo`, `dirty_worktree`, `not_safe`, `commit_failed`,
   `invalid_parameter`, `worktree_exists`, `active_agents`, `owned_by_other`,
-  `locked_unreadable`, `corrupt_worktree`, `timeout`
+  `locked_unreadable`, `corrupt_worktree`, `timeout`, `push_failed`
 - AND `confirm_required` is a summary marker on `ok()` envelopes, never an `error.type`
 
 #### Scenario: Git commit dry-run

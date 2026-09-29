@@ -850,8 +850,25 @@ t "T26 worktree MCP contrato: 4 tools, Path.home(), destructive_flow, catalogo c
   grep -q "git_worktree_list" "$src/tool_handlers/local_read.py" || { ko "git_worktree_list ausente en local_read"; bad=1; }
   grep -q "Path.home()" "$src/worktree_state.py" || { ko "resolucion HOME-relative ausente (Path.home() en worktree_state)"; bad=1; }
   grep -q "destructive_flow" "$src/tool_handlers/worktree_mutation.py" || { ko "two-phase destructive_flow no usado en worktree"; bad=1; }
-  for et in auth_required repo_not_found network_error not_found not_a_repo dirty_worktree not_safe commit_failed invalid_parameter worktree_exists active_agents owned_by_other locked_unreadable corrupt_worktree timeout; do
-    grep -q "$et" "$src/envelope.py" || { ko "catalogo cerrado sin $et"; bad=1; }
+  # El catalogo cerrado deja de ser una lista en prosa. Antes este bloque hacia
+  # `grep -q "$et" "$src/envelope.py"` para cada tipo: pasaba si el nombre
+  # aparecia escrito en un comentario, y no podia ver un tipo DE MAS — por eso
+  # `push_failed` pudo emitirse durante meses sin estar en la lista. Ahora lo que
+  # se afirma es que el catalogo EXISTE COMO DATO y que `err()` valida contra el;
+  # la igualdad de conjuntos (emitido == catalogo == spec) la calcula el test
+  # pytest, que la leg T69 corre. Dos gates, una sola derivacion: duplicar la
+  # comparacion de conjuntos aqui volveria a crear las dos verdades que divergen.
+  grep -q "ERROR_TYPES: tuple\[str, ...\]" "$src/envelope.py" \
+    || { ko "el catalogo cerrado no existe como dato (ERROR_TYPES) — volvio a ser prosa"; bad=1; }
+  grep -q "class UnknownErrorType" "$src/envelope.py" \
+    || { ko "err() no tiene tipo de error propio: un typo en error.type viaja en el envelope"; bad=1; }
+  grep -q 'error_type not in ERROR_TYPES' "$src/envelope.py" \
+    || { ko "err() no valida contra el catalogo"; bad=1; }
+  # El catalogo es una tupla: un string daria True para cualquier substring.
+  grep -q '"push_failed",' "$src/envelope.py" \
+    || { ko "catalogo sin push_failed (lo emite local_mutation.py)"; bad=1; }
+  for et in auth_required repo_not_found network_error not_found not_a_repo dirty_worktree not_safe commit_failed invalid_parameter worktree_exists active_agents owned_by_other locked_unreadable corrupt_worktree timeout push_failed; do
+    grep -q "\"$et\"," "$src/envelope.py" || { ko "catalogo cerrado sin $et"; bad=1; }
   done
   if [[ $bad -eq 0 ]]; then ok; fi
 }
