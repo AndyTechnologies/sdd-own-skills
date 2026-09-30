@@ -82,6 +82,42 @@ def _classify_or_deny(
     return state, signals, None
 
 
+def _held_by_live_foreign_pid(lock: dict[str, Any] | None) -> bool:
+    """``True`` si hay un proceso VIVO sosteniendo la claim y no es este proceso.
+
+    La senal autoritativa para la ruta destructiva es el PID, no la identidad.
+    El lock guarda ``pid = os.getpid()`` del proceso que acquireo, y para un
+    servidor MCP de vida larga ese PID esta siempre vivo: "denegar si hay PID
+    vivo" al pie de la letra haria que un servidor no pudiera remover el
+    worktree que el mismo acaba de tomar. La pregunta util es si el worktree lo
+    esta usando OTRO proceso ahora mismo.
+
+    Ausente o corrupto → ``False``: esos casos ya los denyan
+    ``locked_unreadable`` / ``corrupt_worktree``, y ser fail-closed aqui
+    convertiria un lock ilegible en un rechazo con el diagnostico equivocado.
+    """
+    if not ws.lock_has_live_pid(lock):
+        return False
+    return ws.lock_pid(lock) != os.getpid()
+
+
+def _active_agents_deny(target: str) -> Envelope | None:
+    """Denial tipado cuando otro proceso vivo tiene el worktree."""
+    lock, lock_status = ws.read_lock_v2(target)
+    if lock_status != "ok" or not _held_by_live_foreign_pid(lock):
+        return None
+    return err(
+        "active_agents",
+        f"Worktree is held by a LIVE process (pid {ws.lock_pid(lock)}) "
+        f"other than this one ({os.getpid()})",
+        hint="the holder must release it, or finish its work, before removal",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Handlers
+# ---------------------------------------------------------------------------
+
 def register(server: FastMCP, executor: ExecutorProto) -> None:
     """Wire all 4 worktree mutation tools into *server*."""
 
@@ -345,7 +381,8 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
         description="Remove a git worktree at "
         "~/.agent_worktrees/<repo-name>/<change> (two-phase: dry-run → confirm). "
         + ECHO_PROTOCOL
-        + " Denies (typed, outside the two-phase flow): dirty worktree → "
+        + " Denies (typed, outside the two-phase flow): a LIVE process other "
+        "than this one holds the lock → active_agents; dirty worktree → "
         "dirty_worktree; lock owner != owner arg → "
         "owned_by_other; corrupt lock → locked_unreadable; absent → not_found. "
         "Never accepts a raw worktree path — (repo_path, change, owner) only.",
@@ -375,7 +412,20 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
 
         state, signals, deny = _classify_or_deny(executor, repo_path, change, owner, None)
         if deny:
-            return dict(deny)
+            # Remove llama al clasificador con `session=None`, y con session nula
+            # TODA identidad se declara distinta (incluida la propia): todo lock v2
+            # con PID vivo caia en `exists_active_other` y se denegaba como
+            # `owned_by_other`, aunque el lock fuera de este mismo owner — un
+            # servidor que acquire y despues removia su worktree no podia.
+            #
+            # Para esta ruta la senal autoritativa es el PID, no la session (remove
+            # no recibe session). Si el lock ES de este owner, se deja pasar la
+            # clasificacion y decide el gate de PID de mas abajo: el proceso que
+            # llama es el unico autorizado a decidir sobre su propia claim.
+            if deny["error"]["type"] == "owned_by_other" and signals.get("owner") == owner:
+                state, deny = state, None
+            else:
+                return dict(deny)
 
         if state == "absent":
             return dict(err(
@@ -384,7 +434,15 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
                 hint="check the change name / repo path",
             ))
 
-        # Pre-check 1 — dirty worktree (server-owned artifacts excluded)
+        # Pre-check 1 — un proceso VIVO distinto de este tiene el worktree.
+        # Va antes del chequeo de dirty a proposito: si hay un agente vivo
+        # trabajando adentro, el mensaje util es "soltalo", no "tiene cambios
+        # sin commitear", y el deny no depende de tocar git.
+        agents_deny = _active_agents_deny(target)
+        if agents_deny:
+            return dict(agents_deny)
+
+        # Pre-check 2 — dirty worktree (server-owned artifacts excluded)
         dirty, status_err = ws.status_dirty(executor, target)
         if status_err:
             return dict(status_err)
@@ -408,12 +466,18 @@ def register(server: FastMCP, executor: ExecutorProto) -> None:
                 owner_match = False
             else:
                 owner_match = True if lock_status_now == "missing" else ws.lock_owner(lock_now) == owner
+            # El PID entra en la MISMA recomputacion, no en un chequeo aparte: un
+            # proceso puede tomar el worktree entre el pre-check y el confirm, y
+            # un gate viejo — aun si el pre-check lo cubriera — dejaria pasar el
+            # borrado. Mismo patron que `dirty` y `owner_match`.
+            foreign_live = _held_by_live_foreign_pid(lock_now)
             data: dict[str, Any] = {
                 "path": target,
                 "change": change,
                 "dirty": dirty,
                 "lock_owner": ws.lock_owner(lock_now),
-                "safe": (not dirty) and owner_match,
+                "held_by_live_pid": foreign_live,
+                "safe": (not dirty) and owner_match and not foreign_live,
             }
             if not data["safe"]:
                 return DryRunResult(

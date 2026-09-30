@@ -191,19 +191,30 @@ def lock_owner(lock: dict[str, Any] | None) -> str | None:
     return str(owner) if owner is not None else None
 
 
+def lock_pid(lock: dict[str, Any] | None) -> int | None:
+    """PID de la claim, o ``None`` si es ausente o no parseable (stale).
+
+    Unica fuente del parseo. Lo consumen tanto el probe de liveness como el gate
+    de ``active_agents`` en la ruta destructiva; duplicar el parseo permitiria
+    que uno dijera "vivo" con una regla y el otro con otra sin que nada lo note.
+    """
+    if not lock:
+        return None
+    try:
+        pid = int(lock.get("pid"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return pid if pid > 0 else None
+
+
 def lock_has_live_pid(lock: dict[str, Any] | None) -> bool:
     """``kill -0`` liveness probe for the lock PID. Stale/absent → ``False``.
 
     ESRCH → dead (stale); EPERM → alive (exists, owned by another user);
     unparsable/non-positive PID → dead (stale).
     """
-    if not lock:
-        return False
-    try:
-        pid = int(lock.get("pid"))
-    except (TypeError, ValueError):
-        return False
-    if pid <= 0:
+    pid = lock_pid(lock)
+    if pid is None:
         return False
     try:
         os.kill(pid, 0)

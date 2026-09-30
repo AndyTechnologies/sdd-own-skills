@@ -184,8 +184,22 @@ distinct families and MUST NOT be conflated.
 
 ### Requirement: Worktree remove tool
 
-`git_worktree_remove` SHALL become a thin retrocompat wrapper delegating to `git_worktree_release` for the claim release. The existing `destructive_flow` two-phase and pre-checks (dirty, active agents, owner match) are preserved but the claim-clearing step routes through `release` internally. The server SHALL NEVER accept a raw worktree path.
+`git_worktree_remove` SHALL become a thin retrocompat wrapper delegating to `git_worktree_release` for the claim release. The existing `destructive_flow` two-phase and pre-checks are preserved but the claim-clearing step routes through `release` internally. The server SHALL NEVER accept a raw worktree path.
 (Previously: standalone remove with self-contained lock logic)
+
+The three pre-checks are, in order:
+
+1. **Active agents** — the lock's `pid` is live AND is not this process → deny with `active_agents`. The PID, not the asserted identity, is the authoritative signal: the lock stores the acquiring process's `os.getpid()`, so for a long-lived server a literal "any live PID denies" would make the worktree impossible to remove by the process that claimed it. A stale PID or this process's own PID proceeds. The same condition is recomputed inside `destructive_flow` (`safe` = not dirty AND owner match AND no live foreign PID) so a claim taken between the pre-check and the confirm fails closed. This check applies to `remove` only; `git_worktree_release` clears a claim without deleting files and is NOT gated on liveness.
+2. **Dirty worktree** (server-owned artifacts excluded) → `dirty_worktree`.
+3. **Owner match** → `owned_by_other`, reported only when the lock owner differs from the caller's `owner`. When the lock owner matches, the PID check in (1) decides, so a caller can remove its own live claim.
+
+#### Scenario: Remove denies a live foreign holder
+
+- GIVEN the lock's `pid` is live and differs from the calling process's PID
+- AND the lock owner matches the caller's `owner`
+- WHEN `git_worktree_remove` is called
+- THEN the result is `ok:false` with `error.type: active_agents`
+- AND `git worktree remove` is never executed
 
 #### Scenario: Remove delegates release for claim
 
