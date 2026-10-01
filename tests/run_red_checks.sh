@@ -71,15 +71,34 @@ PASS=0; FAIL=0; SKIP=0
 declare -a FAILURES=()
 TEST_NAME=""
 TEST_START=0
+# Contador de ocurrencias por id de check. Los ids NO son unicos: T49..T54
+# aparecen dos veces y T55 tres veces (grupos distintos que compartieron
+# numeracion historicamente). Con ok/ko registrando solo el nombre, un fallo en
+# cualquiera de las copias era INDISTINGUIBLE: "[FAIL] T49" no decia cual de los
+# dos T49 fallo, y el resumen final tampoco.
+#
+# El bloque se deriva SOLO (id + numero de ocurrencia), no con un sufijo escrito a
+# mano: un sufijo manual es una convencion que se pierde en el primer copy-paste de
+# un bloque, y devolveria el defecto en silencio. El sufijo aparece unicamente
+# cuando el id se repite, asi que en el caso comun —la mayoria de los checks— el
+# formato de salida queda exactamente igual.
+declare -A _ID_SEEN=()
+TEST_LABEL=""
 START_EPOCH="$(date +%s)"
-TEST_EPOCH="$START_EPOCH"
 
 _t_elapsed() { echo "$(( $(date +%s) - TEST_START ))s"; }
 
-t()   { TEST_NAME="$1"; TEST_START="$(date +%s)"; }
-ok()  { PASS=$((PASS + 1)); printf '  [PASS] %-9s %s\n' "($(_t_elapsed))" "$TEST_NAME"; }
-ko()  { FAIL=$((FAIL + 1)); FAILURES+=("$TEST_NAME"); printf '  [FAIL] %-9s %s: %s\n' "($(_t_elapsed))" "$TEST_NAME" "$1"; }
-skip(){ SKIP=$((SKIP + 1)); printf '  [SKIP] %-9s %s: %s\n' "($(_t_elapsed))" "$TEST_NAME" "$1"; }
+t() {
+  TEST_NAME="$1"
+  TEST_START="$(date +%s)"
+  TEST_ID="${TEST_NAME%% *}"
+  _id_n=$(( ${_ID_SEEN[$TEST_ID]:-0} + 1 ))
+  _ID_SEEN[$TEST_ID]=$_id_n
+  if [[ $_id_n -gt 1 ]]; then TEST_LABEL=" [bloque $_id_n]"; else TEST_LABEL=""; fi
+}
+ok()  { PASS=$((PASS + 1)); printf '  [PASS] %-9s %s%s\n' "($(_t_elapsed))" "$TEST_NAME" "$TEST_LABEL"; }
+ko()  { FAIL=$((FAIL + 1)); FAILURES+=("$TEST_NAME$TEST_LABEL"); printf '  [FAIL] %-9s %s%s: %s\n' "($(_t_elapsed))" "$TEST_NAME" "$TEST_LABEL" "$1"; }
+skip(){ SKIP=$((SKIP + 1)); printf '  [SKIP] %-9s %s%s: %s\n' "($(_t_elapsed))" "$TEST_NAME" "$TEST_LABEL" "$1"; }
 
 cleanup() { stop_fake_api; cleanup_sandboxes; }
 trap cleanup EXIT INT TERM
@@ -610,6 +629,55 @@ PY
   if [[ $bad -eq 0 ]]; then ok; fi
 }
 
+# T69: la suite pytest del server (110 tests) no tenia NADIE que la corriera.
+# Es la misma enfermedad de T27/T67, pero en la dimension mas grave: un check que
+# no puede fallar porque no existe. Evidencia del defecto: con un test pytest roto
+# inyectado, T26/T27/T67/T68 pasaban todos — ningun check de la suite menciona
+# pytest; las dos unicas apariciones de la palabra eran comentarios.
+#
+# Por que `skip` y no `ko` cuando falta `uv`: el exit code de esta suite ya declara
+# "0 = todo verde (skips permitidos)" (cabecera) y el helper skip() ya existe. Un
+# paso opcional que se exige no es opcional. `uv` no esta en el PATH de todos los
+# entornos, y un `ko` por su ausencia dejaria la suite roja en la maquina del
+# developer de al lado. El contraste con `jq` es correcto y deliberado: `jq` es
+# load-bearing para los checks de merge, `uv` solo lo es para este paso.
+#
+# El pin afirma que el paso CORRE la suite, no que el binario este en el PATH: un
+# check que solo comprueba `command -v uv` seria otra vez un check que no puede
+# fallar. Por eso la asercion mira la salida real de pytest.
+t "T69 enforcement: la suite pytest del server se corre desde la suite RED"
+{
+  bad=0
+  srv="$REPO/srv/gh-mcp-server"
+  if ! command -v uv >/dev/null 2>&1; then
+    skip "uv no disponible en este entorno; la suite pytest no es ejecutable aqui"
+  elif [[ ! -d "$srv/tests" ]]; then
+    ko "no existe $srv/tests: nada que enforcing"
+    bad=1
+  else
+    # Se corre FUERA del sandbox SB_HOME a proposito: uv resuelve su cache y su
+    # home en el HOME real, y meterlo dentro del sandbox lo haria depender de un
+    # HOME falso con una cache vacia (resolucion de red en cada corrida).
+    out="$(cd "$srv" && timeout 300 uv run --quiet pytest -q 2>&1)"
+    rc=$?
+    if [[ $rc -ne 0 ]]; then
+      ko "suite pytest del server en rojo (exit $rc):"
+      # Se imprimen las lineas de fallo, no un conteo: "faltan 2" es tan
+      # inaccionable como el conteo que este check reemplaza.
+      printf '%s\n' "$out" | grep -E "^(FAILED|ERROR|[0-9]+ (failed|error))" | head -10 | while IFS= read -r l; do ko "  $l"; done
+      [[ $rc -eq 127 ]] && ko "uv presente pero no ejecutable (exit 127)"
+      bad=1
+    elif [[ "$out" != *"passed"* && "$out" != *"no tests ran"* ]]; then
+      # pytest puede salir 0 sin haber-corribo nada (p.ej. filtro vacio). Un
+      # enforcement que no ejecuto tests y reporta verde es el defecto original
+      # con otro disfraz.
+      ko "pytest salio 0 pero la salida no reporta tests pasados: '$out'"
+      bad=1
+    fi
+  fi
+  if [[ $bad -eq 0 ]]; then ok; fi
+}
+
 t "T17 hard deps (F4): curl ausente y docker ausente con TRANSPORT=docker → exit 2 pre-delegacion"
 {
   bad=0
@@ -782,8 +850,25 @@ t "T26 worktree MCP contrato: 4 tools, Path.home(), destructive_flow, catalogo c
   grep -q "git_worktree_list" "$src/tool_handlers/local_read.py" || { ko "git_worktree_list ausente en local_read"; bad=1; }
   grep -q "Path.home()" "$src/worktree_state.py" || { ko "resolucion HOME-relative ausente (Path.home() en worktree_state)"; bad=1; }
   grep -q "destructive_flow" "$src/tool_handlers/worktree_mutation.py" || { ko "two-phase destructive_flow no usado en worktree"; bad=1; }
-  for et in auth_required repo_not_found network_error not_found not_a_repo dirty_worktree not_safe commit_failed invalid_parameter worktree_exists active_agents owned_by_other locked_unreadable corrupt_worktree timeout; do
-    grep -q "$et" "$src/envelope.py" || { ko "catalogo cerrado sin $et"; bad=1; }
+  # El catalogo cerrado deja de ser una lista en prosa. Antes este bloque hacia
+  # `grep -q "$et" "$src/envelope.py"` para cada tipo: pasaba si el nombre
+  # aparecia escrito en un comentario, y no podia ver un tipo DE MAS — por eso
+  # `push_failed` pudo emitirse durante meses sin estar en la lista. Ahora lo que
+  # se afirma es que el catalogo EXISTE COMO DATO y que `err()` valida contra el;
+  # la igualdad de conjuntos (emitido == catalogo == spec) la calcula el test
+  # pytest, que la leg T69 corre. Dos gates, una sola derivacion: duplicar la
+  # comparacion de conjuntos aqui volveria a crear las dos verdades que divergen.
+  grep -q "ERROR_TYPES: tuple\[str, ...\]" "$src/envelope.py" \
+    || { ko "el catalogo cerrado no existe como dato (ERROR_TYPES) — volvio a ser prosa"; bad=1; }
+  grep -q "class UnknownErrorType" "$src/envelope.py" \
+    || { ko "err() no tiene tipo de error propio: un typo en error.type viaja en el envelope"; bad=1; }
+  grep -q 'error_type not in ERROR_TYPES' "$src/envelope.py" \
+    || { ko "err() no valida contra el catalogo"; bad=1; }
+  # El catalogo es una tupla: un string daria True para cualquier substring.
+  grep -q '"push_failed",' "$src/envelope.py" \
+    || { ko "catalogo sin push_failed (lo emite local_mutation.py)"; bad=1; }
+  for et in auth_required repo_not_found network_error not_found not_a_repo dirty_worktree not_safe commit_failed invalid_parameter worktree_exists active_agents owned_by_other locked_unreadable corrupt_worktree timeout push_failed; do
+    grep -q "\"$et\"," "$src/envelope.py" || { ko "catalogo cerrado sin $et"; bad=1; }
   done
   if [[ $bad -eq 0 ]]; then ok; fi
 }
