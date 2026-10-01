@@ -62,6 +62,7 @@ llama.
 - **Guard de paridad cross-envelope**: bloqueado hasta que `feat/pi-gh-git-mcp` mergee (daria rojo en `main`).
 - **T52** (1603-1606): dos `grep -Fc` sobre el mismo archivo, con el patron del catalogo como superliteral del base → `2 == 2` se cumple aunque los loops bajen de 5 a 2.
 - **T62a/T62b** (2089/2110): cuentan `6` sobre la salida del tool contra el numero del fixture que el mismo test planto (1982-2012). El esperado es el input: tautologico.
+- **La suite RED no es una suite de repo, es una suite de host.** Dato del primer run real del workflow (PR #15, job `RED suite (provisional, no bloquea)`: **PASS 75 / FAIL 16 / SKIP 3**). Los 16 fallos no son defectos de contrato: son checks que afirman hechos sobre la maquina. En el runner de GitHub no existe `/home/runner/.config/opencode/opencode.json` porque nadie corrio `gentle-ai sync` ni `setup.sh` ahi, asi que T05/T21/T30/T31/T38/T39 no encuentran el prompt del orquestador ni el config instalado; y T17 espera `curl` ausente cuando el runner lo tiene. Ese es el motivo real por el que la leg es provisional, y no una cobardia: hacerlo bloqueante exigiria **provisionar el host en CI** (`gentle-ai sync` + `setup.sh`) o **separar los checks dependientes del host** en una suite propia. La alternativa —dejar la leg en rojo para siempre y que nadie la mire— es peor que reportar. El guard anti-suite-que-no-corrio funciono en su primer uso real:vio `PASS: 75` y no disparo, o sea que los 16 FAIL son checks que corrieron de verdad.
 
 ## Retros
 
@@ -126,14 +127,30 @@ propia — el servidor no podia remover su propio worktree, y el error le decia 
 era de otro. Un gate faltante no solo deja un hueco: oculta los defectos que hay
 detras.
 
-### Pendiente de decision del usuario (no bloquea el code)
+### El host: sincronizado al cierre (como se decidio)
 
-El host tiene 3 desyncs (`./setup.sh --check`): `_shared/sdd-phase-common.md` sin
+El host tenia 3 desyncs (`./setup.sh --check`): `_shared/sdd-phase-common.md` sin
 marcadores `sdd-own:`, `opencode.jsonc` divergente del fragmento SDD, y el bloque de
 la routing extension ausente. Producen los 7 FAIL de la suite RED (T05, T21, T30x2,
 T31, T39x2) — **baseline conocido, verificado tambien sobre `main` con contenido
-identico**, asi que no es de esta rama. La hipotesis inicial (working tree sucio)
+identico**, asi que no era de esta rama. La hipotesis inicial (working tree sucio)
 se publico, se refuto cuando los mismos 7 fallaron con un arbol limpio y commiteado,
-y se descarta. Los mtimes (12:15) son anteriores a las corridas de hoy. Decision
-tomada: seguir con el code y sincronizar el host al final. La fragilidad de que la
-suite falle por una archivo untracked del usuario queda **fuera de scope**.
+y se descarta. Los mtimes (12:15) son anteriores a las corridas de hoy. Decision del
+usuario: seguir con el code y sincronizar al final.
+
+Se sincronizo con `./sync-skills.sh --skip-gentleai-sync`, no con `setup.sh` completo:
+el paso 5 de `setup.sh` pide un token de GitHub interactivo y crea
+`~/.pi/agent/mcp.json`, y no causa ninguno de los 3 desyncs. `--check` posterior:
+**cero desyncs**. La fragilidad de que la suite falle por un archivo untracked del
+usuario queda **fuera de scope**.
+
+Estado final verificado: pytest **135 passed** (110 al abrir el change); RED **83 PASS
+/ 0 FAIL / 0 SKIP** — verde de verdad. El unico FAIL del primer run post-sync, T09, era
+flake por carga: ese run tardo 252s porque los checks de host hacian trabajo real por
+primera vez y el timeout de 30s del pty se disparo; la corrida siguiente (122s) dio T09
+verde y ningun otro fallo.
+
+Un detalle que no hay que dar por sabido: el resumen cuenta llamadas a `ok`/`ko`, no
+checks. Un check con dos aserciones que fallan suma 2 a `FAIL` y aparece duplicado en
+la lista de fallos — por eso T30 y T39 salian repetidos y el total daba 85 con 83 checks
+definidos. No es un defecto, pero costo una diagnosis entera.
